@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+logs/
+node_modules/
+dist/
+pnpm-debug.log*
+.superpowers/
+.zcode/
