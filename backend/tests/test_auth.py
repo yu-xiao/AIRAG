@@ -57,3 +57,33 @@ async def test_login_wrong_password(client):
         "/api/auth/login", json={"username": name, "password": "wrongpass1"}
     )
     assert resp.status_code == 401
+
+
+async def _register_and_login(client, username: str) -> str:
+    await client.post(
+        "/api/auth/register", json={"username": username, "password": "secret123"}
+    )
+    resp = await client.post(
+        "/api/auth/login", json={"username": username, "password": "secret123"}
+    )
+    return resp.json()["access_token"]
+
+
+async def test_me_without_token(client):
+    resp = await client.get("/api/auth/me")
+    assert resp.status_code == 401
+
+
+async def test_me_with_token(client):
+    name = _username()
+    token = await _register_and_login(client, name)
+    resp = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 200
+    assert resp.json()["username"] == name
+
+
+async def test_me_with_garbage_token(client):
+    resp = await client.get(
+        "/api/auth/me", headers={"Authorization": "Bearer not-a-jwt"}
+    )
+    assert resp.status_code == 401
