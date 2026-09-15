@@ -69,7 +69,7 @@
 7. 执行方式二选一(由用户在启动执行时指定):superpowers:subagent-driven-development(推荐,每任务派新子代理+两段评审)或 superpowers:executing-plans(本会话内分批执行+检查点)。
 8. GitHub 同步:远程仓库 `https://github.com/yu-xiao/AIRAG.git`(2026-09-14 用户提供)。每个里程碑完成、分支合并回 main 后推送一次 `git push origin main`;M1 的首次推送见 Task 12 Step 6。凭据走系统级 Git Credential Manager——首次推送会弹浏览器登录,用户完成一次即缓存。本机访问 GitHub 偶发网络抖动,推送失败先重试再排查。
 9. **环境未就绪时的并行路径**:若『环境准备』尚未完成,可先执行不依赖数据库的任务:Task 1 → Task 2(Step 1~2 及 venv/依赖安装;Step 3 的 psql 验证推迟到环境就绪后补做)→ Task 10 → Task 11(前端按 API 契约编程,store 测试已 mock,不需后端运行)。**Task 3 起必须等数据库就绪**——TDD 红绿循环需要真实 PG,不允许跳过测试先行堆码。
-10. **DLP 防护(2026-09-15 发现)**:本机终端加密软件会把部分进程(已确认 alembic)新写的文件在磁盘上透明加密(密文含 `%TSD-Header` 标记)。任何**工具自动生成的文件**(alembic 迁移、脚手架产物)提交前必须 `git diff --cached | findstr TSD-Header` 检查;命中则用 `git hash-object --stdin`(以明文从 stdin 重灌 blob)+ `update-index` + amend 修复(方法见 Task 5 报告)。根治方案:请 IT 把 `E:\Projects\AIRag` 加入 DLP 排除策略。
+10. **DLP 防护(2026-09-15 发现,M2 补强)**:本机终端加密软件会把部分进程(已确认 alembic、venv python)新写的文件在磁盘上透明加密(密文首部含 `%TSD-Header-###%`、大小恰为 8192 字节)。提交前必须双重检查:①`git diff --cached | findstr TSD-Header`;②`git diff --cached --numstat` 中**不得出现 `-	-` 占位(二进制渲染)**——命中即说明该文件已被加密成二进制。修复:用编辑器工具(非 alembic/pip)重写该文件为明文 → `git add` → 字节级验证 blob(`git cat-file -p :路径` 无 TSD 标记且可读)→ amend。注意误报:若被检文件**内容本身**提到 "TSD-Header"(如本文档),findstr 会命中——用"文件大小是否恰为 8192/内容是否可读"判真伪。根治方案:请 IT 把 `E:\Projects\AIRag` 加入 DLP 排除策略。
 
 ## 里程碑路线图(M2~M5 概要,进入时生成详细计划)
 
