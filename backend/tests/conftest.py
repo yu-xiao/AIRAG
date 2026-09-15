@@ -93,3 +93,21 @@ async def isolated_upload_dir(tmp_path):
     _Path(settings.UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
     yield
     settings.UPLOAD_DIR = old
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def celery_eager():
+    from app.workers.celery_app import celery_app
+
+    old = {
+        "always": celery_app.conf.task_always_eager,
+        "propagates": celery_app.conf.task_eager_propagates,
+    }
+    # propagates 必须 False:Task 2 的哑字节上传用例(.docx 内容是 b"dummy")在 Task 6
+    # 之后会于 eager 模式真的跑流水线并解析失败;异常若传播会把 API 响应变成 500。
+    # False 时异常只存进 result,不冒泡,旧用例不受影响。
+    celery_app.conf.update(task_always_eager=True, task_eager_propagates=False)
+    yield
+    celery_app.conf.update(
+        task_always_eager=old["always"], task_eager_propagates=old["propagates"]
+    )

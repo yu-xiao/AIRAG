@@ -10,6 +10,7 @@ from app.core.deps import get_current_user
 from app.db.session import get_db
 from app.models import Document, KnowledgeBase, User
 from app.schemas.document import DocumentOut
+from app.workers.pipeline import process_document
 
 router = APIRouter(tags=["documents"])
 
@@ -74,6 +75,7 @@ async def upload_document(
     db.add(doc)
     await db.commit()
     await db.refresh(doc)
+    process_document.delay(doc.id)
     return doc
 
 
