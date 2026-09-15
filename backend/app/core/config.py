@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     CHAT_TEMPERATURE: float = 0.3
     CHAT_MAX_TOKENS: int = 2048
     RERANK_ENABLED: bool = False
-    RERANK_MODEL: str = "rerank-3"
+    RERANK_MODEL: str = "rerank"  # 智谱文本重排序模型编码,文档枚举仅此一个
     RETRIEVAL_TOP_K: int = 8
     ZHIPU_API_KEY: str = ""
     ZHIPU_BASE_URL: str = "https://open.bigmodel.cn/api/paas/v4"
