@@ -43,7 +43,7 @@
 
 **Files:** Modify `backend/pyproject.toml`, `backend/app/core/config.py`, `backend/.env.example`(根目录), `backend/tests/test_pipeline.py`(一行导入统一)
 
-- [ ] Step 1: pyproject dependencies 追加:
+- [x] Step 1: pyproject dependencies 追加:
 
 ```toml
     "langgraph>=1.0",
@@ -53,7 +53,7 @@
     "jieba>=0.42",
 ```
 
-- [ ] Step 2: config.py `Settings` 追加(JWT_EXPIRE_MINUTES 之后任意处):
+- [x] Step 2: config.py `Settings` 追加(JWT_EXPIRE_MINUTES 之后任意处):
 
 ```python
     CHAT_MODEL: str = "glm-5.3-flash"
@@ -64,7 +64,7 @@
     RETRIEVAL_TOP_K: int = 8
 ```
 
-- [ ] Step 3: 根 `.env.example` 在 CHAT_MODEL 行后追加:
+- [x] Step 3: 根 `.env.example` 在 CHAT_MODEL 行后追加:
 
 ```env
 CHAT_TEMPERATURE=0.3
@@ -74,9 +74,9 @@ RERANK_MODEL=rerank-3
 RETRIEVAL_TOP_K=8
 ```
 
-- [ ] Step 4: `tests/test_pipeline.py` 顶部 `import fitz` 改为 `import pymupdf as fitz`(统一,消弃用告警)。
+- [x] Step 4: `tests/test_pipeline.py` 顶部 `import fitz` 改为 `import pymupdf as fitz`(统一,消弃用告警)。
 
-- [ ] Step 5: 安装+验证:
+- [x] Step 5: 安装+验证:
 
 ```cmd
 cd /d E:\Projects\AIRag\backend
@@ -87,7 +87,7 @@ cd /d E:\Projects\AIRag\backend
 
 Expected: imports ok;**32 passed**(基线不变)。
 
-- [ ] Step 6: 提交(显式路径 + DLP 双检):`chore: m3 deps and settings (langgraph/jieba/rerank)`
+- [x] Step 6: 提交(显式路径 + DLP 双检):`chore: m3 deps and settings (langgraph/jieba/rerank)`
 
 ### Task 1: jieba 分词 + 混合检索 + RRF(核心)
 
@@ -95,7 +95,7 @@ Expected: imports ok;**32 passed**(基线不变)。
 
 **Interfaces(Produces):** `tokenize(text: str) -> list[str]`(jieba cut_for_search,去空白);`SearchHit(dataclass: chunk_id, document_id, kb_id, filename, page_no, content, score, source)`;`hybrid_search(db: AsyncSession, kb_ids: list[int], query: str, top_k: int = 20) -> list[SearchHit]`(两半场各 top_k,RRF k=60 融合);`rebuild_tsv(db) -> int`(回填存量 chunks 的新 tsv,返回行数)
 
-- [ ] Step 1: 失败测试 `tests/test_retrieval.py`(3 个函数):
+- [x] Step 1: 失败测试 `tests/test_retrieval.py`(3 个函数):
 
 ```python
 from app.services.retrieval.tokenize import tokenize
@@ -164,8 +164,8 @@ async def test_hybrid_search_returns_matching_chunk(client, auth_headers, db_ses
     assert "差旅" in hits[0].content
 ```
 
-- [ ] Step 2: 跑 RED(`pytest tests\test_retrieval.py -v` 全 FAIL/ERROR)。
-- [ ] Step 3: 实现:
+- [x] Step 2: 跑 RED(`pytest tests\test_retrieval.py -v` 全 FAIL/ERROR)。
+- [x] Step 3: 实现:
 
 `tokenize.py`:
 
@@ -326,8 +326,8 @@ pipeline.py 修改:tsv 的 UPDATE 语句改为逐 chunk 用分词文本(把原 `
 
 (若嫌 index 低效,用 enumerate 变量循环——语义等价即可。)
 
-- [ ] Step 4: 跑 GREEN:全量 **35 passed**(32+3)。
-- [ ] Step 5: 提交:`feat: hybrid retrieval with jieba tokenization and rrf fusion`
+- [x] Step 4: 跑 GREEN:全量 **35 passed**(32+3)。
+- [x] Step 5: 提交:`feat: hybrid retrieval with jieba tokenization and rrf fusion`
 
 ### Task 2: Rerank Provider(默认关)
 
@@ -335,7 +335,7 @@ pipeline.py 修改:tsv 的 UPDATE 语句改为逐 chunk 用分词文本(把原 `
 
 **Interfaces:** `RerankProvider.rerank(query: str, documents: list[str], top_n: int) -> list[int]`(返回按下标引用的排序);`get_reranker() -> RerankProvider | None`(settings.RERANK_ENABLED 为 False 时返回 None;True 时 ZhipuRerank,POST {ZHIPU_BASE_URL}/rerank,model=RERANK_MODEL,query/results/top_n,httpx 同步放线程)
 
-- [ ] Step 1: 失败测试(2 函数):
+- [x] Step 1: 失败测试(2 函数):
 
 ```python
 def test_rerank_disabled_returns_none():
@@ -366,8 +366,8 @@ def test_zhipu_rerank_parses_response(monkeypatch):
 
 注:测试进程 RERANK_ENABLED 未设(默认 False),第一个用例天然成立;实现里 `get_reranker` 读 settings。
 
-- [ ] Step 2: RED。
-- [ ] Step 3: 实现:
+- [x] Step 2: RED。
+- [x] Step 3: 实现:
 
 `base.py`:
 
@@ -418,8 +418,8 @@ class ZhipuRerank(RerankProvider):
         return [r["index"] for r in results][:top_n]
 ```
 
-- [ ] Step 4: GREEN:全量 **37 passed**(35+2)。
-- [ ] Step 5: 提交:`feat: optional zhipu rerank provider behind feature flag`
+- [x] Step 4: GREEN:全量 **37 passed**(35+2)。
+- [x] Step 5: 提交:`feat: optional zhipu rerank provider behind feature flag`
 
 ### Task 3: chat_graph(LangGraph 三节点图)
 
@@ -427,7 +427,7 @@ class ZhipuRerank(RerankProvider):
 
 **Interfaces:** `build_graph(llm=None, checkpointer=None) -> CompiledGraph`;节点签名 `async def retrieve_node(state) -> dict` / `rerank_node` / `generate_node`;state 键:`question/kb_ids/hits/answer/citations`(hits 为 SearchHit 的 dict 化列表);generate 的 prompt 模板与引用编号规则钉死(代码内);`make_chat_llm()` 返回 ChatOpenAI(base_url=ZHIPU_BASE_URL, api_key, model=CHAT_MODEL, temperature, max_tokens)
 
-- [ ] Step 1: 失败测试(2 函数):
+- [x] Step 1: 失败测试(2 函数):
 
 ```python
 async def test_graph_end_to_end_with_fakes(client, auth_headers, db_session, monkeypatch):
@@ -468,8 +468,8 @@ async def test_citations_truncate_excerpt():
     assert len(cits[0]["excerpt"]) <= 160
 ```
 
-- [ ] Step 2: RED。
-- [ ] Step 3: 实现:
+- [x] Step 2: RED。
+- [x] Step 3: 实现:
 
 `state.py`:
 
@@ -597,8 +597,8 @@ def build_graph(llm=None, checkpointer=None):
     return g.compile(checkpointer=checkpointer)
 ```
 
-- [ ] Step 4: GREEN:全量 **39 passed**(37+2)。
-- [ ] Step 5: 提交:`feat: langgraph three-node chat graph with citations`
+- [x] Step 4: GREEN:全量 **39 passed**(37+2)。
+- [x] Step 5: 提交:`feat: langgraph three-node chat graph with citations`
 
 ### Task 4: 检查点 + 会话/消息 API
 
@@ -606,7 +606,7 @@ def build_graph(llm=None, checkpointer=None):
 
 **Interfaces:** `get_checkpointer()`(app lifespan 惰性单例,AsyncPostgresSaver,psycopg URL = DATABASE_URL 去 `+asyncpg`,首次 `.setup()` 建表);`POST /api/chat/conversations {kb_ids,name?}` 201;`GET /api/chat/conversations` 列表(id 倒序);`GET /api/chat/conversations/{id}/messages` 消息列表(升序);全部鉴权
 
-- [ ] Step 1: 失败测试(2 函数):
+- [x] Step 1: 失败测试(2 函数):
 
 ```python
 async def test_create_and_list_conversations(client, auth_headers):
@@ -644,8 +644,8 @@ async def test_messages_history(client, auth_headers, db_session):
     assert body[1]["citations"][0]["number"] == 1
 ```
 
-- [ ] Step 2: RED。
-- [ ] Step 3: 实现:
+- [x] Step 2: RED。
+- [x] Step 3: 实现:
 
 `checkpointer.py`:
 
@@ -765,8 +765,8 @@ async def list_messages(
 
 `api/__init__.py` 挂载 conversations_router。
 
-- [ ] Step 4: GREEN:全量 **41 passed**(39+2)。
-- [ ] Step 5: 提交:`feat: conversations and messages api with async checkpointer`
+- [x] Step 4: GREEN:全量 **41 passed**(39+2)。
+- [x] Step 5: 提交:`feat: conversations and messages api with async checkpointer`
 
 ### Task 5: SSE 问答端点(核心)
 
@@ -774,7 +774,7 @@ async def list_messages(
 
 **Interfaces:** `POST /api/chat/ask {conversation_id?, kb_ids, question}` → `text/event-stream`;事件序列 `token* → citations → done`(错误 `error`);无 conversation_id 则自动建(标题=问题前 20 字);持久化 user/assistant 消息+citations;鉴权。测试用 FakeListChatModel 注入(monkeypatch `app.api.ask.build_graph` 为返回 fake-llm 图,检索同样 stub——**实现者按 T3 测试的 stub 手法复用**)
 
-- [ ] Step 1: 失败测试(2 函数):
+- [x] Step 1: 失败测试(2 函数):
 
 ```python
 async def test_ask_streams_tokens_and_saves(client, auth_headers, monkeypatch, db_session):
@@ -822,8 +822,8 @@ async def test_ask_requires_auth(client):
     assert resp.status_code == 401
 ```
 
-- [ ] Step 2: RED。
-- [ ] Step 3: 实现 `app/api/ask.py`:
+- [x] Step 2: RED。
+- [x] Step 3: 实现 `app/api/ask.py`:
 
 ```python
 import json
@@ -908,8 +908,8 @@ async def ask(
 
 挂载到 api_router。
 
-- [ ] Step 4: GREEN:全量 **43 passed**(41+2)。
-- [ ] Step 5: 提交:`feat: sse streaming ask endpoint with persistence`
+- [x] Step 4: GREEN:全量 **43 passed**(41+2)。
+- [x] Step 5: 提交:`feat: sse streaming ask endpoint with persistence`
 
 ### Task 6: 前端基建(依赖/SSE 解析/ api 模块/组合式)
 
@@ -917,8 +917,8 @@ async def ask(
 
 **Interfaces:** `sse.ts`:`parseSSEChunk(raw: string) -> object[]`(按 `data: ` 前缀+空行分帧解析 JSON,坏帧跳过);`useChatStream.ask({kbIds, question, conversationId}, {onToken, onCitations, onDone, onError})`(fetch-event-source POST /api/chat/ask,逐帧回调);api 模块:kbApi(list/create), documentsApi(list/upload/onProgress/detail/chunks), conversationsApi(list/messages)
 
-- [ ] Step 1: `pnpm add @microsoft/fetch-event-source markdown-it highlight.js`
-- [ ] Step 2: 失败测试 `src/utils/__tests__/sse.spec.ts`:
+- [x] Step 1: `pnpm add @microsoft/fetch-event-source markdown-it highlight.js`
+- [x] Step 2: 失败测试 `src/utils/__tests__/sse.spec.ts`:
 
 ```ts
 import { describe, expect, it } from 'vitest'
@@ -940,7 +940,7 @@ describe('parseSSEChunk', () => {
 })
 ```
 
-- [ ] Step 3: RED(`pnpm test -- --run`)→ 实现 `sse.ts`:
+- [x] Step 3: RED(`pnpm test -- --run`)→ 实现 `sse.ts`:
 
 ```ts
 export interface SSEEvent {
@@ -1024,8 +1024,8 @@ export function useChatStream() {
 
 (实现者注意:onmessage 里 msg.data 已是单帧负载,直接 JSON.parse 并 dispatch 即可,parseSSEChunk 双保险用于分片测试——**两种都保留,以测试通过为准**。)
 
-- [ ] Step 4: GREEN(前端 3 passed)+ `pnpm build` 绿。
-- [ ] Step 5: 提交:`feat: frontend chat streaming infra (sse parser/apis/composable)`
+- [x] Step 4: GREEN(前端 3 passed)+ `pnpm build` 绿。
+- [x] Step 5: 提交:`feat: frontend chat streaming infra (sse parser/apis/composable)`
 
 ### Task 7: 知识库页面
 
@@ -1033,8 +1033,8 @@ export function useChatStream() {
 
 **Interfaces:** 列表(名称/描述/文档数占位/时间)+ 新建对话框(el-dialog + 表单校验)+ 点击进入 `/kb/:id/docs`;空态 el-empty;类型 `KbItem` 与 kbApi 对齐
 
-- [ ] Step 1-4: 实现页面(完整 SFC:el-table/el-dialog/el-form;onMounted 拉列表;创建成功刷新);`pnpm build` + `pnpm test` 全绿。
-- [ ] Step 5: 提交:`feat: knowledge base page with create dialog`
+- [x] Step 1-4: 实现页面(完整 SFC:el-table/el-dialog/el-form;onMounted 拉列表;创建成功刷新);`pnpm build` + `pnpm test` 全绿。
+- [x] Step 5: 提交:`feat: knowledge base page with create dialog`
 
 ### Task 8: 文档管理页面
 
@@ -1042,8 +1042,8 @@ export function useChatStream() {
 
 **Interfaces:** 顶部返回+上传区(el-upload 手动触发,白名单 .pdf/.docx/.xlsx,进度条);文档表(文件名/状态 tag 轮询 pending→done 每 3s/chunk_count/时间);行操作"查看分块"→ 抽屉(el-drawer,调 chunks 端点分页);状态色:pending灰/parsing蓝/chunking蓝/embedding蓝/done绿/failed红(failed 显示 error_msg tooltip)
 
-- [ ] Step 1-4: 实现;build+test 绿。
-- [ ] Step 5: 提交:`feat: documents page with upload status polling and chunks drawer`
+- [x] Step 1-4: 实现;build+test 绿。
+- [x] Step 5: 提交:`feat: documents page with upload status polling and chunks drawer`
 
 ### Task 9: 对话页面(核心体验)
 
@@ -1051,16 +1051,16 @@ export function useChatStream() {
 
 **Interfaces:** 左栏会话列表+新对话;顶部 KB 多选(el-select multiple,kbApi 拉取);消息区(用户右侧/助手左侧,markdown-it 渲染+highlight.js 代码高亮,流式追加);回答完成后 CitationList 展示(点击弹 el-dialog 显示 excerpt/document/page);输入框 el-input textarea + 发送(Enter 发送/Shift+Enter 换行,流式期间禁用)
 
-- [ ] Step 1-4: 实现;build+test 绿。
-- [ ] Step 5: 提交:`feat: chat page with streaming answers and citation panel`
+- [x] Step 1-4: 实现;build+test 绿。
+- [x] Step 5: 提交:`feat: chat page with streaming answers and citation panel`
 
 ### Task 10: M3 端到端验收(真模型×真文档)
 
-- [ ] Step 1: 准备 3~5 份真实感样例(含中文段落+表格的 pdf/docx,xlsx)到 %TEMP%(脚本生成,内容要能构成可问答的事实,如"报销审批需三天")。
-- [ ] Step 2: 起全栈四进程(PG/Redis 服务确认 → start_dev.bat → start_worker.bat → pnpm dev)。
-- [ ] Step 3: 无头验收链:注册登录→建 KB→上传样例→轮询 done→**curl 调 /api/chat/ask**,验证 SSE 帧序列(token 若干→citations 含 filename/page_no/excerpt→done 含 conversation_id),答案内容与样例事实一致(关键词抽查);再问一个知识库外问题,断言回答含"未找到"或明确不知(记录实际行为)。
-- [ ] Step 4: 浏览器验收(留给用户,同 M1 模式):三页面走查+流式对话+引用点击。无头项全过即 M3 验收 PASS。
-- [ ] Step 5: 回归(后端 43 passed;前端 build+test)+ 清进程;空标记提交 `chore: m3 complete - retrieval chat acceptance verified`。
+- [x] Step 1: 准备 3~5 份真实感样例(含中文段落+表格的 pdf/docx,xlsx)到 %TEMP%(脚本生成,内容要能构成可问答的事实,如"报销审批需三天")。
+- [x] Step 2: 起全栈四进程(PG/Redis 服务确认 → start_dev.bat → start_worker.bat → pnpm dev)。
+- [x] Step 3: 无头验收链:注册登录→建 KB→上传样例→轮询 done→**curl 调 /api/chat/ask**,验证 SSE 帧序列(token 若干→citations 含 filename/page_no/excerpt→done 含 conversation_id),答案内容与样例事实一致(关键词抽查);再问一个知识库外问题,断言回答含"未找到"或明确不知(记录实际行为)。
+- [x] Step 4: 浏览器验收(留给用户,同 M1 模式):三页面走查+流式对话+引用点击。无头项全过即 M3 验收 PASS。
+- [x] Step 5: 回归(后端 43 passed;前端 build+test)+ 清进程;空标记提交 `chore: m3 complete - retrieval chat acceptance verified`。
 
 ### Task 11(控制器): 收尾
 
@@ -1074,3 +1074,22 @@ export function useChatStream() {
 2. **占位符扫描**:T3/T4 各有一处"笔误示范+修正说明"(nodes.py 顶部导入、checkpointer 三行)——均为显式指令非 TBD;T1 pipeline 改写给了语义等价说明。实现者按说明写正式版。
 3. **类型一致性**:SearchHit 字段 ↔ nodes dict 化 ↔ citations 映射键一致;SSE 契约 ↔ sse.ts/useChatStream 一致;ConversationOut/MessageOut ↔ 前端 api 模块;`rrf_fuse` 签名 ↔ 测试元组输入。
 4. **计数一致性**(按测试函数):32→T1+3=35→T2+2=37→T3+2=39→T4+2=41→T5+2=43;前端 2→T6+1=3。T8 允许 +2 加固(404/401)→若加,后续计数 +2 且 T10 回归以实际为准。
+
+---
+
+## M4 交接附录(2026-09-15 终审前固化,M4 计划生成时必须消化)
+
+### 定稿裁决(本次验收后)
+1. **断连语义正式定稿**:M3 行为即定稿语义——断连仅保留已落库的 user 消息,assistant 部分回答**不持久化、不恢复**(CancelledError 不入 except Exception,无 error 帧)。spec 原倾向的"检查点恢复"降级为 M5 可选增强(接线 get_checkpointer 单例 + thread_id 已随 config 传递,接线成本可控)。
+2. **done 事件携带完整 answer** 为正式协议(T5 裁决,前端以 done.answer 为权威对账源)。
+3. **DOCX 引用 page_no=null 为设计行为**(docx 无页概念;前端 CitationList 已兜底显示"—")。
+4. 真模型实测:glm-5.3-flash 无思考内容混入 token 流,首 token 2-3s、单问总耗时 3-4s(2026-09-15,供性能基线参考)。
+
+### M4 范围提示(spec §9-M4)
+RBAC(viewer/editor/admin)+ 权限管理界面;失败重试/重新解析;问答历史完善;Rerank 开关界面。**注意 M3 遗留**:R4 权限从简(登录即可检索任意 KB)必须在 M4 收紧(kb_permissions 表已在);ask/检索入口都要加权限过滤。
+
+### 延后 Minor 清单(择要,M3 台账有全量)
+- checkpointer 接线(见裁决 1);DOMPurify(markdown html:false 已兜底);卸载页面未中止 SSE(isAborted 未接);错误消息内联标记;poll-after-unmount 窄窗;轮询 loading 闪烁;kb 高亮子路由;kbName 走 list 匹配;hybrid 返回 2×top_k 消费端已切;rerank 负下标;单次 OpenAI 客户端;markdown 每帧全量重渲染;Alt/Meta+Enter 也发送;oxlint 三处旧错;断连 assistant 丢失(同裁决 1)。
+
+### 环境事实(增量)
+运行库 airag 含验收数据(KB 2 三文档,可留作回归样本或手动清理);EMBED_PROVIDER 默认 zhipu 真嵌入(余额已充);worker 连 Redis 需 .env 带密码 REDIS_URL(已配)。
