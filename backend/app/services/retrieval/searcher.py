@@ -38,8 +38,9 @@ def rrf_fuse(vec: list, kw: list, k: int = RRF_K) -> list:
 
 
 def _tsquery(query: str) -> str:
+    """无有效检索词时返回空串,由调用方跳过关键词半场(空串会致 PG 语法错误)。"""
     terms = [t for t in tokenize(query) if t.isalnum() or "\u4e00" <= t[0] <= "\u9fff"]
-    return " | ".join(dict.fromkeys(terms)) or "''"
+    return " | ".join(dict.fromkeys(terms))
 
 
 async def hybrid_search(
@@ -60,16 +61,20 @@ async def hybrid_search(
         )
     ).scalars().all()
 
-    kw_rows = (
-        await db.execute(
-            text(
-                "SELECT c.id FROM chunks c "
-                "WHERE c.kb_id = ANY(:kb_ids) AND c.tsv @@ to_tsquery('simple', :tsq) "
-                "ORDER BY ts_rank(c.tsv, to_tsquery('simple', :tsq)) DESC LIMIT :k"
-            ),
-            {"kb_ids": kb_ids, "tsq": _tsquery(query), "k": top_k},
-        )
-    ).scalars().all()
+    tsq = _tsquery(query)
+    if tsq:
+        kw_rows = (
+            await db.execute(
+                text(
+                    "SELECT c.id FROM chunks c "
+                    "WHERE c.kb_id = ANY(:kb_ids) AND c.tsv @@ to_tsquery('simple', :tsq) "
+                    "ORDER BY ts_rank(c.tsv, to_tsquery('simple', :tsq)) DESC LIMIT :k"
+                ),
+                {"kb_ids": kb_ids, "tsq": tsq, "k": top_k},
+            )
+        ).scalars().all()
+    else:
+        kw_rows = []  # 全标点/停用词查询:to_tsquery 收到空串会语法错误,整体跳过
 
     fused = rrf_fuse([(i, 0) for i in vec_rows], [(i, 0) for i in kw_rows])
     top_ids = [cid for cid, _ in fused[: top_k * 2]]

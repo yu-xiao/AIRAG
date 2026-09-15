@@ -65,3 +65,11 @@ async def test_hybrid_search_returns_matching_chunk(client, auth_headers, db_ses
     assert len(hits) >= 1
     assert hits[0].chunk_index if hasattr(hits[0], "chunk_index") else True
     assert "差旅" in hits[0].content
+
+
+async def test_hybrid_search_punctuation_only_query(db_session):
+    from app.services.retrieval.searcher import hybrid_search
+
+    # 纯标点查询无有效检索词:关键词半场应整体跳过(空 tsq 会使 PG 语法报错),不抛异常
+    hits = await hybrid_search(db_session, [999999], "???")
+    assert hits == []

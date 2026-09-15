@@ -2,6 +2,7 @@ import json
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
+from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user
@@ -67,8 +68,10 @@ async def ask(
             # FakeListChatModel yields per-char chunks — done 携带完整 answer 作为
             # 权威终稿(客户端可对账),详见 task-5 报告"偏差"一节。
             yield _sse("done", {"conversation_id": conv.id, "answer": answer})
-        except Exception as exc:  # 断连/取消也会走这里
-            yield _sse("error", str(exc)[:300])
+        except Exception:  # 断连/取消也会走这里
+            # 真实异常只进日志;SSE 帧对客户端输出通用文案,避免泄露内部细节
+            logger.exception("SSE 回答生成失败 conversation_id={}", conv.id)
+            yield _sse("error", "回答生成失败,请稍后重试")
 
     return StreamingResponse(gen(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache",
