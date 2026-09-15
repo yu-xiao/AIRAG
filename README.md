@@ -9,5 +9,5 @@ copy .env.example .env
 cd backend
 py -3.12 -m venv .venv
 .venv\Scripts\python -m pip install -e ".[dev]"
-start_dev.bat   # 迁移 + 热重载,后端 http://localhost:8000/docs
+start_dev.bat   # 迁移 + 热重载,后端 http://localhost:8001/docs
 cd ..\frontend && pnpm install && pnpm dev   # 前端 http://localhost:5173
