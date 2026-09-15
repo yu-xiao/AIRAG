@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -19,3 +20,14 @@ class KBOut(BaseModel):
     my_perm: str | None = None
 
     model_config = {"from_attributes": True}
+
+
+class MemberOut(BaseModel):
+    user_id: int
+    username: str
+    perm: str
+
+
+class GrantIn(BaseModel):
+    username: str = Field(min_length=3, max_length=32)
+    perm: Literal["viewer", "editor"]
