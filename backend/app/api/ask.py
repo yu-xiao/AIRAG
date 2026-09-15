@@ -1,13 +1,14 @@
 import json
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user
+from app.core.perms import get_kb_perm
 from app.db.session import get_db, SessionLocal
-from app.models import Conversation, Message, User
+from app.models import Conversation, KnowledgeBase, Message, User
 from app.schemas.chat import AskIn
 from app.services.chat_graph.graph import build_graph
 
@@ -24,6 +25,13 @@ async def ask(
     current: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    for kb_id in payload.kb_ids:
+        kb = await db.get(KnowledgeBase, kb_id)
+        if kb is None or await get_kb_perm(db, current, kb) is None:
+            raise HTTPException(
+                status_code=403, detail=f"no permission for knowledge base {kb_id}"
+            )
+
     if payload.conversation_id is None:
         conv = Conversation(
             user_id=current.id, kb_ids=payload.kb_ids,
@@ -35,8 +43,6 @@ async def ask(
     else:
         conv = await db.get(Conversation, payload.conversation_id)
         if conv is None or conv.user_id != current.id:
-            from fastapi import HTTPException
-
             raise HTTPException(status_code=404, detail="conversation not found")
 
     db.add(Message(conversation_id=conv.id, role="user", content=payload.question))

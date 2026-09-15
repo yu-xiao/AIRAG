@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user
@@ -52,3 +52,18 @@ async def list_messages(
         select(Message).where(Message.conversation_id == conv_id).order_by(Message.id)
     )
     return list(rows.scalars().all())
+
+
+@router.delete("/conversations/{conv_id}", status_code=204)
+async def delete_conversation(
+    conv_id: int,
+    current: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    conv = await db.get(Conversation, conv_id)
+    if conv is None or conv.user_id != current.id:
+        raise HTTPException(status_code=404, detail="conversation not found")
+    await db.execute(delete(Message).where(Message.conversation_id == conv_id))
+    await db.delete(conv)
+    await db.commit()
+    return None
