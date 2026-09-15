@@ -9,7 +9,10 @@ from app.services.parsing.base import ParseResult, ParsedBlock, Parser, register
 class XlsxParser(Parser):
     def parse(self, path: Path) -> ParseResult:
         result = ParseResult()
-        wb = load_workbook(str(path), data_only=True, read_only=True)
+        # 不用 read_only:WPS 等工具生成的 xlsx 常带错误的 dimension 声明
+        # (如 A1:A1),只读模式信任该声明会丢掉全部数据行。
+        # data_only=True 让公式单元格取缓存值。
+        wb = load_workbook(str(path), data_only=True)
         try:
             for idx, ws in enumerate(wb.worksheets, start=1):
                 lines = []
