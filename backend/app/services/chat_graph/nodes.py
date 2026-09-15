@@ -32,7 +32,7 @@ async def retrieve_node(state: dict) -> dict:
 
 async def rerank_node(state: dict) -> dict:
     reranker = get_reranker()
-    if reranker is None or not state.get("hits"):
+    if reranker is None or not state.get("hits") or not state.get("rerank"):
         return {}
     import asyncio
 

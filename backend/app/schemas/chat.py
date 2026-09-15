@@ -31,3 +31,4 @@ class AskIn(BaseModel):
     conversation_id: int | None = None
     kb_ids: list[int] = Field(min_length=1)
     question: str = Field(min_length=1, max_length=2000)
+    rerank: bool = False

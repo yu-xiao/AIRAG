@@ -49,7 +49,11 @@ async def ask(
     await db.commit()
 
     graph = build_graph()
-    init = {"question": payload.question, "kb_ids": payload.kb_ids}
+    init = {
+        "question": payload.question,
+        "kb_ids": payload.kb_ids,
+        "rerank": payload.rerank,
+    }
     cfg = {"configurable": {"thread_id": str(conv.id)}}
 
     async def gen():

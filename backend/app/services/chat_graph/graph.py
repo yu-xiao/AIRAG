@@ -24,11 +24,9 @@ def build_graph(llm=None, checkpointer=None):
     g.add_node("retrieve", retrieve_node)
     g.add_node("rerank", rerank_node)
     g.add_node("generate", gen)
+    # 拓扑恒含 rerank:provider 未开或请求未带 rerank 时节点直通返回 {}
     g.add_edge(START, "retrieve")
-    if settings.RERANK_ENABLED:
-        g.add_edge("retrieve", "rerank")
-        g.add_edge("rerank", "generate")
-    else:
-        g.add_edge("retrieve", "generate")
+    g.add_edge("retrieve", "rerank")
+    g.add_edge("rerank", "generate")
     g.add_edge("generate", END)
     return g.compile(checkpointer=checkpointer)
