@@ -12,7 +12,7 @@ class Document(Base, TimestampMixin):
     kb_id: Mapped[int] = mapped_column(ForeignKey("knowledge_bases.id"), index=True)
     filename: Mapped[str] = mapped_column(String(256))
     file_path: Mapped[str] = mapped_column(String(512))
-    mime: Mapped[str] = mapped_column(String(64))
+    mime: Mapped[str] = mapped_column(String(128))
     size: Mapped[int] = mapped_column(Integer)
     sha256: Mapped[str] = mapped_column(String(64), index=True)
     # pending|parsing|chunking|embedding|done|failed

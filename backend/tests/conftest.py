@@ -1,5 +1,6 @@
 import os
 import uuid as _uuid
+from pathlib import Path as _Path
 
 # M2 全局测试约定:测试进程一律指向测试库 + fake 嵌入(必须在导入 app.* 之前设置)
 os.environ["DATABASE_URL"] = (
@@ -83,3 +84,12 @@ async def auth_headers(client):
     )
     token = resp.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def isolated_upload_dir(tmp_path):
+    old = settings.UPLOAD_DIR
+    settings.UPLOAD_DIR = str(tmp_path / "uploads")
+    _Path(settings.UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
+    yield
+    settings.UPLOAD_DIR = old
