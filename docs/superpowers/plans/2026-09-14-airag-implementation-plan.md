@@ -1686,7 +1686,7 @@ git commit -m "chore: m1 complete - full stack acceptance verified"
 - [ ] M2 计划文件已生成并提交(Ruling:详版计划推迟到 M1 合并后的下一会话生成,基于合并后代码质量更高;本文件执行协议第 6 条的接力点即此)
 - [ ] 本文件路线图表中 M2 行的"详细计划"已更新为该文件路径(随 M2 计划生成时一并更新)
 
-- [ ] **Step 6: 推送 GitHub(M1 首次)**
+- [x] **Step 6: 推送 GitHub(M1 首次)**(已完成:2026-09-15 main 与 m1-skeleton-auth 均推送至 20b340e,首次连接失败重试成功)
 
 ```cmd
 cd /d E:\Projects\AIRag
