@@ -110,3 +110,13 @@ async def test_chunks_endpoint(client, auth_headers, db_session):
     assert len(body["items"]) == 2
     assert body["items"][0]["chunk_index"] == 0
     assert len(body["items"][0]["content_preview"]) <= 200
+
+
+async def test_chunks_endpoint_missing_document(client, auth_headers):
+    resp = await client.get("/api/documents/999999/chunks", headers=auth_headers)
+    assert resp.status_code == 404
+
+
+async def test_chunks_endpoint_requires_auth(client):
+    resp = await client.get("/api/documents/1/chunks")
+    assert resp.status_code == 401

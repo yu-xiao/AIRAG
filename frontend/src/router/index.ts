@@ -11,6 +11,7 @@ const router = createRouter({
       children: [
         { path: '', name: 'home', component: () => import('@/pages/HomePage.vue') },
         { path: 'kb', name: 'kb', component: () => import('@/pages/KbPage.vue') },
+        { path: 'kb/:id/docs', name: 'kb-docs', component: () => import('@/pages/DocsPage.vue') },
       ],
     },
   ],
