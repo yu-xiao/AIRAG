@@ -6,7 +6,7 @@ from app.models import Chunk, Document
 
 
 async def _upload_pdf(client, auth_headers, kb_id, text="AIRag pipeline pdf body"):
-    import fitz
+    import pymupdf as fitz
 
     doc = fitz.open()
     page = doc.new_page()
