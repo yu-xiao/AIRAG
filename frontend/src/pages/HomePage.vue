@@ -1,3 +1,3 @@
 <template>
-  <el-empty description="M1 完成:骨架与认证已就绪。知识库与对话页面将在 M3 上线。" />
+  <el-empty description="欢迎回来!在左侧「知识库」中创建知识库并上传文档,即可开始构建你的私有知识问答。" />
 </template>
