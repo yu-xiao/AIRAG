@@ -12,4 +12,3 @@ py -3.12 -m venv .venv
 net start postgresql-x64-18   # 1/3 确保 PG 服务在跑(需管理员)
 start_dev.bat   # 2/3 迁移 + 热重载,后端 http://localhost:8001/docs
 cd ..\frontend && pnpm install && pnpm dev   # 3/3 前端 http://localhost:5173
-cd ..\frontend && pnpm install && pnpm dev   # 前端 http://localhost:5173
