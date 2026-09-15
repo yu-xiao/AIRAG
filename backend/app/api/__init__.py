@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 
+from app.api.admin import router as admin_router
 from app.api.ask import router as ask_router
 from app.api.auth import router as auth_router
 from app.api.conversations import router as conversations_router
@@ -18,3 +19,4 @@ api_router.include_router(kbs_router)
 api_router.include_router(documents_router)
 api_router.include_router(conversations_router)
 api_router.include_router(ask_router)
+api_router.include_router(admin_router)
