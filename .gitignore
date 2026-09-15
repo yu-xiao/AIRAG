@@ -10,3 +10,4 @@ pnpm-debug.log*
 .superpowers/
 .zcode/
 *.egg-info/
+storage/

@@ -13,6 +13,13 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"  # M2 才使用,Windows 运行方案届时定
     JWT_SECRET: str = "dev-secret-change-me"
     JWT_EXPIRE_MINUTES: int = 60
+    ZHIPU_API_KEY: str = ""
+    ZHIPU_BASE_URL: str = "https://open.bigmodel.cn/api/paas/v4"
+    EMBED_PROVIDER: str = "zhipu"  # zhipu|fake
+    EMBED_MODEL: str = "embedding-3"
+    EMBED_DIMS: int = 1024
+    UPLOAD_DIR: str = "storage/uploads"  # 相对 backend 运行目录
+    MAX_UPLOAD_MB: int = 20
 
 
 settings = Settings()

@@ -1,3 +1,11 @@
+import os
+
+# M2 全局测试约定:测试进程一律指向测试库 + fake 嵌入(必须在导入 app.* 之前设置)
+os.environ["DATABASE_URL"] = (
+    "postgresql+asyncpg://airag:airag_dev_password@localhost:5432/airag_test"
+)
+os.environ["EMBED_PROVIDER"] = "fake"
+
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
