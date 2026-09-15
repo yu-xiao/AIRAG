@@ -104,3 +104,47 @@ async def get_document(
     if doc is None:
         raise HTTPException(status_code=404, detail="document not found")
     return doc
+
+
+@router.get("/documents/{doc_id}/chunks")
+async def list_chunks(
+    doc_id: int,
+    page: int = 1,
+    page_size: int = 20,
+    current: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    doc = await db.get(Document, doc_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="document not found")
+    page = max(page, 1)
+    page_size = min(max(page_size, 1), 100)
+    from app.models import Chunk
+
+    total = (
+        await db.execute(
+            select(Chunk.id).where(Chunk.document_id == doc_id)
+        )
+    ).scalars().all()
+    rows = (
+        await db.execute(
+            select(Chunk)
+            .where(Chunk.document_id == doc_id)
+            .order_by(Chunk.chunk_index)
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+    ).scalars().all()
+    return {
+        "total": len(total),
+        "items": [
+            {
+                "id": c.id,
+                "chunk_index": c.chunk_index,
+                "page_no": c.page_no,
+                "char_len": c.char_len,
+                "content_preview": c.content[:200],
+            }
+            for c in rows
+        ],
+    }

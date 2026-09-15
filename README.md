@@ -5,6 +5,7 @@
 
 ## 开发启动(M1 起,原生运行,无需 Docker)
 
+```bash
 copy .env.example .env
 cd backend
 py -3.12 -m venv .venv
@@ -12,3 +13,15 @@ py -3.12 -m venv .venv
 net start postgresql-x64-18   # 1/3 确保 PG 服务在跑(需管理员)
 start_dev.bat   # 2/3 迁移 + 热重载,后端 http://localhost:8001/docs
 cd ..\frontend && pnpm install && pnpm dev   # 3/3 前端 http://localhost:5173
+```
+
+## 文档流水线(M2 起)
+
+除后端/前端两个窗口外,再开一个窗口启动 worker:
+
+```bash
+cd backend
+start_worker.bat
+```
+
+上传:.env 填好 ZHIPU_API_KEY 后默认走智谱 embedding;未填 key 时可在 .env 设 EMBED_PROVIDER=fake 跑通全流程(向量无语义)。
