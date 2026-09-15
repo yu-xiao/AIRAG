@@ -33,3 +33,66 @@ async def test_list_and_get_kb(client, auth_headers):
 
     missing = await client.get("/api/kbs/999999", headers=auth_headers)
     assert missing.status_code == 404
+
+
+async def _register_and_login(client, username):
+    await client.post(
+        "/api/auth/register", json={"username": username, "password": "secret123"}
+    )
+    resp = await client.post(
+        "/api/auth/login", json={"username": username, "password": "secret123"}
+    )
+    return {"Authorization": f"Bearer {resp.json()['access_token']}"}
+
+
+async def test_viewer_cannot_create_kb(client, auth_headers):
+    plain = await _register_and_login(client, "plain_viewer1")
+    resp = await client.post("/api/kbs", json={"name": "游客库"}, headers=plain)
+    assert resp.status_code == 403
+    # editor 仍可建(auth_headers 已升 editor)
+    ok = await client.post("/api/kbs", json={"name": "编辑库"}, headers=auth_headers)
+    assert ok.status_code == 201
+
+
+async def test_kb_invisible_to_stranger(client, auth_headers):
+    mine = await client.post("/api/kbs", json={"name": "私库"}, headers=auth_headers)
+    kb_id = mine.json()["id"]
+    other = await _register_and_login(client, "stranger_ed1")  # 默认 viewer
+    listed = await client.get("/api/kbs", headers=other)
+    assert all(k["id"] != kb_id for k in listed.json())
+    got = await client.get(f"/api/kbs/{kb_id}", headers=other)
+    assert got.status_code == 404
+
+
+async def test_list_returns_my_perm(client, auth_headers, db_session):
+    from app.models import KbPermission
+
+    mine = await client.post("/api/kbs", json={"name": "权限标注库"}, headers=auth_headers)
+    kb_id = mine.json()["id"]
+    listed = await client.get("/api/kbs", headers=auth_headers)
+    row = next(k for k in listed.json() if k["id"] == kb_id)
+    assert row["my_perm"] == "owner"
+
+    viewer_headers = await _register_and_login(client, "perm_viewer1")
+    reg = await client.get("/api/auth/me", headers=viewer_headers)
+    db_session.add(KbPermission(kb_id=kb_id, user_id=reg.json()["id"], perm="viewer"))
+    await db_session.commit()
+    granted = await client.get("/api/kbs", headers=viewer_headers)
+    row2 = next(k for k in granted.json() if k["id"] == kb_id)
+    assert row2["my_perm"] == "viewer"
+
+
+async def test_admin_sees_all_kbs(client, auth_headers, db_session):
+    from sqlalchemy import text as _text
+
+    mine = await client.post("/api/kbs", json={"name": "他人库"}, headers=auth_headers)
+    kb_id = mine.json()["id"]
+    me = await client.get("/api/auth/me", headers=auth_headers)
+    await db_session.execute(
+        _text("UPDATE users SET role = 'admin' WHERE id = :i"),
+        {"i": me.json()["id"]},
+    )
+    await db_session.commit()
+    listed = await client.get("/api/kbs", headers=auth_headers)
+    row = next(k for k in listed.json() if k["id"] == kb_id)
+    assert row["my_perm"] == "owner"

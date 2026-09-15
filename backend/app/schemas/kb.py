@@ -16,5 +16,6 @@ class KBOut(BaseModel):
     embed_provider: str
     embed_model: str
     created_at: datetime
+    my_perm: str | None = None
 
     model_config = {"from_attributes": True}
