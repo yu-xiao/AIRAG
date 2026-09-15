@@ -1650,3 +1650,19 @@ git commit --allow-empty -m "chore: m2 complete - document pipeline acceptance v
 2. **占位符扫描**:Task 6 的 pipeline.py 给出三段演进式草稿+明确"以第三段为准+删除垃圾行"的强指令——这是**对实现者的显式警告**,不是 TBD;评审按语义清单验收。其余任务代码完整。
 3. **类型一致性**:`ParsedBlock(content,page_no,is_table)` ↔ splitter/xlsx/docx 用法一致;`Chunk(content,page_no,char_len)` ↔ pipeline 插库字段一致;`DocumentOut` 字段 ↔ 模型列一致;`get_provider(name=None)` ↔ 测试/管线调用一致;conftest 的 DATABASE_URL 环境约定 ↔ pipeline 的 settings.DATABASE_URL 一致。
 4. **风险预埋**:eager 模式 retry 会抛异常 → 失败路径改测 `_mark_failed`(Task 6 Step 2 已注明);upload 端点 `.delay` 在响应返回前执行使响应仍为 pending 状态(Task 6 Step 5 注明);upload 测试用哑字节不触发解析(仅 pipeline 测试用真 PDF)。
+
+---
+
+## M3 交接附录(2026-09-15 终审后固化,M3 计划生成时必须消化)
+
+### 必须显式裁决
+1. **切块器与 Spec §7 的差距**:当前为递归字符切块(1000 字符/150 重叠,无标题感知);§7 写"标题感知递归切块,默认 512 token / 64 重叠"。M3 计划须裁决:调参数即可接近(512 token≈768-1024 汉字,现值已接近),或实现标题感知;此决定直接影响检索质量。
+2. **KB.embed_provider 快照与实际 EMBED_PROVIDER 不一致**(KB 建库快照 zhipu,系统级实际跑 fake):M3 按 KB 路由检索前必须对齐语义(per-KB 或 global)。
+
+### 移交的延后 Minor(M3 承接)
+- chunks 端点 404/401/钳制无测试;list_chunks 的 total 用 count() 替代 len(ids);OpenAI 客户端每调用新建→复用;parser 产出 markdown 层(§7 原意,引用预览要用);test_pipeline 的 `import fitz` 统一为 pymupdf;前端 fetchUser 死代码与 store 覆盖(前端三页面任务顺带)。
+
+### 环境事实(M3 开工先读)
+- 本机 Redis 有 requirepass:.env 必须配 `REDIS_URL=redis://:<密码>@localhost:6379/0`,否则 start_worker.bat 连不上(.env.example 已有注释行)。
+- 智谱 key 未填:.env 的 ZHIPU_API_KEY 为空,现走 EMBED_PROVIDER=fake;填 key 后切回 zhipu,live 测试自动激活(届时全量应为 32 passed 0 skipped)。
+- DLP 双检协议(M1 计划执行协议第 10 条 v2)继续有效;真 worker 的 2/4/8s 重试退避尚未实测(eager 不睡眠),M3 若触发失败路径注意观察。
