@@ -25,6 +25,8 @@ export interface AskPayload {
   kbIds: number[]
   question: string
   conversationId?: number
+  /** M4:请求级精排开关;provider 未开时后端直通 */
+  rerank?: boolean
 }
 
 export interface AskHandlers {
@@ -35,12 +37,15 @@ export interface AskHandlers {
 }
 
 export function useChatStream() {
+  let currentCtrl: AbortController | null = null
+
   async function ask(
     payload: AskPayload,
     handlers: AskHandlers,
     isAborted?: Ref<boolean>,
   ): Promise<void> {
     const ctrl = new AbortController()
+    currentCtrl = ctrl
     const stopWatch = isAborted
       ? watch(isAborted, (v) => {
           if (v) ctrl.abort()
@@ -68,6 +73,7 @@ export function useChatStream() {
           kb_ids: payload.kbIds,
           question: payload.question,
           conversation_id: payload.conversationId ?? null,
+          rerank: payload.rerank ?? false,
         }),
         signal: ctrl.signal,
         onmessage(msg) {
@@ -94,8 +100,15 @@ export function useChatStream() {
       // 调用方只需处理回调,无需额外 catch。
     } finally {
       stopWatch?.stop()
+      if (currentCtrl === ctrl) currentCtrl = null
     }
   }
 
-  return { ask }
+  /** 中止当前流(页面卸载时调用,防 SSE 泄漏) */
+  function abort(): void {
+    currentCtrl?.abort()
+    currentCtrl = null
+  }
+
+  return { ask, abort }
 }

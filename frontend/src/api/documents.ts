@@ -63,4 +63,9 @@ export const documentsApi = {
     })
     return data
   },
+
+  async reprocess(docId: number): Promise<DocumentItem> {
+    const { data } = await http.post<DocumentItem>(`/documents/${docId}/reprocess`)
+    return data
+  },
 }

@@ -39,4 +39,8 @@ export const conversationsApi = {
     )
     return data
   },
+
+  async remove(conversationId: number): Promise<void> {
+    await http.delete(`/chat/conversations/${conversationId}`)
+  },
 }
