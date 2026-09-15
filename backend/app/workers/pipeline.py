@@ -13,6 +13,7 @@ from app.models import Chunk, Document
 from app.services.chunking import split_blocks
 from app.services.embedding import get_provider
 from app.services.parsing import get_parser
+from app.services.retrieval.tokenize import tokenize as _tok
 from app.workers.celery_app import celery_app
 
 EMBED_BATCH = 16
@@ -100,13 +101,15 @@ async def _run(document_id: int, db_url: str) -> None:
                 )
             await session.commit()
 
-            await session.execute(
-                text(
-                    "UPDATE chunks SET tsv = to_tsvector('simple', content) "
-                    "WHERE document_id = :doc_id AND tsv IS NULL"
-                ),
-                {"doc_id": document_id},
-            )
+            for index, chunk in enumerate(chunks):
+                await session.execute(
+                    text(
+                        "UPDATE chunks SET tsv = to_tsvector('simple', :t) "
+                        "WHERE document_id = :d AND chunk_index = :i"
+                    ),
+                    {"t": " ".join(_tok(chunk.content)), "d": document_id,
+                     "i": index},
+                )
             await session.commit()
 
             doc.page_count = result.page_count or None
