@@ -1,4 +1,5 @@
 import os
+import uuid as _uuid
 
 # M2 全局测试约定:测试进程一律指向测试库 + fake 嵌入(必须在导入 app.* 之前设置)
 os.environ["DATABASE_URL"] = (
@@ -69,3 +70,16 @@ async def client(db_session):
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
     app.dependency_overrides.clear()
+
+
+@pytest_asyncio.fixture
+async def auth_headers(client):
+    username = f"m2_{_uuid.uuid4().hex[:8]}"
+    await client.post(
+        "/api/auth/register", json={"username": username, "password": "secret123"}
+    )
+    resp = await client.post(
+        "/api/auth/login", json={"username": username, "password": "secret123"}
+    )
+    token = resp.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
