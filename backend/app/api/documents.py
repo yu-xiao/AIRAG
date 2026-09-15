@@ -2,13 +2,14 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.deps import get_current_user
+from app.core.perms import get_kb_perm, has_perm
 from app.db.session import get_db
-from app.models import Document, KnowledgeBase, User
+from app.models import Chunk, Document, KnowledgeBase, User
 from app.schemas.document import DocumentOut
 from app.workers.pipeline import process_document
 
@@ -17,9 +18,11 @@ router = APIRouter(tags=["documents"])
 ALLOWED_EXTS = {".pdf", ".docx", ".xlsx"}
 
 
-async def _get_kb_or_404(db: AsyncSession, kb_id: int) -> KnowledgeBase:
+async def _get_visible_kb_or_404(
+    db: AsyncSession, current: User, kb_id: int
+) -> KnowledgeBase:
     kb = await db.get(KnowledgeBase, kb_id)
-    if kb is None:
+    if kb is None or await get_kb_perm(db, current, kb) is None:
         raise HTTPException(status_code=404, detail="knowledge base not found")
     return kb
 
@@ -35,7 +38,9 @@ async def upload_document(
     current: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _get_kb_or_404(db, kb_id)
+    kb = await _get_visible_kb_or_404(db, current, kb_id)
+    if not has_perm(await get_kb_perm(db, current, kb), "editor"):
+        raise HTTPException(status_code=403, detail="editor permission required")
 
     original = Path(file.filename or "unnamed").name
     ext = Path(original).suffix.lower()
@@ -85,7 +90,7 @@ async def list_documents(
     current: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _get_kb_or_404(db, kb_id)
+    await _get_visible_kb_or_404(db, current, kb_id)
     result = await db.execute(
         select(Document)
         .where(Document.kb_id == kb_id)
@@ -94,16 +99,25 @@ async def list_documents(
     return list(result.scalars().all())
 
 
+async def _get_visible_document_or_404(
+    db: AsyncSession, current: User, doc_id: int
+) -> Document:
+    doc = await db.get(Document, doc_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="document not found")
+    kb = await db.get(KnowledgeBase, doc.kb_id)
+    if kb is None or await get_kb_perm(db, current, kb) is None:
+        raise HTTPException(status_code=404, detail="document not found")
+    return doc
+
+
 @router.get("/documents/{doc_id}", response_model=DocumentOut)
 async def get_document(
     doc_id: int,
     current: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    doc = await db.get(Document, doc_id)
-    if doc is None:
-        raise HTTPException(status_code=404, detail="document not found")
-    return doc
+    return await _get_visible_document_or_404(db, current, doc_id)
 
 
 @router.get("/documents/{doc_id}/chunks")
@@ -114,12 +128,9 @@ async def list_chunks(
     current: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    doc = await db.get(Document, doc_id)
-    if doc is None:
-        raise HTTPException(status_code=404, detail="document not found")
+    await _get_visible_document_or_404(db, current, doc_id)
     page = max(page, 1)
     page_size = min(max(page_size, 1), 100)
-    from app.models import Chunk
 
     total = (
         await db.execute(
@@ -148,3 +159,26 @@ async def list_chunks(
             for c in rows
         ],
     }
+
+
+@router.post("/documents/{doc_id}/reprocess", response_model=DocumentOut)
+async def reprocess_document(
+    doc_id: int,
+    current: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    doc = await _get_visible_document_or_404(db, current, doc_id)
+    kb = await db.get(KnowledgeBase, doc.kb_id)
+    if not has_perm(await get_kb_perm(db, current, kb), "editor"):
+        raise HTTPException(status_code=403, detail="editor permission required")
+    if doc.status in ("parsing", "chunking", "embedding"):
+        raise HTTPException(status_code=409, detail="document is being processed")
+    await db.execute(delete(Chunk).where(Chunk.document_id == doc_id))
+    doc.status = "pending"
+    doc.error_msg = None
+    doc.chunk_count = 0
+    doc.page_count = None
+    await db.commit()
+    await db.refresh(doc)
+    process_document.delay(doc_id)
+    return doc
