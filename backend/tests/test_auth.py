@@ -12,7 +12,7 @@ async def test_register_success(client):
     assert resp.status_code == 201
     data = resp.json()
     assert data["id"] > 0
-    assert data["role"] == "admin"
+    assert data["role"] == "viewer"  # M4-R1:注册默认 viewer,admin 由晋升而来
     assert "password_hash" not in data
 
 

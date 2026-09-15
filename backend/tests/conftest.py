@@ -74,11 +74,17 @@ async def client(db_session):
 
 
 @pytest_asyncio.fixture
-async def auth_headers(client):
+async def auth_headers(client, db_session):
     username = f"m2_{_uuid.uuid4().hex[:8]}"
-    await client.post(
+    created = await client.post(
         "/api/auth/register", json={"username": username, "password": "secret123"}
     )
+    # M4 起注册默认 viewer;存量用例的建库/上传流按 editor 走
+    await db_session.execute(
+        text("UPDATE users SET role = 'editor' WHERE id = :i"),
+        {"i": created.json()["id"]},
+    )
+    await db_session.commit()
     resp = await client.post(
         "/api/auth/login", json={"username": username, "password": "secret123"}
     )
