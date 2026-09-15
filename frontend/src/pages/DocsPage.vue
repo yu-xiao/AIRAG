@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, type UploadRawFile, type UploadRequestOptions } from 'element-plus'
 import { ArrowLeft } from '@element-plus/icons-vue'
@@ -11,6 +11,11 @@ const router = useRouter()
 
 const kbId = Number(route.params.id)
 const kbName = ref(`知识库 #${kbId}`)
+const myPerm = ref<string | null>(null)
+
+const canEdit = computed(() => myPerm.value === 'owner' || myPerm.value === 'editor')
+/** 允许触发重新解析的状态(处理中禁止重入,与后端 409 语义一致) */
+const REPROCESSABLE = ['pending', 'done', 'failed']
 
 const loading = ref(false)
 const docs = ref<DocumentItem[]>([])
@@ -121,15 +126,40 @@ function openChunks(row: DocumentItem) {
   fetchChunks()
 }
 
+// ---- 重新解析(editor+;删旧块回 pending 重新入队)----
+const reprocessing = ref<number | null>(null)
+
+async function reprocess(row: DocumentItem) {
+  reprocessing.value = row.id
+  try {
+    await documentsApi.reprocess(row.id)
+    ElMessage.success(`「${row.filename}」已重新入队处理`)
+    await load()
+  } catch (e) {
+    const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+    ElMessage.error(detail ?? '重新解析失败')
+  } finally {
+    reprocessing.value = null
+  }
+}
+
 function fmtTime(iso: string) {
   return iso.replace('T', ' ').slice(0, 19)
 }
 
-async function loadKbName() {
+async function loadKb() {
   try {
-    const kb = (await kbApi.list()).find((k) => k.id === kbId)
-    if (kb) kbName.value = kb.name
-  } catch {
+    const kb = await kbApi.detail(kbId)
+    kbName.value = kb.name
+    myPerm.value = kb.my_perm ?? null
+  } catch (e) {
+    // 不可见/不存在:统一回列表页,不在此页滞留
+    const status = (e as { response?: { status?: number } })?.response?.status
+    if (status === 404) {
+      ElMessage.error('知识库不存在或无权访问')
+      router.replace({ name: 'kb' })
+      return
+    }
     /* 名称加载失败不阻塞页面 */
   }
 }
@@ -140,7 +170,7 @@ onMounted(() => {
     router.replace({ name: 'kb' })
     return
   }
-  loadKbName()
+  loadKb()
   load()
 })
 
@@ -158,7 +188,7 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <el-card class="upload-card" shadow="never">
+    <el-card v-if="canEdit" class="upload-card" shadow="never">
       <el-upload
         drag
         multiple
@@ -201,9 +231,18 @@ onUnmounted(() => {
       <el-table-column label="上传时间" width="180">
         <template #default="{ row }">{{ fmtTime(row.created_at) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="120" align="center">
+      <el-table-column label="操作" width="170" align="center">
         <template #default="{ row }">
           <el-button link type="primary" @click="openChunks(row)">查看分块</el-button>
+          <el-button
+            v-if="canEdit && REPROCESSABLE.includes(row.status)"
+            link
+            type="warning"
+            :loading="reprocessing === row.id"
+            @click="reprocess(row)"
+          >
+            重新解析
+          </el-button>
         </template>
       </el-table-column>
     </el-table>

@@ -28,6 +28,7 @@ function onLogout() {
         <el-menu-item index="/">首页</el-menu-item>
         <el-menu-item index="/kb">知识库</el-menu-item>
         <el-menu-item index="/chat">对话</el-menu-item>
+        <el-menu-item v-if="auth.user?.role === 'admin'" index="/admin/users">用户管理</el-menu-item>
       </el-menu>
     </el-aside>
     <el-container>

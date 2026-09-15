@@ -13,6 +13,7 @@ const router = createRouter({
         { path: 'kb', name: 'kb', component: () => import('@/pages/KbPage.vue') },
         { path: 'kb/:id/docs', name: 'kb-docs', component: () => import('@/pages/DocsPage.vue') },
         { path: 'chat', name: 'chat', component: () => import('@/pages/ChatPage.vue') },
+        { path: 'admin/users', name: 'admin-users', component: () => import('@/pages/UsersPage.vue') },
       ],
     },
   ],

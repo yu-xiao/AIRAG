@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { nextTick, onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Delete } from '@element-plus/icons-vue'
+import DOMPurify from 'dompurify'
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js/lib/core'
 import bash from 'highlight.js/lib/languages/bash'
@@ -14,7 +16,7 @@ import { useChatStream } from '@/composables/useChatStream'
 import CitationList from '@/components/CitationList.vue'
 
 // ---- markdown 渲染:页面级单例;语言子集 python/ts/json/bash ----
-// 注:v-html 前未做 XSS 消毒(内网 + 模型自答内容),DOMPurify 排期在 M4 加固批。
+// 注:M4 起 v-html 前统一过 DOMPurify(markdown html:false 之外的第二道防线)。
 hljs.registerLanguage('python', python)
 hljs.registerLanguage('typescript', typescript)
 hljs.registerLanguage('json', json)
@@ -36,7 +38,7 @@ const md = new MarkdownIt({
 })
 
 function render(src: string): string {
-  return md.render(src)
+  return DOMPurify.sanitize(md.render(src))
 }
 
 // ---- 状态 ----
@@ -57,8 +59,14 @@ const selectedKbIds = ref<number[]>([])
 const question = ref('')
 const streaming = ref(false)
 const bottomAnchor = ref<HTMLElement>()
+/** M4:请求级精排开关,localStorage 记忆;provider 未开时后端直通 */
+const rerankEnabled = ref(localStorage.getItem('airag_rerank') === '1')
 
-const { ask } = useChatStream()
+function onRerankChange(v: boolean) {
+  localStorage.setItem('airag_rerank', v ? '1' : '0')
+}
+
+const { ask, abort } = useChatStream()
 
 // ---- 加载 ----
 async function loadKbs() {
@@ -115,6 +123,29 @@ function newConversation() {
   // selectedKbIds 保留(组件级缓存,便于连续提问)
 }
 
+async function removeConversation(c: ConversationItem) {
+  if (guardStreaming()) return
+  try {
+    await ElMessageBox.confirm(`删除会话「${c.title}」?历史消息将一并删除。`, '删除会话', {
+      type: 'warning',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+    })
+  } catch {
+    return
+  }
+  try {
+    await conversationsApi.remove(c.id)
+    if (currentId.value === c.id) {
+      currentId.value = null
+      messages.value = []
+    }
+    await loadConversations()
+  } catch {
+    ElMessage.error('删除会话失败')
+  }
+}
+
 // ---- 发送与 SSE 渲染契约 ----
 // token → 增量追加;done → 用 done.answer 整体替换(权威对账);
 // citations → 存入当前助手消息;error → 终止流 + ElMessage。
@@ -140,7 +171,12 @@ async function onSend() {
   scrollToBottom()
 
   await ask(
-    { kbIds: [...selectedKbIds.value], question: q, conversationId: currentId.value ?? undefined },
+    {
+      kbIds: [...selectedKbIds.value],
+      question: q,
+      conversationId: currentId.value ?? undefined,
+      rerank: rerankEnabled.value,
+    },
     {
       onToken(t) {
         assistant.content += t
@@ -187,6 +223,11 @@ onMounted(() => {
   loadKbs()
   loadConversations()
 })
+
+onUnmounted(() => {
+  // 离开页面时中止进行中的 SSE 流,防后台悬挂
+  abort()
+})
 </script>
 
 <template>
@@ -203,7 +244,10 @@ onMounted(() => {
           :class="{ active: c.id === currentId }"
           @click="openConversation(c)"
         >
-          {{ c.title }}
+          <span class="conv-title" :title="c.title">{{ c.title }}</span>
+          <el-icon class="conv-delete" :size="14" @click.stop="removeConversation(c)">
+            <Delete />
+          </el-icon>
         </div>
         <el-empty v-if="conversations.length === 0" description="暂无会话" :image-size="48" />
       </div>
@@ -223,6 +267,13 @@ onMounted(() => {
         >
           <el-option v-for="k in kbs" :key="k.id" :label="k.name" :value="k.id" />
         </el-select>
+        <el-switch
+          :model-value="rerankEnabled"
+          label="精排"
+          active-text="精排"
+          @change="onRerankChange"
+          @update:model-value="rerankEnabled = $event"
+        />
       </div>
 
       <div class="chat-messages">
@@ -290,10 +341,28 @@ onMounted(() => {
   border-radius: 4px;
   cursor: pointer;
   font-size: 13px;
+  color: var(--el-text-color-primary);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.conv-title {
+  flex: 1;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--el-text-color-primary);
+}
+.conv-delete {
+  flex-shrink: 0;
+  color: var(--el-text-color-secondary);
+  visibility: hidden;
+}
+.conv-item:hover .conv-delete {
+  visibility: visible;
+}
+.conv-delete:hover {
+  color: var(--el-color-danger);
 }
 .conv-item:hover {
   background: var(--el-fill-color-light);
