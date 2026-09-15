@@ -13,8 +13,7 @@
 ## Global Constraints
 
 - 开发机 Windows,CMD shell;所有命令必须 CMD 兼容(`rmdir /s /q`、反斜杠路径)。**开发环境原生运行,不依赖 Docker/WSL**:PostgreSQL 16 原生安装 + pgvector 手工编译(一次性,见下方『环境准备』);venv 必须用 `py -3.12 -m venv .venv` 创建(PATH 上默认 python 是 3.11)。
-- 版本下限:Python 3.12+、Node 20+、pnpm 9+;依赖小版本在脚手架任务中取当期最新稳定版。
-- 端口约定:后端 8000、前端 5173、PG 原生 localhost:5432(若 5432 被本机其他 PG 占用,安装时改 5433 并同步 config.py 默认值)。Redis(M2)的 Windows 运行方案届时另定,M1 不涉及。
+- 端口约定:后端 **8001**(2026-09-15 裁决:8000 被本机金蝶 K/3 Cloud 生产服务占用)、前端 5173、PG 原生 localhost:5432(若 5432 被本机其他 PG 占用,安装时改 5433 并同步 config.py 默认值)。Redis(M2)的 Windows 运行方案届时另定,M1 不涉及。
 - 数据库名:`airag`(运行)/ `airag_test`(测试);PG 镜像 `pgvector/pgvector:pg16`;**zhparser 延后到 M3**(M1/M2 只建 tsv 列,用默认 `simple` 分词,不建中文分词配置)。
 - API 统一前缀 `/api`;认证用 Bearer JWT(HS256,默认 60 分钟);密码哈希用 bcrypt(直接用 `bcrypt` 库,**不用 passlib**——规避其与 bcrypt≥4.1 的兼容问题,与设计文档功能等价)。
 - M1 注册用户角色一律 `role='admin'`(bootstrap 简化;M4 做 RBAC 时收紧)。
@@ -57,6 +56,8 @@
 
    返回一行 `vector` 即环境就绪(airag_test 库同样执行一次)。
 
+> **实机记录(2026-09-15)**:环境实际为 PostgreSQL **18.6**,安装于 `D:\Program Files\PostgreSQL\18`(Windows 服务名 `postgresql-x64-18`,端口 5432,postgres 超级密码由用户私下提供,**任何文档不得记录**);pgvector 0.8.6 编译成功;airag 角色、两库与 vector 扩展已由控制器补建并验证。此后一切命令中的 psql 路径以 `D:\Program Files\PostgreSQL\18\bin\psql` 为准,上文 C:\...\16 仅存档。
+
 ## 执行协议(跨会话长任务怎么自动接力)
 
 1. 执行会话开头读两份文件:Spec(设计文档)+ 本计划;然后从**第一个未勾选的步骤**继续,不重做已完成任务。
@@ -68,6 +69,7 @@
 7. 执行方式二选一(由用户在启动执行时指定):superpowers:subagent-driven-development(推荐,每任务派新子代理+两段评审)或 superpowers:executing-plans(本会话内分批执行+检查点)。
 8. GitHub 同步:远程仓库 `https://github.com/yu-xiao/AIRAG.git`(2026-09-14 用户提供)。每个里程碑完成、分支合并回 main 后推送一次 `git push origin main`;M1 的首次推送见 Task 12 Step 6。凭据走系统级 Git Credential Manager——首次推送会弹浏览器登录,用户完成一次即缓存。本机访问 GitHub 偶发网络抖动,推送失败先重试再排查。
 9. **环境未就绪时的并行路径**:若『环境准备』尚未完成,可先执行不依赖数据库的任务:Task 1 → Task 2(Step 1~2 及 venv/依赖安装;Step 3 的 psql 验证推迟到环境就绪后补做)→ Task 10 → Task 11(前端按 API 契约编程,store 测试已 mock,不需后端运行)。**Task 3 起必须等数据库就绪**——TDD 红绿循环需要真实 PG,不允许跳过测试先行堆码。
+10. **DLP 防护(2026-09-15 发现)**:本机终端加密软件会把部分进程(已确认 alembic)新写的文件在磁盘上透明加密(密文含 `%TSD-Header` 标记)。任何**工具自动生成的文件**(alembic 迁移、脚手架产物)提交前必须 `git diff --cached | findstr TSD-Header` 检查;命中则用 `git hash-object --stdin`(以明文从 stdin 重灌 blob)+ `update-index` + amend 修复(方法见 Task 5 报告)。根治方案:请 IT 把 `E:\Projects\AIRag` 加入 DLP 排除策略。
 
 ## 里程碑路线图(M2~M5 概要,进入时生成详细计划)
 
@@ -96,7 +98,7 @@ backend/
   app/schemas/auth.py                 # RegisterIn/UserOut/TokenOut
   app/api/{__init__,auth}.py          # api_router 聚合
   alembic/{env.py,versions/} + alembic.ini
-  tests/{conftest.py,test_health.py,test_auth.py}
+  tests/{conftest.py,test_health.py,test_models.py,test_auth.py}
 frontend/
   vite.config.ts                      # @ 别名 + /api 代理
   src/main.ts                         # Pinia/Router/ElementPlus
@@ -105,7 +107,6 @@ frontend/
   src/router/index.ts                 # 路由 + 登录守卫
   src/layouts/MainLayout.vue
   src/pages/{LoginPage.vue,HomePage.vue}
-  tests/unit/auth.store.spec.ts       (create-vue 的 vitest 目录结构)
 .env.example / .gitignore / README.md(生产用 docker-compose.yml/Dockerfile 推迟到部署里程碑再创建)
 ```
 
@@ -114,13 +115,12 @@ frontend/
 ### Task 1: 仓库初始化与项目骨架
 
 **Files:**
-- Create: `.gitignore`, `.env.example`, `README.md`, `docs/`(已存在,不覆盖)
-- Create: 空目录 `backend/app/{core,models,schemas,api,services,workers}`、`backend/alembic/versions/`、`backend/tests/`
+- Create: `.gitignore`, `.env.example`, `README.md`、空目录 `backend/app/{core,models,schemas,api,services,workers}`、`backend/alembic/versions/`、`backend/tests/`
 
 **Interfaces:**
 - Produces: git 仓库(main 分支)、根目录 `.env.example`(后续任务的 env 模板源头)
 
-- [ ] **Step 1: 初始化 git 仓库并建目录**
+- [x] **Step 1: 初始化 git 仓库并建目录**
 
 ```cmd
 cd /d E:\Projects\AIRag
@@ -128,7 +128,7 @@ git init -b main
 mkdir backend\app\core backend\app\models backend\app\schemas backend\app\api backend\app\services backend\app\workers backend\alembic\versions backend\tests
 ```
 
-- [ ] **Step 2: 写 `.gitignore`**
+- [x] **Step 2: 写 `.gitignore`**
 
 ```gitignore
 .venv/
@@ -142,7 +142,7 @@ dist/
 pnpm-debug.log*
 ```
 
-- [ ] **Step 3: 写 `.env.example`**
+- [x] **Step 3: 写 `.env.example`**
 
 ```env
 JWT_SECRET=please-change-me-32-chars-minimum
@@ -152,7 +152,7 @@ ZHIPU_API_KEY=
 
 (端口/DATABASE_URL 由 config.py 默认值固定为 localhost:5432,不入 env,减少 M1 配置面。)
 
-- [ ] **Step 4: 写 `README.md` 骨架**
+- [x] **Step 4: 写 `README.md` 骨架**
 
 ```markdown
 # AIRag 企业知识库
@@ -166,11 +166,11 @@ copy .env.example .env
 cd backend
 py -3.12 -m venv .venv
 .venv\Scripts\python -m pip install -e ".[dev]"
-start_dev.bat   # 迁移 + 热重载,后端 http://localhost:8000/docs
+start_dev.bat   # 迁移 + 热重载,后端 http://localhost:8001/docs
 cd ..\frontend && pnpm install && pnpm dev   # 前端 http://localhost:5173
 ```
 
-- [ ] **Step 5: 首次提交并验证**
+- [x] **Step 5: 首次提交并验证**
 
 ```cmd
 git add -A
@@ -190,7 +190,7 @@ Expected: 输出 1 条提交记录。
 **Interfaces:**
 - Produces: `app.core.config.settings`(字段见代码,后续所有模块从它读配置);数据库按『环境准备』节已就绪
 
-- [ ] **Step 1: 写 `backend/pyproject.toml`**
+- [x] **Step 1: 写 `backend/pyproject.toml`**
 
 ```toml
 [project]
@@ -225,7 +225,7 @@ include = ["app*"]
 asyncio_mode = "auto"
 ```
 
-- [ ] **Step 2: 写 `backend/app/core/config.py` 并补齐各层 `__init__.py`**
+- [x] **Step 2: 写 `backend/app/core/config.py` 并补齐各层 `__init__.py`**
 
 `config.py`:
 
@@ -257,7 +257,7 @@ cd /d E:\Projects\AIRag\backend
 type nul > app\__init__.py & type nul > app\core\__init__.py & type nul > app\models\__init__.py & type nul > app\schemas\__init__.py & type nul > app\api\__init__.py & type nul > app\services\__init__.py & type nul > app\workers\__init__.py & type nul > tests\__init__.py
 ```
 
-- [ ] **Step 3: 建 venv、装依赖,验证数据库连通**
+- [x] **Step 3: 建 venv、装依赖,验证数据库连通**
 
 ```cmd
 cd /d E:\Projects\AIRag\backend
@@ -269,15 +269,15 @@ copy .env.example .env
 
 (必须用 `py -3.12`:PATH 上默认 python 是 3.11,直接 `python -m venv` 会违反 requires-python>=3.12。)
 
-确认 PG Windows 服务在运行(默认服务名 `postgresql-x64-16`)且『环境准备』已完成,然后验证连通与扩展:
+确认 PG Windows 服务在运行且『环境准备』已完成,然后验证连通与扩展:
 
 ```cmd
-"C:\Program Files\PostgreSQL\16\bin\psql" -U airag -d airag -h localhost -c "SELECT extname FROM pg_extension WHERE extname='vector';"
+"D:\Program Files\PostgreSQL\18\bin\psql" -U airag -d airag -h localhost -c "SELECT extname FROM pg_extension WHERE extname='vector';"
 ```
 
 Expected: 返回一行 `vector`;对 `-d airag_test` 再执行一次,同样返回 `vector`。
 
-- [ ] **Step 4: 提交**
+- [x] **Step 4: 提交**
 
 ```cmd
 git add -A
@@ -295,7 +295,7 @@ git commit -m "chore: backend deps and settings with native pg connection"
 - Produces: `app.main:app`(FastAPI 实例);测试夹具 `client`(httpx AsyncClient,已注入依赖覆盖);路由挂载点 `app.api.api_router`
 - Consumes: Task 2 的 settings
 
-- [ ] **Step 1: 写失败测试 `tests/test_health.py`**
+- [x] **Step 1: 写失败测试 `tests/test_health.py`**
 
 ```python
 async def test_health(client):
@@ -304,7 +304,7 @@ async def test_health(client):
     assert resp.json() == {"status": "ok"}
 ```
 
-- [ ] **Step 2: 写 `tests/conftest.py`**
+- [x] **Step 2: 写 `tests/conftest.py`**
 
 ```python
 import pytest_asyncio
@@ -347,6 +347,8 @@ async def clean_tables():
     yield
     async with engine.begin() as conn:
         for table in CLEANUP_ORDER:
+            if table not in Base.metadata.tables:  # 空元数据守卫(模型落地前)
+                continue
             await conn.execute(text(f"DELETE FROM {table}"))
 
 
@@ -368,9 +370,9 @@ async def client(db_session):
     app.dependency_overrides.clear()
 ```
 
-注:conftest 引用了尚不存在的 `app.db.session` 与 `app.main`——这正是 Step 2 期望失败的原因。
+注:conftest 引用了尚不存在的 `app.db.session` 与 `app.main`——这正是本步期望失败的原因。
 
-- [ ] **Step 3: 运行确认失败**
+- [x] **Step 3: 运行确认失败**
 
 ```cmd
 cd /d E:\Projects\AIRag\backend
@@ -379,7 +381,7 @@ cd /d E:\Projects\AIRag\backend
 
 Expected: FAIL/ERROR(`ModuleNotFoundError: app.main` 或类似)。
 
-- [ ] **Step 4: 最小实现 `app/db/session.py` 与 `app/main.py`**
+- [x] **Step 4: 最小实现 `app/db/session.py` 与 `app/main.py`**
 
 `app/db/session.py`:
 
@@ -442,15 +444,15 @@ logger.add("logs/app.log", rotation="10 MB", retention=5, enqueue=True)
 app = create_app()
 ```
 
-- [ ] **Step 5: 运行确认通过**
+- [x] **Step 5: 运行确认通过**
 
 ```cmd
 .venv\Scripts\python -m pytest tests\test_health.py -v
 ```
 
-Expected: `1 passed`(conftest 的 drop_all/create_all 会在 airag_test 上建空表集——此刻 metadata 为空,不报错即可)。
+Expected: `1 passed`(conftest 的 session 级 prepare_db 会在 airag_test 上建空表集——此刻 metadata 为空,不报错即可)。
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```cmd
 git add -A
@@ -462,13 +464,13 @@ git commit -m "feat: fastapi app skeleton with /api/health and async test harnes
 ### Task 4: 全量业务数据模型(Spec §5 七张表)
 
 **Files:**
-- Create: `backend/app/models/base.py`, `user.py`, `knowledge_base.py`, `document.py`, `chat.py`;改 `app/models/__init__.py`
+- Create: `backend/app/models/user.py`, `backend/app/models/knowledge_base.py`, `backend/app/models/document.py`, `backend/app/models/chat.py`;改写 `backend/app/models/base.py`(整体替换)与 `backend/app/models/__init__.py`
 
 **Interfaces:**
-- Produces: `Base`( declarative_base,含 TSVector 自定义类型)、`User`、`KnowledgeBase`、`KbPermission`、`Document`、`Chunk`、`Conversation`、`Message`;字段以代码为准,后续任务/M2/M3 直接复用
-- Consumes: pgvector 的 `Vector` 类型
+- Produces: `Base`(含 TSVector 自定义类型 + TimestampMixin)、`User`、`KnowledgeBase`、`KbPermission`、`Document`、`Chunk`、`Conversation`、`Message`;字段以代码为准,后续任务/M2/M3 直接复用
+- Consumes: pgvector 的 `Vector` 类型;Task 3 的 conftest 夹具链(prepare_db 会以真实 metadata 建表)
 
-- [ ] **Step 1: 写失败测试 `tests/test_models.py`**
+- [x] **Step 1: 写失败测试 `tests/test_models.py`**
 
 ```python
 from sqlalchemy import inspect
@@ -490,7 +492,7 @@ async def test_all_spec_tables_exist(prepare_db):
     assert expected <= names
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 ```cmd
 .venv\Scripts\python -m pytest tests\test_models.py -v
@@ -498,7 +500,7 @@ async def test_all_spec_tables_exist(prepare_db):
 
 Expected: FAIL(集合为空/缺表)。
 
-- [ ] **Step 3: 实现模型**
+- [x] **Step 3: 实现模型**
 
 `app/models/base.py`:
 
@@ -621,10 +623,10 @@ class Chunk(Base):
     content_hash: Mapped[str] = mapped_column(String(64), index=True)
 ```
 
-`app/models/chat.py`:
+`app/models/chat.py`(注:执行版在首行导入中补了计划原文遗漏的 `Integer`,以执行版为准):
 
 ```python
-from sqlalchemy import ForeignKey, String, Text
+from sqlalchemy import ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -673,7 +675,7 @@ __all__ = [
 ]
 ```
 
-- [ ] **Step 4: 运行确认通过**
+- [x] **Step 4: 运行确认通过**
 
 ```cmd
 .venv\Scripts\python -m pytest tests\test_models.py tests\test_health.py -v
@@ -681,7 +683,7 @@ __all__ = [
 
 Expected: `2 passed`(conftest 的 session 级 prepare_db 每次会话首跑都会 drop_all/create_all 重建全部表,无需手动清库)。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```cmd
 git add -A
@@ -698,7 +700,7 @@ git commit -m "feat: full domain models for users/kb/documents/chunks/conversati
 **Interfaces:**
 - Produces: `alembic upgrade head` 可在任意环境建全量表(含 vector 扩展);M2+ 的迁移在此基础上累加
 
-- [ ] **Step 1: 初始化 alembic async 模板**
+- [x] **Step 1: 初始化 alembic async 模板**
 
 ```cmd
 cd /d E:\Projects\AIRag\backend
@@ -707,7 +709,7 @@ cd /d E:\Projects\AIRag\backend
 
 注:Task 1 已预建 `alembic\versions\` 空目录,init 遇到已存在目录会报错,先删掉这两层空目录再执行:`rmdir alembic\versions && rmdir alembic`。
 
-- [ ] **Step 2: 改 `alembic/env.py`(替换模板的 placeholder 段)**
+- [x] **Step 2: 改 `alembic/env.py`(替换模板的 placeholder 段)**
 
 在文件顶部 `from alembic import context` 之后加入 imports:
 
@@ -729,7 +731,7 @@ config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
 target_metadata = Base.metadata
 ```
 
-- [ ] **Step 3: 生成并修补初始迁移**
+- [x] **Step 3: 生成并修补初始迁移**
 
 ```cmd
 .venv\Scripts\python -m alembic revision --autogenerate -m "init all tables"
@@ -741,7 +743,9 @@ target_metadata = Base.metadata
     op.execute("CREATE EXTENSION IF NOT EXISTS vector")
 ```
 
-- [ ] **Step 4: 对 airag_test 库执行迁移并验证往返**
+(执行补记:alembic 1.20 渲染自定义类型按模块路径引用但不生成 import,需在迁移文件顶部补 `import app.models.base` 与 `import pgvector.sqlalchemy.vector` 两行——见 Task 5 报告。)
+
+- [x] **Step 4: 对 airag_test 库执行迁移并验证往返**
 
 说明:env.py 读的是 `settings.DATABASE_URL`(默认指向 localhost:5432 的 `airag` 运行库)。本步骤验证用测试库,临时覆盖环境变量:
 
@@ -757,12 +761,12 @@ set DATABASE_URL=
 Expected: `current` 显示 init_all_tables head;downgrade/upgrade 往返无错。
 
 ```cmd
-"C:\Program Files\PostgreSQL\16\bin\psql" -U airag -d airag_test -h localhost -c "\dt"
+"D:\Program Files\PostgreSQL\18\bin\psql" -U airag -d airag_test -h localhost -c "\dt"
 ```
 
 Expected: 列出 7 张业务表 + alembic_version。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```cmd
 git add -A
@@ -774,14 +778,14 @@ git commit -m "feat: alembic async setup with initial migration for all tables"
 ### Task 6: 密码/JWT 安全模块 + 注册接口
 
 **Files:**
-- Create: `backend/app/core/security.py`, `backend/app/schemas/auth.py`, `backend/app/api/auth.py`;改 `app/api/__init__.py`
+- Create: `backend/app/core/security.py`, `backend/app/schemas/auth.py`, `backend/app/api/auth.py`;改 `backend/app/api/__init__.py`
 - Test: `backend/tests/test_auth.py`
 
 **Interfaces:**
 - Produces: `hash_password(password: str) -> str`、`verify_password(password: str, password_hash: str) -> bool`、`create_access_token(user_id: int) -> str`、`decode_access_token(token: str) -> dict | None`;`POST /api/auth/register`(201→UserOut,409 重名,422 校验);Schema:`UserOut{id,username,role,is_active}`
 - Consumes: Task 4 的 `User`、Task 3 的 `get_db`
 
-- [ ] **Step 1: 写失败测试 `tests/test_auth.py`**
+- [x] **Step 1: 写失败测试 `tests/test_auth.py`**
 
 ```python
 import uuid
@@ -820,7 +824,7 @@ async def test_register_password_too_short(client):
     assert resp.status_code == 422
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 ```cmd
 .venv\Scripts\python -m pytest tests\test_auth.py -v
@@ -828,7 +832,7 @@ async def test_register_password_too_short(client):
 
 Expected: FAIL(404 Not Found,路由不存在)。
 
-- [ ] **Step 3: 实现三个文件**
+- [x] **Step 3: 实现三个文件**
 
 `app/core/security.py`:
 
@@ -922,7 +926,7 @@ from app.api.auth import router as auth_router
 api_router.include_router(auth_router)
 ```
 
-- [ ] **Step 4: 运行确认通过**
+- [x] **Step 4: 运行确认通过**
 
 ```cmd
 .venv\Scripts\python -m pytest tests\test_auth.py -v
@@ -930,7 +934,7 @@ api_router.include_router(auth_router)
 
 Expected: `3 passed`。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```cmd
 git add -A
@@ -949,7 +953,7 @@ git commit -m "feat: bcrypt+jwt security module and register endpoint"
 - Produces: `POST /api/auth/login` → 200 `{"access_token": "...", "token_type": "bearer"}`;错误凭证 401
 - Consumes: Task 6 的 `verify_password`/`create_access_token`
 
-- [ ] **Step 1: 追加失败测试**
+- [x] **Step 1: 追加失败测试**
 
 ```python
 async def test_login_success(client):
@@ -977,7 +981,7 @@ async def test_login_wrong_password(client):
     assert resp.status_code == 401
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 ```cmd
 .venv\Scripts\python -m pytest tests\test_auth.py -v
@@ -985,7 +989,7 @@ async def test_login_wrong_password(client):
 
 Expected: 新增 2 条 FAIL。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `schemas/auth.py` 追加:
 
@@ -1014,7 +1018,7 @@ async def login(payload: LoginIn, db: AsyncSession = Depends(get_db)):
     return TokenOut(access_token=create_access_token(user.id))
 ```
 
-- [ ] **Step 4: 运行确认通过**
+- [x] **Step 4: 运行确认通过**
 
 ```cmd
 .venv\Scripts\python -m pytest tests\test_auth.py -v
@@ -1022,7 +1026,7 @@ async def login(payload: LoginIn, db: AsyncSession = Depends(get_db)):
 
 Expected: `5 passed`。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```cmd
 git add -A
@@ -1041,7 +1045,7 @@ git commit -m "feat: login endpoint issuing jwt access token"
 - Produces: `get_current_user`(AsyncSession 依赖,返回 `User`,无效/过期 token → 401);`GET /api/auth/me` → UserOut。**所有后续受保护路由都复用此依赖**
 - Consumes: Task 6/7 的 token 体系
 
-- [ ] **Step 1: 追加失败测试**
+- [x] **Step 1: 追加失败测试**
 
 ```python
 async def _register_and_login(client, username: str) -> str:
@@ -1074,7 +1078,7 @@ async def test_me_with_garbage_token(client):
     assert resp.status_code == 401
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 ```cmd
 .venv\Scripts\python -m pytest tests\test_auth.py -v
@@ -1082,7 +1086,7 @@ async def test_me_with_garbage_token(client):
 
 Expected: 新增 3 条 FAIL(404)。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `app/core/deps.py`:
 
@@ -1121,15 +1125,15 @@ async def me(current: User = Depends(get_current_user)):
     return current
 ```
 
-- [ ] **Step 4: 运行确认通过**
+- [x] **Step 4: 运行确认通过**
 
 ```cmd
 .venv\Scripts\python -m pytest -v
 ```
 
-Expected: 全部 `10 passed`(health 1 + models 1 + auth 8:注册 3 + 登录 2 + me 3)。
+Expected: 全部 `11 passed`(health 1 + models 2 + auth 8:注册 3 + 登录 2 + me 3;Task 4 曾给 models 补第 2 个测试,故较初稿的 10 多 1)。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```cmd
 git add -A
@@ -1144,37 +1148,37 @@ git commit -m "feat: jwt auth dependency and /auth/me endpoint"
 - Create: `backend/start_dev.bat`;Modify: `README.md`(开发启动一节与脚本一致)
 
 **Interfaces:**
-- Produces: 一键开发启动:`start_dev.bat` 完成迁移+热重载;http://localhost:8000/api/health 可访问
+- Produces: 一键开发启动:`start_dev.bat` 完成迁移+热重载;http://localhost:8001/api/health 可访问
 
-- [ ] **Step 1: 写 `backend/start_dev.bat`**
+- [x] **Step 1: 写 `backend/start_dev.bat`**
 
 ```bat
 @echo off
 REM AIRag 后端开发启动:迁移 + 热重载
 cd /d %~dp0
 .venv\Scripts\python -m alembic upgrade head
-.venv\Scripts\python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+.venv\Scripts\python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8001
 ```
 
 同时核对 README 的"开发启动"一节与此脚本行为一致(不一致则改 README)。
 
-- [ ] **Step 2: 启动并验证**
+- [x] **Step 2: 启动并验证**
 
 新开一个 CMD 窗口运行 `backend\start_dev.bat`,另开一个窗口验证:
 
 ```cmd
-curl http://localhost:8000/api/health
+curl http://localhost:8001/api/health
 ```
 
 Expected: `{"status":"ok"}`。再验证迁移已在运行库执行:
 
 ```cmd
-"C:\Program Files\PostgreSQL\16\bin\psql" -U airag -d airag -h localhost -c "SELECT count(*) FROM alembic_version;"
+"D:\Program Files\PostgreSQL\18\bin\psql" -U airag -d airag -h localhost -c "SELECT count(*) FROM alembic_version;"
 ```
 
 Expected: count=1。验证后回到启动窗口 Ctrl+C 停掉 uvicorn。
 
-- [ ] **Step 3: 提交**
+- [x] **Step 3: 提交**
 
 ```cmd
 git add -A
@@ -1189,9 +1193,9 @@ git commit -m "chore: native dev start script with auto-migration"
 - Create: `frontend/`(create-vue 生成)+ 依赖安装
 
 **Interfaces:**
-- Produces: 可 `pnpm build`/`pnpm test` 的 Vue3 工程后续任务的宿主
+- Produces: 可 `pnpm build`/`pnpm test` 的 Vue3 工程作为后续任务的宿主
 
-- [ ] **Step 1: 生成工程**
+- [x] **Step 1: 生成工程**
 
 ```cmd
 cd /d E:\Projects\AIRag
@@ -1200,7 +1204,7 @@ pnpm create vue@latest frontend -- --ts --router --pinia --vitest --eslint-with-
 
 若进入交互式提问,按此清单选择:TypeScript=Yes、JSX=No、Router=Yes、Pinia=Yes、Vitest=Yes、E2E=No、ESLint+Prettier=Yes、其余默认。若目录已存在询问,选忽略/合并。
 
-- [ ] **Step 2: 装依赖**
+- [x] **Step 2: 装依赖**
 
 ```cmd
 cd frontend
@@ -1208,7 +1212,7 @@ pnpm install
 pnpm add element-plus @element-plus/icons-vue axios
 ```
 
-- [ ] **Step 3: 接入 Element Plus,重写 `src/main.ts`**
+- [x] **Step 3: 接入 Element Plus,重写 `src/main.ts`**
 
 ```ts
 import { createApp } from 'vue'
@@ -1230,7 +1234,7 @@ app.mount('#app')
 
 (全量引入是 M1 的刻意简化;unplugin 按需加载优化留给 M3 页面增多时再做。)
 
-- [ ] **Step 4: 验证构建与默认测试**
+- [x] **Step 4: 验证构建与默认测试**
 
 ```cmd
 pnpm build
@@ -1239,7 +1243,7 @@ pnpm test -- --run
 
 Expected: build 成功;vitest 通过(create-vue 自带示例测试,若报 "no test files" 属正常,Task 11 会补)。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```cmd
 cd /d E:\Projects\AIRag
@@ -1254,13 +1258,13 @@ git commit -m "chore: vue3+vite+ts scaffold with element-plus/pinia/router/vites
 **Files:**
 - Create: `frontend/src/api/http.ts`, `frontend/src/api/auth.ts`, `frontend/src/stores/auth.ts`, `frontend/src/pages/LoginPage.vue`, `frontend/src/pages/HomePage.vue`, `frontend/src/layouts/MainLayout.vue`
 - Modify: `frontend/src/App.vue`, `frontend/src/router/index.ts`, `frontend/vite.config.ts`
-- Test: `frontend/tests/unit/auth.store.spec.ts`(或 create-vue 的 `src/**/__tests__` 约定,以工程实际为准)
+- Test: `frontend/src/stores/__tests__/auth.store.spec.ts`(create-vue 实际约定为 `src/**/__tests__`,无顶层 tests/ 目录)
 
 **Interfaces:**
-- Consumes: Task 6~8 的 `/api/auth/*`
-- Produces: `authApi.login/register/me`;`useAuthStore()`(`{token, user, isLoggedIn, login(u,p), fetchUser(), clear(), logout()}`);localStorage 键 `airag_token`;vite 代理 `/api`→8000。M3 页面直接复用 http.ts 与守卫
+- Consumes: 后端 API 契约(计划钉死):`POST /api/auth/register|login`、`GET /api/auth/me`;请求 `{username,password}`,登录响应 `{access_token, token_type}`,用户 `{id,username,role,is_active}`。本任务不依赖后端运行(store 测试已 mock)
+- Produces: `authApi.login/register/me`;`useAuthStore()`(`{token, user, isLoggedIn, login(u,p), fetchUser(), clear(), logout()}`);localStorage 键 `airag_token`;vite 代理 `/api`→`http://localhost:8001`。M3 页面直接复用 http.ts 与守卫
 
-- [ ] **Step 1: 写失败的 store 测试 `tests/unit/auth.store.spec.ts`**
+- [x] **Step 1: 写失败的 store 测试 `src/stores/__tests__/auth.store.spec.ts`**
 
 ```ts
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -1300,7 +1304,7 @@ describe('auth store', () => {
 })
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 ```cmd
 cd /d E:\Projects\AIRag\frontend
@@ -1309,7 +1313,7 @@ pnpm test -- --run
 
 Expected: FAIL(`@/stores/auth` 不存在)。
 
-- [ ] **Step 3: 实现 API 层与 store**
+- [x] **Step 3: 实现 API 层与 store**
 
 `src/api/http.ts`:
 
@@ -1417,15 +1421,15 @@ export const useAuthStore = defineStore('auth', {
 })
 ```
 
-- [ ] **Step 4: 运行确认通过**
+- [x] **Step 4: 运行确认通过**
 
 ```cmd
 pnpm test -- --run
 ```
 
-Expected: auth store 2 条 PASS(连同自带示例)。
+Expected: auth store 2 条 PASS。
 
-- [ ] **Step 5: 实现页面、路由、代理**
+- [x] **Step 5: 实现页面、路由、代理**
 
 `src/router/index.ts`(整体替换):
 
@@ -1607,13 +1611,13 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/api': { target: 'http://localhost:8000', changeOrigin: true },
+      '/api': { target: 'http://localhost:8001', changeOrigin: true },
     },
   },
 })
 ```
 
-- [ ] **Step 6: 构建验证**
+- [x] **Step 6: 构建验证**
 
 ```cmd
 pnpm build
@@ -1622,7 +1626,7 @@ pnpm test -- --run
 
 Expected: build 成功、测试全绿。
 
-- [ ] **Step 7: 提交**
+- [x] **Step 7: 提交**
 
 ```cmd
 cd /d E:\Projects\AIRag
@@ -1640,23 +1644,23 @@ git commit -m "feat: frontend auth loop (axios+pinia store+login page+router gua
 **Interfaces:**
 - Produces: 本地三件套(PG 服务 + 后端 + 前端)可稳定启动;M1 验收清单全过;M2 详细计划文件,路线图表指向它
 
-- [ ] **Step 1: 核对 README 开发启动指南**
+- [x] **Step 1: 核对 README 开发启动指南**
 
 确认 `README.md` 的"开发启动"三步(PG Windows 服务 → `backend\start_dev.bat` → `frontend` 下 `pnpm dev`)与实际操作一致,不一致则修正。
 
-- [ ] **Step 2: 起全栈并验收**
+- [x] **Step 2: 起全栈并验收**
 
-按 README 三步启动:确认 PG 服务运行(服务名 `postgresql-x64-16`,可用 `net start | findstr postgres` 检查)→ 新窗口运行 `backend\start_dev.bat` → 新窗口 `cd frontend && pnpm dev`。
+按 README 三步启动:确认 PG 服务运行(实机服务名 `postgresql-x64-18`,可用 `net start | findstr postgres` 检查)→ 新窗口运行 `backend\start_dev.bat` → 新窗口 `cd frontend && pnpm dev`。
 
 浏览器打开 http://localhost:5173 ,人工核对清单(逐项勾选):
 
-- [ ] 未登录访问 `/` 被守卫重定向到 `/login`
-- [ ] "没有账号?注册一个" → 输入用户名(≥3 位字母数字下划线)+ 密码(≥8 位)→ 注册并登录成功,跳转首页
-- [ ] 退出登录回到登录页;用刚注册的账号重新登录成功
-- [ ] 浏览器 DevTools → Application → Local Storage 有 `airag_token`
-- [ ] http://localhost:8000/docs Swagger 可访问,`/api/auth/me` 用 token 调试返回用户
+- [ ] 未登录访问 `/` 被守卫重定向到 `/login`(无头等价已验证,浏览器项留待用户抽查)
+- [ ] "没有账号?注册一个" → 输入用户名(≥3 位字母数字下划线)+ 密码(≥8 位)→ 注册并登录成功,跳转首页(无头等价已验证:经代理 register→login→me 201/200/200)
+- [ ] 退出登录回到登录页;用刚注册的账号重新登录成功(无头等价已验证,浏览器项留待用户抽查)
+- [ ] 浏览器 DevTools → Application → Local Storage 有 `airag_token`(留待用户抽查)
+- [x] http://localhost:8001/docs Swagger 可访问(无头验证 HTTP 200)
 
-- [ ] **Step 3: 全量回归**
+- [x] **Step 3: 全量回归**
 
 ```cmd
 cd /d E:\Projects\AIRag\backend
@@ -1665,9 +1669,9 @@ cd /d E:\Projects\AIRag\frontend
 pnpm test -- --run && pnpm build
 ```
 
-Expected: 后端 10 passed、前端全绿、构建成功。
+Expected: 后端 11 passed(初稿写 10,Task 4 给 models 增补第 2 个测试后为 11)、前端全绿、构建成功。
 
-- [ ] **Step 4: 提交 M1 完成态**
+- [x] **Step 4: 提交 M1 完成态**
 
 ```cmd
 cd /d E:\Projects\AIRag
@@ -1679,8 +1683,8 @@ git commit -m "chore: m1 complete - full stack acceptance verified"
 
 使用 superpowers:writing-plans 技能,基于 Spec §7/§9-M2 与当前代码,生成 `docs/superpowers/plans/2026-09-14-airag-m2-document-pipeline.md`(上传 API+状态机、Parser 插件 pdf/docx/xlsx、切块、智谱 Embedding Provider、Celery 流水线+worker 服务、集成测试)。生成本文剩余勾选:
 
-- [ ] M2 计划文件已生成并提交
-- [ ] 本文件路线图表中 M2 行的"详细计划"已更新为该文件路径
+- [ ] M2 计划文件已生成并提交(Ruling:详版计划推迟到 M1 合并后的下一会话生成,基于合并后代码质量更高;本文件执行协议第 6 条的接力点即此)
+- [ ] 本文件路线图表中 M2 行的"详细计划"已更新为该文件路径(随 M2 计划生成时一并更新)
 
 - [ ] **Step 6: 推送 GitHub(M1 首次)**
 
@@ -1707,3 +1711,4 @@ Expected: 两个分支推送成功(失败多为网络抖动,重试)。
 2. **占位符扫描**:无 TBD/TODO;所有代码步骤均给出完整代码或精确修改说明。
 3. **类型一致性**:`UserOut{ id, username, role, is_active }` 与前端 `UserResponse` 字段一致;`TokenResponse{ access_token, token_type }` 与 `TokenOut` 一致;`get_db`/`client`/`db_session` 在 conftest 与各任务引用一致;localStorage 键 `airag_token` 前后端约定一致。
 4. **修订(2026-09-14,去 Docker 化)**:应用户决策,开发环境改为原生 Windows(PG 16 原生安装 + pgvector 手工编译,见『环境准备』);Task 2/9/12 重写为原生验证;docker-compose/Dockerfile 推迟到部署里程碑;端口改为 5432。
+5. **修订(2026-09-15,实机对齐)**:后端端口 8000→8001(8000 被金蝶 K/3 占用,见执行协议与台账);PG 实机为 18.6(D 盘,服务 postgresql-x64-18),psql 路径以 D:\Program Files\PostgreSQL\18\bin 为准;新增执行协议第 10 条 DLP 防护;Task 4 chat.py 补 Integer 导入、Task 8 全量计数 11、Task 5 迁移补 import 的执行补记均已回填本文。
