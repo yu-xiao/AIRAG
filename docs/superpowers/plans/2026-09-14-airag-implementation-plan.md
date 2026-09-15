@@ -1654,10 +1654,10 @@ git commit -m "feat: frontend auth loop (axios+pinia store+login page+router gua
 
 浏览器打开 http://localhost:5173 ,人工核对清单(逐项勾选):
 
-- [ ] 未登录访问 `/` 被守卫重定向到 `/login`(无头等价已验证,浏览器项留待用户抽查)
-- [ ] "没有账号?注册一个" → 输入用户名(≥3 位字母数字下划线)+ 密码(≥8 位)→ 注册并登录成功,跳转首页(无头等价已验证:经代理 register→login→me 201/200/200)
-- [ ] 退出登录回到登录页;用刚注册的账号重新登录成功(无头等价已验证,浏览器项留待用户抽查)
-- [ ] 浏览器 DevTools → Application → Local Storage 有 `airag_token`(留待用户抽查)
+- [x] 未登录访问 `/` 被守卫重定向到 `/login`(2026-09-15 用户浏览器确认)
+- [x] "没有账号?注册一个" → 输入用户名(≥3 位字母数字下划线)+ 密码(≥8 位)→ 注册并登录成功,跳转首页(用户浏览器确认;后端日志 register 201 + login 200)
+- [x] 退出登录回到登录页;用刚注册的账号重新登录成功(用户浏览器确认)
+- [x] 浏览器 DevTools → Application → Local Storage 有 `airag_token`(用户确认;注:退出后 token 被清除属设计行为,需登录状态下查看)
 - [x] http://localhost:8001/docs Swagger 可访问(无头验证 HTTP 200)
 
 - [x] **Step 3: 全量回归**
