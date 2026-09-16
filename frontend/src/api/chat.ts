@@ -43,4 +43,12 @@ export const conversationsApi = {
   async remove(conversationId: number): Promise<void> {
     await http.delete(`/chat/conversations/${conversationId}`)
   },
+
+  /** M5:导出会话 markdown(后端拼好含引用附录) */
+  async export(conversationId: number): Promise<Blob> {
+    const { data } = await http.get<Blob>(`/chat/conversations/${conversationId}/export`, {
+      responseType: 'blob',
+    })
+    return data
+  },
 }

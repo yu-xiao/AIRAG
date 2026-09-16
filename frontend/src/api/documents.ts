@@ -12,6 +12,9 @@ export interface DocumentItem {
   error_msg: string | null
   page_count: number | null
   chunk_count: number
+  /** M5 OCR:上传选择(auto/force/off);ocr_used 为实际是否走了 MinerU */
+  ocr_mode: string | null
+  ocr_used: boolean
   created_at: string
 }
 
@@ -39,9 +42,11 @@ export const documentsApi = {
     kbId: number,
     file: File,
     onProgress?: (percent: number) => void,
+    ocr: 'auto' | 'force' | 'off' = 'auto',
   ): Promise<DocumentItem> {
     const form = new FormData()
     form.append('file', file)
+    form.append('ocr', ocr)
     const { data } = await http.post<DocumentItem>(`/kbs/${kbId}/documents`, form, {
       onUploadProgress: (e) => {
         if (onProgress && e.total) {

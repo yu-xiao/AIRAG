@@ -10,6 +10,8 @@ export interface KbItem {
   embed_model: string
   created_at: string
   my_perm?: string | null
+  /** M5:库内文档数(后端聚合) */
+  doc_count: number
 }
 
 /** 对应后端 KBIn */

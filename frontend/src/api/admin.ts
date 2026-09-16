@@ -8,6 +8,29 @@ export interface AdminUser {
   is_active: boolean
 }
 
+/** 镜像后端 AuditLogOut(app/schemas/admin.py) */
+export interface AuditLogItem {
+  id: number
+  username: string
+  action: string
+  target: string
+  detail: string | null
+  ip: string | null
+  created_at: string
+}
+
+export interface AuditLogQuery {
+  username?: string
+  action?: string
+  page?: number
+  page_size?: number
+}
+
+export interface AuditLogResponse {
+  total: number
+  items: AuditLogItem[]
+}
+
 export const adminApi = {
   async listUsers(): Promise<AdminUser[]> {
     const { data } = await http.get<AdminUser[]>('/admin/users')
@@ -19,6 +42,11 @@ export const adminApi = {
     payload: { role?: AdminUser['role']; is_active?: boolean },
   ): Promise<AdminUser> {
     const { data } = await http.patch<AdminUser>(`/admin/users/${id}`, payload)
+    return data
+  },
+
+  async listAuditLogs(params: AuditLogQuery): Promise<AuditLogResponse> {
+    const { data } = await http.get<AuditLogResponse>('/admin/audit-logs', { params })
     return data
   },
 }

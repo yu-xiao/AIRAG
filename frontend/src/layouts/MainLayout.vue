@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+
+// kb 子路由(/kb/3/docs)时菜单仍高亮"知识库"
+const activeIndex = computed(() => (route.path.startsWith('/kb') ? '/kb' : route.path))
 
 onMounted(() => {
   // 头部显示当前用户名:M1 的 fetchUser 死代码至此激活。
@@ -24,11 +27,12 @@ function onLogout() {
 <template>
   <el-container style="height: 100vh">
     <el-aside width="200px">
-      <el-menu :default-active="route.path" router>
+      <el-menu :default-active="activeIndex" router>
         <el-menu-item index="/">首页</el-menu-item>
         <el-menu-item index="/kb">知识库</el-menu-item>
         <el-menu-item index="/chat">对话</el-menu-item>
         <el-menu-item v-if="auth.user?.role === 'admin'" index="/admin/users">用户管理</el-menu-item>
+        <el-menu-item v-if="auth.user?.role === 'admin'" index="/admin/audit-logs">审计日志</el-menu-item>
       </el-menu>
     </el-aside>
     <el-container>
