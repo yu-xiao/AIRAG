@@ -45,8 +45,7 @@ def maybe_ocr(
         use_ocr = ext in IMAGE_EXTS or is_thin_text(primary)
     if not use_ocr:
         return primary
+    # OCR 成功但无文字(纯图形图片等)也保持 ocr_used=True:由流水线按
+    # 确定性失败直落 failed(NoContentError),不静默回退、不重试
     md_text = parse_via_mineru(path, path.name)
-    ocr_result = markdown_to_blocks(md_text)
-    if not ocr_result.blocks:
-        return primary
-    return ocr_result
+    return markdown_to_blocks(md_text)

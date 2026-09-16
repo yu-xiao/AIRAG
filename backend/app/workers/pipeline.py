@@ -20,6 +20,10 @@ from app.workers.celery_app import celery_app
 EMBED_BATCH = 16
 
 
+class NoContentError(RuntimeError):
+    """确定性失败(解析/OCR 后无内容):重试不会改变结果,直接落 failed。"""
+
+
 def _run_async(coro):
     # 唯一对简报的偏离(增补 6 最小防御):eager 模式下任务在 API 端点的
     # 事件循环线程内同步执行,asyncio.run 会拒绝("cannot be called from a
@@ -76,6 +80,10 @@ async def _run(document_id: int, db_url: str) -> None:
             await session.commit()
             chunks = split_blocks(result.blocks)
             if not chunks:
+                if doc.ocr_used:
+                    raise NoContentError(
+                        "ocr completed but no text content was recognized"
+                    )
                 raise RuntimeError("no content extracted")
 
             doc.status = "embedding"
@@ -132,6 +140,10 @@ async def _run(document_id: int, db_url: str) -> None:
 def process_document(self, document_id: int):
     try:
         _run_async(_run(document_id, settings.DATABASE_URL))
+    except NoContentError as exc:
+        # OCR/解析成功但无文字是确定性结果(如图片中没有文本),重试只会
+        # 重复调用 MinerU 白耗云额度——跳过重试直接失败
+        _run_async(_mark_failed(document_id, str(exc)))
     except Exception as exc:
         retries = self.request.retries
         if retries < 3:

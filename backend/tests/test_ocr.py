@@ -91,7 +91,8 @@ def test_maybe_ocr_auto_thick_pdf_and_docx_skip(tmp_path, monkeypatch):
     assert calls == []
 
 
-def test_maybe_ocr_mineru_empty_falls_back(tmp_path, monkeypatch):
+def test_maybe_ocr_mineru_empty_keeps_ocr_semantics(tmp_path, monkeypatch):
+    """OCR 成功但无文字:不回退 primary(保持 ocr_used=True → 流水线不重试直落 failed)。"""
     import app.services.parsing.ocr as ocr_mod
 
     monkeypatch.setattr(ocr_mod, "parse_via_mineru", lambda p, f: "")
@@ -100,7 +101,7 @@ def test_maybe_ocr_mineru_empty_falls_back(tmp_path, monkeypatch):
     pdf.write_bytes(b"x")
     thin = ParseResult(blocks=[ParsedBlock(content="原")], page_count=1)
     out = maybe_ocr(pdf, ".pdf", "auto", thin)
-    assert out.blocks[0].content == "原"
+    assert out.blocks == []  # 空 OCR 结果保留,不回退到 thin primary
 
 
 def _zip_with_markdown(markdown: str) -> bytes:
@@ -240,3 +241,41 @@ async def test_upload_jpg_and_ocr_mode(client, auth_headers):
         headers=auth_headers,
     )
     assert bad.status_code == 422
+
+
+async def test_ocr_empty_result_fails_without_retry(
+    client, auth_headers, monkeypatch, db_session
+):
+    """OCR 成功但无文字(如纯图形图片)是确定性失败:一次调用即落 failed,不重试。"""
+    import app.services.parsing.ocr as ocr_mod
+
+    _enable_mineru(monkeypatch)
+    calls = []
+
+    def fake_mineru(path, filename):
+        calls.append(filename)
+        return ""
+
+    monkeypatch.setattr(ocr_mod, "parse_via_mineru", fake_mineru)
+
+    kb = await client.post("/api/kbs", json={"name": "空结果库"}, headers=auth_headers)
+    kb_id = kb.json()["id"]
+    png = io.BytesIO(b"\x89PNG\r\n\x1a\nfaked")
+    up = await client.post(
+        f"/api/kbs/{kb_id}/documents",
+        files={"file": ("纯图形.png", png, "image/png")},
+        data={"ocr": "force"},
+        headers=auth_headers,
+    )
+    assert up.status_code == 201
+    doc_id = up.json()["id"]
+
+    # worker 侧状态断言用 get+refresh 绕开 API 会话的 identity map 缓存
+    # (client 夹具跨请求共享 db_session,与生产每请求新建会话不同)
+    from app.models import Document
+
+    doc = await db_session.get(Document, doc_id)
+    await db_session.refresh(doc)
+    assert doc.status == "failed"
+    assert "no text" in doc.error_msg
+    assert len(calls) == 1  # 只调一次 MinerU,不烧重试额度

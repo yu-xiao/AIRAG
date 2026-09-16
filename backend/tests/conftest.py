@@ -7,6 +7,9 @@ os.environ["DATABASE_URL"] = (
     "postgresql+asyncpg://airag:airag_dev_password@localhost:5432/airag_test"
 )
 os.environ["EMBED_PROVIDER"] = "fake"
+# 真实 MINERU_API_TOKEN 不得泄漏进测试(.env 里有真 token 时,稀薄文本 PDF 会
+# 触发真实云调用);需要 OCR 行为的用例用 monkeypatch 打开。
+os.environ["MINERU_API_TOKEN"] = ""
 # M5:agentic 节点与 checkpointer 测试默认关闭(存量用例的 FakeListChatModel
 # 只为 generate 准备了一个响应);相关用例内 monkeypatch 打开。
 os.environ["AGENTIC_REWRITE_ENABLED"] = "false"
