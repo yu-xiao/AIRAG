@@ -34,7 +34,7 @@
 - Produces: `decompose_node(state: dict, llm) -> dict`,返回 `{"sub_queries": list[str], "hopped": True}`;`ChatState` 新键 `sub_queries: list[str]`、`hopped: bool`;`settings.MULTI_HOP_ENABLED: bool`(默认 True)、`settings.MULTI_HOP_MAX_SUBQ: int`(默认 3)。Task 2/3 消费这些名字。
 - Consumes: 现有 `_extract_json(text) -> str`(nodes.py,剥离 ```json 围栏)、`settings`(config.py 单例)。
 
-- [ ] **Step 1: 写失败测试(追加到 test_chat_graph.py 末尾)**
+- [x] **Step 1: 写失败测试(追加到 test_chat_graph.py 末尾)**
 
 ```python
 async def test_decompose_parses_truncates_and_dedupes():
@@ -92,12 +92,12 @@ async def test_decompose_llm_exception_falls_back():
 
 注:`_LLMScript`/`Boom` 已在该文件定义(`test_grade_json_parsing_paths`/`test_rewrite_llm_failure_falls_back` 同款);若 Boom 在该测试之前未定义,把类体 `async def ainvoke(self, msgs, config=None): raise RuntimeError("llm down")` 内联即可。
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd /d E:\Projects\AIRag\backend && .venv\Scripts\python.exe -m pytest tests/test_chat_graph.py -q`
 Expected: 新增 4 个 FAIL(`cannot import name 'decompose_node'`),存量 rewrite 断言 FAIL。
 
-- [ ] **Step 3: 最小实现**
+- [x] **Step 3: 最小实现**
 
 `config.py` 在 `CHECKPOINTER_ENABLED` 块后加:
 
@@ -160,12 +160,12 @@ MULTI_HOP_ENABLED=true
 MULTI_HOP_MAX_SUBQ=3
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `.venv\Scripts\python.exe -m pytest tests/test_chat_graph.py -q`
 Expected: 全 PASS(存量 15 + 新 4 = 19)。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 cd /d E:\Projects\AIRag
@@ -187,7 +187,7 @@ git commit -m "feat: m6 decompose node, state fields and config"
 - Consumes: Task 1 的 `sub_queries` 状态键;`settings.RETRIEVAL_TOP_K`(现有,int,默认 8)。
 - Produces: `retrieve_node(state)` 在 `sub_queries` 存在时逐查询检索并合并——Task 3 端到端依赖此行为。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 async def test_retrieve_multi_query_merges_round_robin(monkeypatch):
@@ -232,12 +232,12 @@ async def test_retrieve_multi_query_caps_at_2x_topk(monkeypatch):
     assert len(out["hits"]) == 4
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `.venv\Scripts\python.exe -m pytest tests/test_chat_graph.py -q -k multi_query`
 Expected: 2 FAIL(现 retrieve_node 忽略 sub_queries,只搜一个查询)。
 
-- [ ] **Step 3: 最小实现(retrieve_node 整体替换)**
+- [x] **Step 3: 最小实现(retrieve_node 整体替换)**
 
 ```python
 async def retrieve_node(state: dict) -> dict:
@@ -266,12 +266,12 @@ async def retrieve_node(state: dict) -> dict:
     return {"hits": [h.__dict__ for h in merged]}
 ```
 
-- [ ] **Step 4: 跑测试确认通过(含全文件回归)**
+- [x] **Step 4: 跑测试确认通过(含全文件回归)**
 
 Run: `.venv\Scripts\python.exe -m pytest tests/test_chat_graph.py tests/test_ask.py -q`
 Expected: 全 PASS(单查询路径行为不变:现有 test_retrieve_uses_search_query / test_retrieve_falls_back_to_question 仍绿)。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add backend/app/services/chat_graph/nodes.py backend/tests/test_chat_graph.py
@@ -291,7 +291,7 @@ git commit -m "feat: m6 retrieve node merges multi sub-query hits"
 - Consumes: Task 1 `decompose_node`/`settings.MULTI_HOP_ENABLED`、Task 2 多查询 retrieve。
 - Produces: `route_after_rerank(state: dict) -> str`("generate"|"grade")、改版 `route_after_grade(state: dict) -> str`("transform"|"decompose"|"generate")。SSE/ask.py 零改动(decompose 的 LLM 调用不带 answer tag)。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 async def test_route_after_grade_multihop_branches(monkeypatch):
@@ -375,12 +375,12 @@ async def test_multihop_fallback_end_to_end(monkeypatch):
     assert "最终答案" in final["answer"]
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `.venv\Scripts\python.exe -m pytest tests/test_chat_graph.py -q -k "route_after or multihop"`
 Expected: 新增用例 FAIL(route_after_grade 无 decompose 分支 / route_after_rerank 未定义 / 拓扑缺边)。
 
-- [ ] **Step 3: 最小实现**
+- [x] **Step 3: 最小实现**
 
 conftest.py 在 `os.environ["CHECKPOINTER_ENABLED"] = "false"` 行后加(必须保留"先 env 后 import app"次序):
 
@@ -424,12 +424,12 @@ def route_after_grade(state: dict) -> str:
     g.add_edge("decompose", "retrieve")
 ```
 
-- [ ] **Step 4: 跑测试确认通过 + 全量回归**
+- [x] **Step 4: 跑测试确认通过 + 全量回归**
 
 Run: `.venv\Scripts\python.exe -m pytest -q`
 Expected: **115 passed**(104 基线 + T1 4 + T2 2 + T3 5;conftest 隔离使存量用例不受零命中新路由影响——`test_route_after_grade_branches` 的 `retries:1→generate` 断言在 MULTI_HOP 关闭下仍成立)。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add backend/app/services/chat_graph/graph.py backend/tests/conftest.py backend/tests/test_chat_graph.py
@@ -448,7 +448,7 @@ git commit -m "feat: m6 wire decompose into graph with three-tier routing"
 - Consumes: `nodes._extract_json(text) -> str`(Task 1 已确认存在)、任意 `llm`(实现 `async ainvoke(messages, config=None)` 返回带 `.content` 的对象)。
 - Produces: `async faithfulness_score(llm, question: str, answer: str, contexts: list[str]) -> dict`、`async relevancy_score(llm, question: str, answer: str) -> dict`,均返回 `{"score": float | None, "reasons": str}`(score 已 clamp 到 [0,1];两次解析失败 → score=None)。Task 5 消费。
 
-- [ ] **Step 1: 写失败测试(新文件 tests/test_eval_judge.py)**
+- [x] **Step 1: 写失败测试(新文件 tests/test_eval_judge.py)**
 
 ```python
 class _Resp:
@@ -505,12 +505,12 @@ async def test_judge_prompt_shape():
     assert "参考资料" not in rl.calls[0][1][1]  # 切题度只看问题与答案
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `.venv\Scripts\python.exe -m pytest tests/test_eval_judge.py -q`
 Expected: FAIL(`ModuleNotFoundError: app.services.eval_judge`)。
 
-- [ ] **Step 3: 最小实现(app/services/eval_judge.py 全文)**
+- [x] **Step 3: 最小实现(app/services/eval_judge.py 全文)**
 
 ```python
 """M6 生成质量 LLM-judge:faithfulness(忠实度)与 answer relevancy(切题度)。
@@ -562,12 +562,12 @@ async def relevancy_score(llm, question: str, answer: str) -> dict:
     return await _judge(llm, RELEVANCY_SYSTEM, user)
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `.venv\Scripts\python.exe -m pytest tests/test_eval_judge.py -q`
 Expected: 3 PASS。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add backend/app/services/eval_judge.py backend/tests/test_eval_judge.py
@@ -586,7 +586,7 @@ git commit -m "feat: m6 llm-judge module for faithfulness and relevancy"
 - Consumes: Task 4 `faithfulness_score`/`relevancy_score`;`scripts.eval_metrics.load_eval_set(path) -> dict`;`build_graph(llm=...)`/`make_chat_llm()`(graph.py 现有);`settings.ZHIPU_API_KEY`/`settings.RETRIEVAL_TOP_K`。
 - Produces: `async run(kb_id: int, use_rerank: bool) -> list[dict]`(元素含 `question/faithfulness/relevancy/citations`,前两者为 judge dict);`main()` 支持 `--kb/--rerank/--json`。Task 8 验收以子进程方式调用本 CLI。
 
-- [ ] **Step 1: 写失败测试(新文件 tests/test_eval_generation.py)**
+- [x] **Step 1: 写失败测试(新文件 tests/test_eval_generation.py)**
 
 ```python
 import json
@@ -658,12 +658,12 @@ async def test_eval_generation_requires_key(monkeypatch):
     assert raised
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `.venv\Scripts\python.exe -m pytest tests/test_eval_generation.py -q`
 Expected: FAIL(模块不存在)。
 
-- [ ] **Step 3: 最小实现(scripts/eval_generation.py 全文)**
+- [x] **Step 3: 最小实现(scripts/eval_generation.py 全文)**
 
 ```python
 """生成质量评估 CLI(LLM-judge)。
@@ -766,12 +766,12 @@ if __name__ == "__main__":
     main()
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `.venv\Scripts\python.exe -m pytest tests/test_eval_generation.py -q`
 Expected: 2 PASS。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add backend/scripts/eval_generation.py backend/tests/test_eval_generation.py
@@ -793,7 +793,7 @@ git commit -m "feat: m6 generation-quality eval cli with llm-judge"
 - Produces: `async purge_expired(db: AsyncSession) -> int`(禁用返回 0;删除后**在函数内**落一条 `audit_purge` 摘要,不自行 commit);端点 `POST /api/admin/audit-logs/purge` → `{"deleted": int, "retention_days": int}`(admin-only)。Task 7 的 Celery 任务复用 purge_expired。
 - Consumes: 现有 `audit(db, username, action, target, detail)`;`AuditLog.created_at`(timestamptz, server_default=now())。
 
-- [ ] **Step 1: 写失败测试(新文件 tests/test_audit_retention.py)**
+- [x] **Step 1: 写失败测试(新文件 tests/test_audit_retention.py)**
 
 ```python
 from sqlalchemy import select, text
@@ -872,12 +872,12 @@ async def test_purge_endpoint_admin_only(client, db_session, auth_headers, monke
     assert denied.status_code == 403
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `.venv\Scripts\python.exe -m pytest tests/test_audit_retention.py -q`
 Expected: FAIL(`cannot import name 'purge_expired'`;端点 404)。
 
-- [ ] **Step 3: 最小实现**
+- [x] **Step 3: 最小实现**
 
 `config.py` 加(OCR 块附近):
 
@@ -961,12 +961,12 @@ async def purge_audit_logs(
 AUDIT_RETENTION_DAYS=180
 ```
 
-- [ ] **Step 4: 跑测试确认通过 + 存量回归**
+- [x] **Step 4: 跑测试确认通过 + 存量回归**
 
 Run: `.venv\Scripts\python.exe -m pytest tests/test_audit_retention.py tests/test_audit.py tests/test_admin_users.py -q`
 Expected: 全 PASS。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add backend/app/core/config.py backend/app/services/audit.py backend/app/api/admin.py backend/tests/test_audit_retention.py .env.example
@@ -988,7 +988,7 @@ git commit -m "feat: m6 audit retention purge with admin endpoint"
 - Consumes: Task 6 `purge_expired`;pipeline.py 现有 `_run_async(coro)` 与 `_engine(db_url)`;`celery_app`(现有实例)。
 - Produces: Celery 任务 `purge_expired_audit_logs`(任务名 `app.workers.maintenance.purge_expired_audit_logs`,返回删除行数);beat 条目键 `purge-expired-audit-logs`(每日 03:00,Asia/Shanghai)。
 
-- [ ] **Step 1: 写失败测试(新文件 tests/test_maintenance.py)**
+- [x] **Step 1: 写失败测试(新文件 tests/test_maintenance.py)**
 
 ```python
 from sqlalchemy import text
@@ -1021,12 +1021,12 @@ async def test_purge_task_deletes_expired_rows(db_session):
     assert "audit_purge" in [r[0] for r in rows]
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `.venv\Scripts\python.exe -m pytest tests/test_maintenance.py -q`
 Expected: FAIL(beat_schedule 空 / maintenance 模块不存在)。
 
-- [ ] **Step 3: 最小实现**
+- [x] **Step 3: 最小实现**
 
 `app/workers/maintenance.py` 全文:
 
@@ -1095,12 +1095,12 @@ README "开发启动" 的 worker 段(Redis 说明行之后)加一行:
 Worker 带 `-B` 内嵌 beat(M6 起):每日 03:00 自动清理超期审计日志(`AUDIT_RETENTION_DAYS`,默认 180 天,0=禁用)。
 ```
 
-- [ ] **Step 4: 跑测试确认通过 + 全量回归**
+- [x] **Step 4: 跑测试确认通过 + 全量回归**
 
 Run: `.venv\Scripts\python.exe -m pytest -q`
 Expected: **125 passed**(104 基线 + T1 4 + T2 2 + T3 5 + T4 3 + T5 2 + T6 3 + T7 2;若个别任务实增测试数不同,以全绿为准并回填此处)。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add backend/app/workers/maintenance.py backend/app/workers/celery_app.py backend/start_worker.bat README.md backend/tests/test_maintenance.py
@@ -1120,7 +1120,7 @@ git commit -m "feat: m6 celery beat audit purge task and worker -B"
 - Consumes: 真后端 `http://127.0.0.1:8001/api`(uvicorn 启动);Task 5 CLI 子进程;Task 6 端点;`m5_acceptance.py` 的既有 helper 模式(注册/SQL 晋升/轮询,复制不 import)。
 - Produces: 终端输出 `M6 ACCEPTANCE: N/M PASS` 与失败明细。
 
-- [ ] **Step 1: 写验收脚本(步骤级清单,断言完整;沿用 M5 模式,httpx 调真后端,asyncpg 直连开发库执行 SQL)**
+- [x] **Step 1: 写验收脚本(步骤级清单,断言完整;沿用 M5 模式,httpx 调真后端,asyncpg 直连开发库执行 SQL)**
 
 脚本骨架与 helper(从 m5_acceptance.py 复制改写):
 
@@ -1160,19 +1160,19 @@ def check(name, ok, detail=""):
 5. **审计清理**:asyncpg 直插 2 条 `created_at = now() - interval '200 days'` 的 audit_logs → `POST /admin/audit-logs/purge`(m6_user)→ `deleted >= 2` 且 `retention_days == 180`;`GET /admin/audit-logs?action=audit_purge` total≥1;`m6_owner` 调 purge 403。
 6. **汇总**:打印 `M6 ACCEPTANCE: {pass}/{total} PASS` 与 FAIL 明细;非零 FAIL 时 exit 1。
 
-- [ ] **Step 2: 本地起三件套跑验收**
+- [x] **Step 2: 本地起三件套跑验收**
 
 Run(三个窗口,或按 M5 惯例):后端 `cd backend && .venv\Scripts\python.exe -m uvicorn app.main:app --port 8001`、worker `start_worker.bat`、PG/Redis 已有服务;然后 `cd backend && .venv\Scripts\python.exe scripts/m6_acceptance.py`
 Expected: 全 PASS(无智谱 key 时第 3/4 项 SKIP)。跑前 `GET /health` 探活(uvicorn 热重载窗口偶发退出,M5 已知)。
 
-- [ ] **Step 3: 全量回归**
+- [x] **Step 3: 全量回归**
 
 Run: `cd backend && .venv\Scripts\python.exe -m pytest -q`;`cd frontend && pnpm build && pnpm test && pnpm oxlint`
 Expected: 后端全绿(≥120 passed);前端 build 绿 + 6 passed + 0 warnings 0 errors(前端零改动,防意外)。
 
-- [ ] **Step 4: 浏览器走查留给用户**(M5 同模式):多跳复合问题对话、审计页无回归;清进程(后端/worker)。
+- [x] **Step 4: 浏览器走查留给用户**(M5 同模式):多跳复合问题对话、审计页无回归;清进程(后端/worker)。
 
-- [ ] **Step 5: 收尾提交与交接**
+- [x] **Step 5: 收尾提交与交接**
 
 ```bash
 git add backend/scripts/m6_acceptance.py backend/eval_sets
@@ -1191,3 +1191,21 @@ git commit --allow-empty -m "chore: m6 complete - acceptance verified"
 3. **类型一致性**:`decompose_node(state, llm)->{"sub_queries","hopped"}` 与 Task 3 接线、e2e 断言一致;`route_after_grade/route_after_rerank` 定义与拓扑断言一致;`purge_expired(db)->int` 在 Task 6 端点与 Task 7 任务两处调用一致且均由调用方 commit;`faithfulness_score(llm,q,a,contexts)`/`relevancy_score(llm,q,a)` 与 Task 5 run() 调用一致;eval_generation `run(kb_id, use_rerank)` 与测试/验收一致;任务名 `app.workers.maintenance.purge_expired_audit_logs` 与 beat/测试一致。
 4. **计数一致性**(按测试函数):104 基线 → T1 +4(改 1)=108 → T2 +2=110 → T3 +5=115 → T4 +3=118 → T5 +2=120 → T6 +3=123 → T7 +2=125;test_chat_graph.py 存量 15 个。
 5. **风险预置**:存量 `test_rewrite_disabled_resets_state` 因 reset 加 hopped 需同步改断言(T1 显式列出);conftest 隔离 MULTI_HOP 必须先于 Task 3 端到端(T3 Step 3 置顶强调);`_LLMScript`/`Boom` 复用现有测试类(T1 注明内联兜底);start_worker.bat 为 GBK 编码只改 ASCII 命令行;验收第 3 项为真 LLM 断言,按 M5 惯例一次重试;`python-docx` 已随 M2 解析器在 venv 中(验收造 docx 用)。
+
+---
+
+## M6 执行记录(2026-09-16,验收后固化)
+
+### 结果
+- 计数:后端 **127 passed**(104→127;计划预算 125,终审 fix wave 补 2 个多跳状态回归测试);前端 build 绿 + vitest **6 passed** + **oxlint 0/0**(零改动)。
+- 无头验收 **12/12 PASS / 0 SKIP**(真智谱):零命中多跳路径 done+拒答无 error 帧、复合问题真 LLM 双事实("五十"+"三十")、eval_generation 3 题忠实度/切题度非 None 且均值≥0.8、审计清理(过期删/摘要留/403)。验收数据:KB"M6验收库"(id 8)+ eval_sets/8.json。
+- 全部 8 任务经独立实现者+独立审查者两段式把关;终审(whole-branch)独立复跑 125P 并实证确认一处 Critical 后修复。
+
+### 偏差与修正(实现者/审查者对计划的增量,均已 ledger 裁决)
+1. **decompose 过滤**改 `isinstance(q, str)`(计划片段 `str(q).strip()` 会把 42 转 "42" 保留,与计划自身测试"非字符串被滤"矛盾)。
+2. **grade 条件边 path_map 补 `"decompose"` 键**(计划漏写;LangGraph 缺键运行时 KeyError)。
+3. 审计禁用测试去掉多余一层 `await`(对 str await 必 TypeError,计划笔误)。
+4. maintenance 测试改 `.fetchall()` 物化(计划对同一 CursorResult 迭代两次,Result 一次性)。
+5. **Windows beat 拆分**(重大):celery 5.6.3 在 Windows 硬拒 `-B`("run celery beat as a separate service"),计划假设 -B 可行不成立——start_worker.bat 去掉 -B,新增 start_beat.bat 独立 beat,README/.env.example 同步;两 bat 均实测可启动。
+6. **sub_queries checkpointer 跨轮残留**(终审 Critical,计划 Task 1 只重置 hopped 违反 spec §1.1"同步重置新增字段"):rewrite reset 字典补 `sub_queries=[]` 与 `proposed_query=""`(后者顺带清 M5 遗留残留),新增单测+两轮 checkpointer 回归测试(先红后绿复现)。
+7. 运行事实:裸 uvicorn(非 --reload)在 Windows 走 ProactorEventLoop 会打断 psycopg checkpointer→ask 500;开发启动走 start_dev.bat(--reload)不受影响——既有特性非 M6 回归,留 M7 文档化。
