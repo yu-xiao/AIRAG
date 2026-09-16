@@ -106,7 +106,7 @@ async def test_rewrite_disabled_resets_state():
         {"question": "它是什么", "history": [{"role": "user", "content": "x"}]},
         llm=FakeListChatModel(responses=["不该被调用"]),
     )
-    assert out == {"search_query": "它是什么", "retries": 0, "grade": ""}
+    assert out == {"search_query": "它是什么", "retries": 0, "grade": "", "hopped": False}
 
 
 async def test_rewrite_resolves_coreference():
@@ -273,3 +273,54 @@ async def test_crag_retries_once_end_to_end(monkeypatch):
         assert final["retries"] == 1
     finally:
         settings.AGENTIC_CRAG_ENABLED = False
+
+
+async def test_decompose_parses_truncates_and_dedupes():
+    from app.services.chat_graph.nodes import decompose_node
+
+    out = await decompose_node(
+        {"question": "复合", "search_query": "A 和 B", "proposed_query": "改写"},
+        llm=_LLMScript(['["子问题一", "子问题二", "子问题三", "子问题四"]']),
+    )
+    assert out["sub_queries"] == ["子问题一", "子问题二", "子问题三"]  # 截断到 MAX_SUBQ=3
+    assert out["hopped"] is True
+
+
+async def test_decompose_filters_and_fenced_json():
+    from app.services.chat_graph.nodes import decompose_node
+
+    out = await decompose_node(
+        {"question": "复合", "search_query": "改写后查询"},
+        llm=_LLMScript(['```json\n["甲", 42, " ", "甲", "乙"]\n```']),
+    )
+    assert out["sub_queries"] == ["甲", "乙"]  # 非字符串/空白被滤,重复去重,围栏剥离
+
+
+async def test_decompose_bad_json_falls_back():
+    from app.services.chat_graph.nodes import decompose_node
+
+    # 解析失败:退化为 [proposed_query or search_query or question]
+    out = await decompose_node(
+        {"question": "原问题", "search_query": "改写后", "proposed_query": "提议词"},
+        llm=_LLMScript(["不是 json"]),
+    )
+    assert out["sub_queries"] == ["提议词"]
+    assert out["hopped"] is True
+    out2 = await decompose_node(
+        {"question": "原问题"}, llm=_LLMScript(["[]"])  # 空数组也走兜底
+    )
+    assert out2["sub_queries"] == ["原问题"]
+
+
+async def test_decompose_llm_exception_falls_back():
+    from app.services.chat_graph.nodes import decompose_node
+
+    class Boom:
+        async def ainvoke(self, msgs, config=None):
+            raise RuntimeError("llm down")
+
+    out = await decompose_node(
+        {"question": "原问题", "search_query": "改写后"},
+        llm=Boom(),
+    )
+    assert out == {"sub_queries": ["改写后"], "hopped": True}

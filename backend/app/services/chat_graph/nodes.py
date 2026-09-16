@@ -94,7 +94,7 @@ def _extract_json(text: str) -> str:
 
 async def rewrite_node(state: dict, llm) -> dict:
     question = state["question"]
-    reset = {"search_query": question, "retries": 0, "grade": ""}
+    reset = {"search_query": question, "retries": 0, "grade": "", "hopped": False}
     if not settings.AGENTIC_REWRITE_ENABLED:
         return reset
     history = state.get("history") or []
@@ -149,3 +149,31 @@ async def transform_node(state: dict) -> dict:
         "search_query": state.get("proposed_query") or state["question"],
         "retries": state.get("retries", 0) + 1,
     }
+
+
+DECOMPOSE_SYSTEM = (
+    "你是问题分解器。把复合问题拆成2~3个各自独立、无指代、可直接用于检索的子问题;"
+    '只输出 JSON 字符串数组,如 ["子问题1","子问题2"]。'
+    "问题本身简单时,输出只含该问题的单元素数组。"
+)
+
+
+async def decompose_node(state: dict, llm) -> dict:
+    base = state.get("search_query") or state["question"]
+    user = f"问题:{base}"
+    hint = state.get("proposed_query")
+    if hint:
+        user += f"\n(检索改写提示:{hint})"
+    try:
+        resp = await llm.ainvoke([("system", DECOMPOSE_SYSTEM), ("user", user)])
+        parsed = json.loads(_extract_json(resp.content))
+        subs = (
+            [str(q).strip() for q in parsed if isinstance(q, str) and str(q).strip()]
+            if isinstance(parsed, list) else []
+        )
+        subs = list(dict.fromkeys(subs))[: settings.MULTI_HOP_MAX_SUBQ]
+        if subs:
+            return {"sub_queries": subs, "hopped": True}
+    except Exception:
+        logger.exception("decompose failed; fallback to single query")
+    return {"sub_queries": [hint or base], "hopped": True}

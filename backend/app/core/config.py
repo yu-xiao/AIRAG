@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     OCR_THIN_CHARS_PER_PAGE: int = 50
     MINERU_API_TOKEN: str = ""
     MINERU_BASE_URL: str = "https://mineru.net"
+    # M6 多跳兜底:检索不足且重检仍不足(或零命中)时拆子问题再检索
+    MULTI_HOP_ENABLED: bool = True
+    MULTI_HOP_MAX_SUBQ: int = 3
     RETRIEVAL_TOP_K: int = 8
     ZHIPU_API_KEY: str = ""
     ZHIPU_BASE_URL: str = "https://open.bigmodel.cn/api/paas/v4"
