@@ -106,7 +106,35 @@ async def test_rewrite_disabled_resets_state():
         {"question": "它是什么", "history": [{"role": "user", "content": "x"}]},
         llm=FakeListChatModel(responses=["不该被调用"]),
     )
-    assert out == {"search_query": "它是什么", "retries": 0, "grade": "", "hopped": False}
+    assert out == {
+        "search_query": "它是什么",
+        "retries": 0,
+        "grade": "",
+        "hopped": False,
+        "sub_queries": [],  # M6:每轮清空,防 checkpointer 跨轮残留
+        "proposed_query": "",
+    }
+
+
+async def test_rewrite_clears_stale_multihop_state():
+    """上一轮经 checkpointer 残留的多跳字段必须在本轮 rewrite 被清空。"""
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+
+    from app.services.chat_graph.nodes import rewrite_node
+
+    out = await rewrite_node(
+        {
+            "question": "新问题",
+            "sub_queries": ["旧子问题"],
+            "proposed_query": "旧提示",
+            "hopped": True,
+        },
+        llm=FakeListChatModel(responses=["不该被调用"]),  # 开关关闭,llm 不应被调用
+    )
+    assert out["sub_queries"] == []
+    assert out["proposed_query"] == ""
+    assert out["hopped"] is False
+    assert out["search_query"] == "新问题"
 
 
 async def test_rewrite_resolves_coreference():
@@ -447,3 +475,44 @@ async def test_multihop_fallback_end_to_end(monkeypatch):
     assert final["hopped"] is True
     assert final["sub_queries"] == ["子问题A", "子问题B"]
     assert "最终答案" in final["answer"]
+
+
+async def test_multihop_state_does_not_leak_across_turns(monkeypatch):
+    """checkpointer 回归:同 thread 第二问必须检索新问题本身,不得复用第一轮的子查询。"""
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    from app.core.config import settings
+    from app.services.chat_graph.graph import build_graph
+    from app.services.retrieval.searcher import SearchHit
+
+    calls = []
+
+    async def fake_search(db, kb_ids, query, top_k=20):
+        calls.append(query)
+        return [SearchHit(len(calls), 1, 1, "a.pdf", 1, f"内容-{query}", 0.5, "vector")]
+
+    import app.services.chat_graph.nodes as nodes_mod
+
+    monkeypatch.setattr(nodes_mod, "hybrid_search", fake_search)
+    monkeypatch.setattr(settings, "AGENTIC_CRAG_ENABLED", True)
+    monkeypatch.setattr(settings, "MULTI_HOP_ENABLED", True)
+
+    llm = FakeListChatModel(responses=[
+        '{"verdict": "insufficient", "query": "重检词"}',   # 第 1 问 grade(首次)
+        '{"verdict": "insufficient", "query": "再改写"}',   # 第 1 问 grade(重检后)
+        '["子问题A", "子问题B"]',                            # 第 1 问 decompose
+        "第一轮答案[1]",                                     # 第 1 问 generate
+        '{"verdict": "sufficient"}',                        # 第 2 问 grade
+        "第二轮答案[1]",                                     # 第 2 问 generate
+    ])
+    g = build_graph(llm=llm, checkpointer=InMemorySaver())
+    cfg = {"configurable": {"thread_id": "t-multihop-leak"}}
+
+    await g.ainvoke({"question": "第一问复合题", "kb_ids": [1]}, config=cfg)
+    assert "子问题A" in calls and "子问题B" in calls  # 第 1 问确实走了多跳
+
+    calls.clear()  # 只记录第 2 问的检索
+    final2 = await g.ainvoke({"question": "第二问新问题", "kb_ids": [1]}, config=cfg)
+    assert calls == ["第二问新问题"]  # 新问题本身被检索;旧子查询未泄漏
+    assert "第二轮答案" in final2["answer"]

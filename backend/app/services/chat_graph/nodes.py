@@ -113,7 +113,15 @@ def _extract_json(text: str) -> str:
 
 async def rewrite_node(state: dict, llm) -> dict:
     question = state["question"]
-    reset = {"search_query": question, "retries": 0, "grade": "", "hopped": False}
+    # 每轮起点整体复位(checkpointer 状态按 thread 持久,不清则子查询跨轮泄漏)
+    reset = {
+        "search_query": question,
+        "retries": 0,
+        "grade": "",
+        "hopped": False,
+        "sub_queries": [],
+        "proposed_query": "",
+    }
     if not settings.AGENTIC_REWRITE_ENABLED:
         return reset
     history = state.get("history") or []
