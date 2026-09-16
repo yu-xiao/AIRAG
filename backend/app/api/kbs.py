@@ -1,12 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user
 from app.core.perms import get_kb_perm, has_perm
 from app.db.session import get_db
-from app.models import KnowledgeBase, KbPermission, User
+from app.models import Document, KnowledgeBase, KbPermission, User
 from app.schemas.kb import GrantIn, KBIn, KBOut, MemberOut
+from app.services.audit import audit
 
 router = APIRouter(prefix="/kbs", tags=["kbs"])
 
@@ -23,6 +24,8 @@ async def create_kb(
         name=payload.name, description=payload.description, owner_id=current.id
     )
     db.add(kb)
+    await db.flush()
+    await audit(db, current.username, "kb_create", f"kb:{kb.id}", {"name": payload.name})
     await db.commit()
     await db.refresh(kb)
     out = KBOut.model_validate(kb)
@@ -30,11 +33,21 @@ async def create_kb(
     return out
 
 
+async def _doc_counts(db: AsyncSession) -> dict[int, int]:
+    rows = (
+        await db.execute(
+            select(Document.kb_id, func.count(Document.id)).group_by(Document.kb_id)
+        )
+    ).all()
+    return dict(rows)
+
+
 @router.get("", response_model=list[KBOut])
 async def list_kbs(
     current: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    doc_counts = await _doc_counts(db)
     if current.role == "admin":
         rows = (
             await db.execute(select(KnowledgeBase).order_by(KnowledgeBase.id.desc()))
@@ -43,6 +56,7 @@ async def list_kbs(
         for kb in rows:
             item = KBOut.model_validate(kb)
             item.my_perm = "owner"
+            item.doc_count = doc_counts.get(kb.id, 0)
             out.append(item)
         return out
     rows = (
@@ -71,6 +85,7 @@ async def list_kbs(
     for kb in rows:
         item = KBOut.model_validate(kb)
         item.my_perm = "owner" if kb.owner_id == current.id else perm_by_kb.get(kb.id)
+        item.doc_count = doc_counts.get(kb.id, 0)
         out.append(item)
     return out
 
@@ -89,6 +104,11 @@ async def get_kb(
         raise HTTPException(status_code=404, detail="knowledge base not found")
     out = KBOut.model_validate(kb)
     out.my_perm = perm
+    out.doc_count = (
+        await db.execute(
+            select(func.count(Document.id)).where(Document.kb_id == kb_id)
+        )
+    ).scalar_one()
     return out
 
 
@@ -148,6 +168,10 @@ async def grant_permission(
         db.add(row)
     else:
         row.perm = payload.perm
+    await audit(
+        db, current.username, "kb_grant", f"kb:{kb_id}",
+        {"to": target.username, "perm": payload.perm},
+    )
     await db.commit()
     return MemberOut(user_id=target.id, username=target.username, perm=payload.perm)
 
@@ -174,5 +198,6 @@ async def revoke_permission(
     if row is None:
         raise HTTPException(status_code=404, detail="permission not found")
     await db.delete(row)
+    await audit(db, current.username, "kb_revoke", f"kb:{kb_id}", {"from": username})
     await db.commit()
     return None

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -7,6 +7,7 @@ from app.core.security import create_access_token, hash_password, verify_passwor
 from app.db.session import get_db
 from app.models import User
 from app.schemas.auth import LoginIn, RegisterIn, TokenOut, UserOut
+from app.services.audit import audit
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -20,19 +21,32 @@ async def register(payload: RegisterIn, db: AsyncSession = Depends(get_db)):
         username=payload.username, password_hash=hash_password(payload.password)
     )
     db.add(user)
+    await db.flush()
+    await audit(db, user.username, "register", f"user:{user.id}")
     await db.commit()
     await db.refresh(user)
     return user
 
 
 @router.post("/login", response_model=TokenOut)
-async def login(payload: LoginIn, db: AsyncSession = Depends(get_db)):
+async def login(
+    payload: LoginIn,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    ip = request.client.host if request.client else None
     result = await db.execute(select(User).where(User.username == payload.username))
     user = result.scalar_one_or_none()
     if user is None or not verify_password(payload.password, user.password_hash):
+        await audit(db, payload.username, "login_fail", ip=ip)
+        await db.commit()
         raise HTTPException(status_code=401, detail="invalid credentials")
     if not user.is_active:
+        await audit(db, payload.username, "login_fail", detail="disabled", ip=ip)
+        await db.commit()
         raise HTTPException(status_code=401, detail="user disabled")
+    await audit(db, user.username, "login_success", f"user:{user.id}", ip=ip)
+    await db.commit()
     return TokenOut(access_token=create_access_token(user.id))
 
 

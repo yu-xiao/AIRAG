@@ -6,6 +6,7 @@ from app.core.deps import require_admin
 from app.db.session import get_db
 from app.models import AuditLog, User
 from app.schemas.admin import AdminUserIn, AdminUserOut, AuditLogOut
+from app.services.audit import audit
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -31,10 +32,19 @@ async def update_user(
     user = await db.get(User, user_id)
     if user is None:
         raise HTTPException(status_code=404, detail="user not found")
+    changes = {
+        k: v
+        for k, v in {"role": payload.role, "is_active": payload.is_active}.items()
+        if v is not None
+    }
     if payload.role is not None:
         user.role = payload.role
     if payload.is_active is not None:
         user.is_active = payload.is_active
+    await audit(
+        db, current.username, "user_admin_update", f"user:{user_id}",
+        {"target": user.username, **changes},
+    )
     await db.commit()
     await db.refresh(user)
     return user

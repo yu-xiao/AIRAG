@@ -187,6 +187,7 @@ async def reprocess_document(
     doc.error_msg = None
     doc.chunk_count = 0
     doc.page_count = None
+    await audit(db, current.username, "doc_reprocess", f"doc:{doc_id}")
     await db.commit()
     await db.refresh(doc)
     process_document.delay(doc_id)

@@ -6,6 +6,7 @@ from app.core.deps import get_current_user
 from app.db.session import get_db
 from app.models import Conversation, Message, User
 from app.schemas.chat import ConversationIn, ConversationOut, MessageOut
+from app.services.audit import audit
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -63,6 +64,9 @@ async def delete_conversation(
     conv = await db.get(Conversation, conv_id)
     if conv is None or conv.user_id != current.id:
         raise HTTPException(status_code=404, detail="conversation not found")
+    await audit(
+        db, current.username, "conv_delete", f"conv:{conv_id}", {"title": conv.title}
+    )
     await db.execute(delete(Message).where(Message.conversation_id == conv_id))
     await db.delete(conv)
     await db.commit()
