@@ -1,6 +1,6 @@
 # AIRag M5 增强实施计划(OOCR / Agentic / 审计 / 评估)
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** 落地 M5 四大增强(MinerU 云 API OCR、查询改写+CRAG 图节点、审计日志+会话导出、检索评估集 CLI)加 Minor 清偿与 checkpointer 接线。
 
@@ -36,7 +36,7 @@
 **Interfaces:**
 - Produces: `AuditLog(id, username, action, target, detail, ip, created_at)` 模型;`Document.ocr_mode`(默认 'auto')/`Document.ocr_used`(默认 False);后续任务直接引用这些列名。
 
-- [ ] **Step 1: 写失败测试**(test_audit.py)
+- [x] **Step 1: 写失败测试**(test_audit.py)
 
 ```python
 from sqlalchemy import select
@@ -73,12 +73,12 @@ async def test_document_ocr_defaults(db_session):
     assert doc.ocr_used is False
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd E:\Projects\AIRag\backend && py -3.12 -m pytest tests/test_audit.py -v`
 Expected: FAIL(ImportError: cannot import name 'AuditLog')
 
-- [ ] **Step 3: 实现模型**
+- [x] **Step 3: 实现模型**
 
 `backend/app/models/audit.py`(新建):
 
@@ -111,12 +111,12 @@ class AuditLog(Base, TimestampMixin):
 
 `conftest.py` 的 `CLEANUP_ORDER` 列表首项前插入 `"audit_logs",`(无外键,先删无妨)。
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `py -3.12 -m pytest tests/test_audit.py -v`
 Expected: 2 passed(conftest 用 metadata 建表,新列/新表自动生效)
 
-- [ ] **Step 5: 手写迁移并升级开发库**
+- [x] **Step 5: 手写迁移并升级开发库**
 
 `backend/alembic/versions/a1b2c3d4e5f6_m5_audit_logs_and_ocr_columns.py`(新建):
 
@@ -174,7 +174,7 @@ def downgrade() -> None:
 Run: `cd E:\Projects\AIRag\backend && py -3.12 -m alembic upgrade head`
 Expected: 无报错;`py -3.12 -m alembic current` 显示 a1b2c3d4e5f6。
 
-- [ ] **Step 6: 全量回归 + 提交**
+- [x] **Step 6: 全量回归 + 提交**
 
 Run: `py -3.12 -m pytest -q`
 Expected: 72 passed(70 存量 + 2 新)
@@ -196,7 +196,7 @@ git commit -m "feat: audit_logs table and documents ocr columns"
 - Produces: `async def audit(db, username: str, action: str, target: str = "", detail=None, ip: str | None = None) -> None`——只 add 不 commit(与业务同事务);detail 非 str 时 json.dumps。
 - Produces: `GET /api/admin/audit-logs?username=&action=&page=&page_size=` → `{"total": int, "items": [AuditLogOut]}`,admin only。
 
-- [ ] **Step 1: 写失败测试**(追加到 test_audit.py)
+- [x] **Step 1: 写失败测试**(追加到 test_audit.py)
 
 ```python
 async def _make_admin(client, db_session, username="aud_admin"):
@@ -266,12 +266,12 @@ async def test_audit_logs_api_admin_only_and_filters(client, db_session):
 
 (注:最后一个断言块前的 `_rl` import 行是冗余的,实现时直接删掉那行,保留后面三段请求。)
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `py -3.12 -m pytest tests/test_audit.py -v`
 Expected: FAIL(ModuleNotFoundError: app.services.audit)
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `backend/app/services/audit.py`(新建):
 
@@ -356,12 +356,12 @@ async def list_audit_logs(
     return {"total": total, "items": [AuditLogOut.model_validate(r) for r in rows]}
 ```
 
-- [ ] **Step 4: 跑测试确认通过 + 全量回归**
+- [x] **Step 4: 跑测试确认通过 + 全量回归**
 
 Run: `py -3.12 -m pytest tests/test_audit.py -v && py -3.12 -m pytest -q`
 Expected: 4 passed / 74 passed
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add backend/app/services/audit.py backend/app/schemas/admin.py backend/app/api/admin.py backend/tests/test_audit.py
@@ -383,7 +383,7 @@ git commit -m "feat: audit helper and admin audit-logs api"
 - Produces: `ChatState` 新键 `history/search_query/proposed_query/grade/retries`;`rewrite_node(state, llm)`、`grade_node(state, llm)`、`transform_node(state)`;`route_after_grade(state) -> "transform"|"generate"`;`make_chat_llm()` 变 lru_cache 单例;generate 的 LLM 调用带 `config={"tags": ["answer"]}`(T4 的 ask.py 依赖此 tag)。
 - 注意:rewrite 关闭时**不是**返回 `{}`,必须返回 `{"search_query": question, "retries": 0, "grade": ""}`(重置 checkpointer 残留 + 保证 retrieve 有查询可用)。
 
-- [ ] **Step 1: conftest 顶部加 env**(在 `os.environ["EMBED_PROVIDER"] = "fake"` 之后)
+- [x] **Step 1: conftest 顶部加 env**(在 `os.environ["EMBED_PROVIDER"] = "fake"` 之后)
 
 ```python
 os.environ["AGENTIC_REWRITE_ENABLED"] = "false"
@@ -391,7 +391,7 @@ os.environ["AGENTIC_CRAG_ENABLED"] = "false"
 os.environ["CHECKPOINTER_ENABLED"] = "false"
 ```
 
-- [ ] **Step 2: 写失败测试**(追加到 test_chat_graph.py)
+- [x] **Step 2: 写失败测试**(追加到 test_chat_graph.py)
 
 ```python
 async def test_retrieve_uses_search_query(monkeypatch):
@@ -598,12 +598,12 @@ async def test_crag_retries_once_end_to_end(monkeypatch):
         settings.AGENTIC_CRAG_ENABLED = False
 ```
 
-- [ ] **Step 3: 跑测试确认失败**
+- [x] **Step 3: 跑测试确认失败**
 
 Run: `py -3.12 -m pytest tests/test_chat_graph.py -v`
 Expected: 新增用例 FAIL(AttributeError/ImportError/断言不符),存量 4 个 PASS
 
-- [ ] **Step 4: 实现**
+- [x] **Step 4: 实现**
 
 `config.py` 在 `RERANK_MODEL` 之后加:
 
@@ -813,13 +813,13 @@ def build_graph(llm=None, checkpointer=None):
     return g.compile(checkpointer=checkpointer)
 ```
 
-- [ ] **Step 5: 跑测试确认通过 + 全量回归**
+- [x] **Step 5: 跑测试确认通过 + 全量回归**
 
 Run: `py -3.12 -m pytest tests/test_chat_graph.py -v && py -3.12 -m pytest -q`
 Expected: 图文件 14 passed(4 存量 + 10 新)/ 全量 84 passed
 注意:若 `("grade","generate")` 边断言因条件边表示差异失败,改断言 `g.get_graph().nodes` 含 "grade"/"transform" 且 `("transform","retrieve")` 在 edges(不许改弱其他断言)。
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add backend/app/core/config.py backend/app/services/chat_graph backend/tests/conftest.py backend/tests/test_chat_graph.py
@@ -837,7 +837,7 @@ git commit -m "feat: query rewrite and corrective-rag nodes in chat graph"
 - Consumes: T3 的 `build_graph(checkpointer=...)`/tag "answer";T2 的 `audit()`;`get_checkpointer()`(既有)。
 - Produces: ask init state 含 `history`(最近 6 条 [{role, content}],不含当前问题);`CHECKPOINTER_ENABLED: bool = True` env。
 
-- [ ] **Step 1: 写失败测试**(追加到 test_ask.py)
+- [x] **Step 1: 写失败测试**(追加到 test_ask.py)
 
 ```python
 async def test_ask_filters_non_answer_llm_tokens(
@@ -950,12 +950,12 @@ async def test_ask_checkpointer_wired_when_enabled(
 
 (test_ask.py 头部已有 `from sqlalchemy import select as select_`,新用例里用 `select_`/直接 import 均可,保持一致用 `select_`。上面第二个用例 `fake_search` 未用 `captured` 可留空实现。)
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `py -3.12 -m pytest tests/test_ask.py -v`
 Expected: 新用例 FAIL(改写输出出现在 body / checkpointer 为 None)
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `config.py` 在 `AGENTIC_CRAG_ENABLED` 后加:
 
@@ -1025,12 +1025,12 @@ async def _recent_history(db: AsyncSession, conv_id: int, limit: int = 6) -> lis
                 await s2.commit()
 ```
 
-- [ ] **Step 4: 跑测试确认通过 + 全量回归**
+- [x] **Step 4: 跑测试确认通过 + 全量回归**
 
 Run: `py -3.12 -m pytest tests/test_ask.py -v && py -3.12 -m pytest -q`
 Expected: ask 文件 5 passed / 全量 86 passed
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add backend/app/core/config.py backend/app/api/ask.py backend/tests/test_ask.py
@@ -1056,12 +1056,12 @@ git commit -m "feat: ask wires history, checkpointer, token tag filter and ask a
 - Consumes: T1 的 `Document.ocr_mode/ocr_used`。
 - Produces: `parse_via_mineru(path: Path, filename: str) -> str`(markdown;失败抛 `MineruError`);`maybe_ocr(path, ext, ocr_mode, primary: ParseResult) -> ParseResult`;`markdown_to_blocks(md_text) -> ParseResult`;`is_thin_text(primary) -> bool`;上传表单字段 `ocr: auto|force|off`(默认 auto)。
 
-- [ ] **Step 0: 核对 MinerU v4 API 契约**
+- [x] **Step 0: 核对 MinerU v4 API 契约**
 
 Run(WebFetch 或浏览器): `https://mineru.net/apiManage/docs`
 核对四点,与 Step 3 客户端代码比对,不符则改客户端常量(端点/字段名以文档为准):①文件上传端点与返回 `data.file_url`;②建任务端点与 `data.task_id`;③轮询端点、`state` 枚举与 `full_zip_url` 字段;④鉴权头 `Authorization: Bearer <token>`。
 
-- [ ] **Step 1: 写失败测试**(test_ocr.py 新建)
+- [x] **Step 1: 写失败测试**(test_ocr.py 新建)
 
 ```python
 import zipfile
@@ -1282,12 +1282,12 @@ async def test_upload_jpg_and_ocr_mode(client, auth_headers, monkeypatch):
     assert bad.status_code == 422
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `py -3.12 -m pytest tests/test_ocr.py -v`
 Expected: FAIL(ModuleNotFoundError: app.services.parsing.ocr)
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `pyproject.toml`:dependencies 里加 `"httpx>=0.27",`;dev 里 httpx 可留(重复无害)。
 `config.py` 在 `CHECKPOINTER_ENABLED` 后加:
@@ -1482,13 +1482,13 @@ from app.services.parsing import image_parser  # noqa: F401 触发 @register
 
 `.env.example` 追加一行 `MINERU_API_TOKEN=`(带注释 `# MinerU 云 API token,留空则 OCR 整体关闭`)。
 
-- [ ] **Step 4: 跑测试确认通过 + 全量回归**
+- [x] **Step 4: 跑测试确认通过 + 全量回归**
 
 Run: `py -3.12 -m pytest tests/test_ocr.py -v && py -3.12 -m pytest -q`
 Expected: ocr 文件 8 passed / 全量 94 passed
 注意:存量 `test_documents.py` 若因图片白名单/表单默认值有断言差异,按新行为修存量断言(允许,记录在提交信息)。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add backend/pyproject.toml backend/app/core/config.py backend/app/services/parsing backend/app/workers/pipeline.py backend/app/api/documents.py backend/app/schemas/document.py .env.example backend/tests/test_ocr.py
@@ -1510,7 +1510,7 @@ git commit -m "feat: mineru cloud ocr with auto detection and upload override"
 - Consumes: T2 `audit()`;T1 列。
 - Produces: `KBOut.doc_count: int = 0`;审计动作枚举 `login_success/login_fail/register/kb_create/kb_grant/kb_revoke/doc_upload/doc_reprocess/conv_delete/user_admin_update`。
 
-- [ ] **Step 1: 写失败测试**(追加到 test_audit.py)
+- [x] **Step 1: 写失败测试**(追加到 test_audit.py)
 
 ```python
 async def _seed_action(client, auth_headers):
@@ -1609,12 +1609,12 @@ async def test_kb_list_includes_doc_count(client, auth_headers, db_session):
     assert detail.json()["doc_count"] == 1
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `py -3.12 -m pytest tests/test_audit.py -v`
 Expected: 新用例 FAIL(无 kb_create 审计/doc_count 键缺失)
 
-- [ ] **Step 3: 实现(六处挂点 + 聚合)**
+- [x] **Step 3: 实现(六处挂点 + 聚合)**
 
 统一模式:各文件 import `from fastapi import Request`(需要的端点)与 `from app.services.audit import audit`;调用 `await audit(db, <username>, <action>, <target>, <detail>, ip)` 后**与业务同 commit**(已存在的 commit 覆盖;若挂点在 commit 之后,把 audit 调用挪到 commit 之前)。
 
@@ -1650,12 +1650,12 @@ Expected: 新用例 FAIL(无 kb_create 审计/doc_count 键缺失)
 
 `admin.py` patch:构造变更摘要(`changes = {k: v for k, v in {"role": payload.role, "is_active": payload.is_active}.items() if v is not None}`,commit 前 `await audit(db, current.username, "user_admin_update", f"user:{user_id}", {"target": user.username, **changes})`)。
 
-- [ ] **Step 4: 跑测试确认通过 + 全量回归**
+- [x] **Step 4: 跑测试确认通过 + 全量回归**
 
 Run: `py -3.12 -m pytest tests/test_audit.py -v && py -3.12 -m pytest -q`
 Expected: audit 文件 6 passed / 全量 96 passed
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add backend/app/api backend/app/schemas/kb.py backend/tests/test_audit.py
@@ -1671,7 +1671,7 @@ git commit -m "feat: audit hooks on write endpoints and kb doc_count aggregation
 **Interfaces:**
 - Produces: `GET /api/chat/conversations/{id}/export` → `text/markdown` 附件 `conv-{id}.md`(owner only,他人/不存在 404)。
 
-- [ ] **Step 1: 写失败测试**(追加到 test_conversations.py;沿用该文件既有的建会话 helper/头,若无则按 test_ask 的 client/auth_headers 直用)
+- [x] **Step 1: 写失败测试**(追加到 test_conversations.py;沿用该文件既有的建会话 helper/头,若无则按 test_ask 的 client/auth_headers 直用)
 
 ```python
 async def test_export_conversation_markdown(client, auth_headers, db_session):
@@ -1719,12 +1719,12 @@ async def test_export_conversation_markdown(client, auth_headers, db_session):
     assert denied.status_code == 404
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `py -3.12 -m pytest tests/test_conversations.py -v`
 Expected: 新用例 FAIL(404,路由不存在)
 
-- [ ] **Step 3: 实现**(conversations.py 追加;import 加 `Response`)
+- [x] **Step 3: 实现**(conversations.py 追加;import 加 `Response`)
 
 ```python
 @router.get("/conversations/{conv_id}/export")
@@ -1766,12 +1766,12 @@ async def export_conversation(
     )
 ```
 
-- [ ] **Step 4: 跑测试确认通过 + 全量回归**
+- [x] **Step 4: 跑测试确认通过 + 全量回归**
 
 Run: `py -3.12 -m pytest tests/test_conversations.py -v && py -3.12 -m pytest -q`
 Expected: 会话文件含新用例 PASS / 全量 97 passed
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add backend/app/api/conversations.py backend/tests/test_conversations.py
@@ -1790,7 +1790,7 @@ git commit -m "feat: export conversation as markdown with citation appendix"
 **Interfaces:**
 - Produces: `hit_at_k(retrieved_doc_ids: list[int], expect_doc_ids: list[int]) -> bool`;`mrr(retrieved_doc_ids, expect_doc_ids) -> float`;`keyword_recall(hit_contents: list[str], expect_keywords: list[str]) -> float`;`load_eval_set(path: Path) -> dict`;CLI `py -m scripts.eval_retrieval --kb 3 [--top-k 8] [--rerank] [--json]`。
 
-- [ ] **Step 1: 写失败测试**(test_eval_metrics.py 新建)
+- [x] **Step 1: 写失败测试**(test_eval_metrics.py 新建)
 
 ```python
 from pathlib import Path
@@ -1831,12 +1831,12 @@ def test_load_eval_set(tmp_path):
 
 (conftest 位于 backend/tests,`scripts` 包在 backend/ 下——pytest 从 backend 目录跑时 sys.path 含当前目录,`import scripts.eval_metrics` 可用;若不可用,在 test 文件顶部加 `import sys; sys.path.insert(0, str(Path(__file__).resolve().parents[1]))`。)
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `py -3.12 -m pytest tests/test_eval_metrics.py -v`
 Expected: FAIL(ModuleNotFoundError: scripts)
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `scripts/__init__.py`:空文件。
 `scripts/eval_metrics.py`:
@@ -1985,12 +1985,12 @@ if __name__ == "__main__":
 示例见 M5 验收(T12)生成的样例文件。
 ```
 
-- [ ] **Step 4: 跑测试确认通过 + 全量回归**
+- [x] **Step 4: 跑测试确认通过 + 全量回归**
 
 Run: `py -3.12 -m pytest tests/test_eval_metrics.py -v && py -3.12 -m pytest -q`
 Expected: 4 passed / 全量 101 passed
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add backend/scripts backend/eval_sets backend/tests/test_eval_metrics.py
@@ -2012,7 +2012,7 @@ git commit -m "feat: retrieval eval set cli with hit mrr recall metrics"
 - Consumes: T2 的 `/admin/audit-logs` 契约 `{total, items}`;T6 的 `doc_count`;T5 的 `ocr_mode/ocr_used`;T7 的 export 端点。
 - Produces: `adminApi.listAuditLogs(params)`、`conversationsApi.export(id): Promise<Blob>`、`KbItem.doc_count`、`DocumentItem.ocr_mode/ocr_used`、`documentsApi.upload(kbId, file, onProgress?, ocr?)`、路由 `admin-audit-logs`。
 
-- [ ] **Step 1: API 模块修改**
+- [x] **Step 1: API 模块修改**
 
 `admin.ts` 追加:
 
@@ -2076,7 +2076,7 @@ adminApi 对象内追加:
     form.append('ocr', ocr)
 ```
 
-- [ ] **Step 2: AuditLogPage.vue**(新建,风格沿 UsersPage)
+- [x] **Step 2: AuditLogPage.vue**(新建,风格沿 UsersPage)
 
 ```vue
 <script setup lang="ts">
@@ -2233,7 +2233,7 @@ onMounted(load)
 </style>
 ```
 
-- [ ] **Step 3: 路由与布局**
+- [x] **Step 3: 路由与布局**
 
 `router/index.ts` 的 children 里 `admin/users` 之后加:
 
@@ -2257,12 +2257,12 @@ const activeIndex = computed(() => (route.path.startsWith('/kb') ? '/kb' : route
         <el-menu-item v-if="auth.user?.role === 'admin'" index="/admin/audit-logs">审计日志</el-menu-item>
 ```
 
-- [ ] **Step 4: 构建 + 测试 + lint**
+- [x] **Step 4: 构建 + 测试 + lint**
 
 Run: `cd E:\Projects\AIRag\frontend && pnpm build && pnpm test && pnpm oxlint`
 Expected: build 成功、4 passed、0 errors
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add frontend/src
@@ -2279,7 +2279,7 @@ git commit -m "feat: audit log page, frontend api modules, menu highlight"
 **Interfaces:**
 - Produces: `throttle(fn, ms)`(尾随触发版);ChatMessage 增 `html?: string`(渲染缓存,模板只 v-html m.html)。
 
-- [ ] **Step 1: 写失败测试**(throttle.spec.ts)
+- [x] **Step 1: 写失败测试**(throttle.spec.ts)
 
 ```ts
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -2316,12 +2316,12 @@ describe('throttle', () => {
 
 (vitest 配置若已有 @ 别名即可用;若 `frontend/src/utils/__tests__` 目录的 spec 不被收集,检查 vitest 配置 include,通常 `src/**/__tests__/**/*.spec.ts` 默认命中。)
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `pnpm test`
 Expected: FAIL(Cannot find module '@/utils/throttle')
 
-- [ ] **Step 3: 实现 throttle.ts**
+- [x] **Step 3: 实现 throttle.ts**
 
 ```ts
 /** 首次立即执行 + 窗口内合并 + 尾随补发的节流(流式渲染用)。 */
@@ -2345,12 +2345,12 @@ export function throttle<F extends (...args: never[]) => void>(fn: F, ms: number
 }
 ```
 
-- [ ] **Step 4: 跑单测确认通过**
+- [x] **Step 4: 跑单测确认通过**
 
 Run: `pnpm test`
 Expected: 6 passed(4 存量 + 2 新)
 
-- [ ] **Step 5: ChatPage 接入**
+- [x] **Step 5: ChatPage 接入**
 
 1. import:`import { Download } from '@element-plus/icons-vue'`(并入现有 Delete import 行)、`import { throttle } from '@/utils/throttle'`。
 2. `ChatMessage` 接口加 `html?: string`。
@@ -2438,12 +2438,12 @@ function onEnterKey(e: KeyboardEvent) {
 }
 ```
 
-- [ ] **Step 6: 构建 + 测试 + lint**
+- [x] **Step 6: 构建 + 测试 + lint**
 
 Run: `pnpm build && pnpm test && pnpm oxlint`
 Expected: build 绿、6 passed、0 errors
 
-- [ ] **Step 7: 提交**
+- [x] **Step 7: 提交**
 
 ```bash
 git add frontend/src
@@ -2460,13 +2460,13 @@ git commit -m "feat: chat export button, throttled markdown render, alt-enter se
 **Interfaces:**
 - Consumes: T6 `doc_count`、T5 `ocr_used` 与图片白名单。
 
-- [ ] **Step 1: KbPage 加列**——"我的权限"列前插:
+- [x] **Step 1: KbPage 加列**——"我的权限"列前插:
 
 ```html
       <el-table-column prop="doc_count" label="文档数" width="90" align="center" />
 ```
 
-- [ ] **Step 2: DocsPage 修改**
+- [x] **Step 2: DocsPage 修改**
 
 1. `ALLOWED_EXTS` 改 `['.pdf', '.docx', '.xlsx', '.jpg', '.jpeg', '.png']`;
 2. beforeUpload 错误文案改 `仅支持 .pdf/.docx/.xlsx/.jpg/.png`;
@@ -2481,7 +2481,7 @@ git commit -m "feat: chat export button, throttled markdown render, alt-enter se
 5. 轮询静默:`async function load(silent = false)`——`loading.value = true` 改 `if (!silent) loading.value = true`,finally 同理 `if (!silent) loading.value = false`;`syncPolling` 里 `timer = window.setInterval(load, 3000)` 改 `timer = window.setInterval(() => load(true), 3000)`;onMounted 仍 `load()`(带 loading)。
 6. 卸载窄窗:`let disposed = false`;`load` 开头加 `if (disposed) return`;`onUnmounted` 改 `disposed = true; if (timer !== undefined) window.clearInterval(timer)`;`syncPolling` 开头加 `if (disposed) return`。
 
-- [ ] **Step 3: oxlint 三错清偿**(auth.store.spec.ts 7-9 行)
+- [x] **Step 3: oxlint 三错清偿**(auth.store.spec.ts 7-9 行)
 
 ```ts
     login: vi
@@ -2502,14 +2502,14 @@ git commit -m "feat: chat export button, throttled markdown render, alt-enter se
 
 (与现有 mockResolvedValue 字面量对齐;若 role 字面量是 `'admin' as const` 之类,类型里用 `string` 兼容即可。)
 
-- [ ] **Step 4: 构建 + 测试 + lint + 全后端回归**
+- [x] **Step 4: 构建 + 测试 + lint + 全后端回归**
 
 Run: `pnpm build && pnpm test && pnpm oxlint`
 Expected: build 绿、6 passed、**0 errors 0 warnings**
 Run: `cd E:\Projects\AIRag\backend && py -3.12 -m pytest -q`
 Expected: 101 passed(前后端互不影响,例行回归)
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add frontend/src
@@ -2525,11 +2525,11 @@ git commit -m "feat: kb doc count column, ocr tag, image upload and poll polish"
 **Interfaces:**
 - Consumes: 全部前序任务;真栈环境(PG/Redis/智谱 key/MinerU token)。
 
-- [ ] **Step 1: 起全栈**
+- [x] **Step 1: 起全栈**
 
 确认 PG18/Redis 服务在跑 → `start_dev.bat`(后端)→ `start_worker.bat`(worker)→ 前端 `pnpm dev`。`.env` 确认 `ZHIPU_API_KEY` 已填;`MINERU_API_TOKEN` 若用户已提供则填(未提供则 Step 5 的 OCR 真调项跳过并记录)。
 
-- [ ] **Step 2: 造图片型 PDF 验收样例**(脚本内实现)
+- [x] **Step 2: 造图片型 PDF 验收样例**(脚本内实现)
 
 ```python
 def make_scanned_pdf(path: str) -> None:
@@ -2551,7 +2551,7 @@ def make_scanned_pdf(path: str) -> None:
 
 (fitz.Pixmap(PIL Image) 接受 Image 对象;若该构造不可用,先 img.save(buf, format="png") 再 insert_image(filename=buf path)。)
 
-- [ ] **Step 3: 验收脚本(m5_acceptance.py,httpx 调真后端 http://127.0.0.1:8000/api,全部断言打印 PASS/FAIL)**
+- [x] **Step 3: 验收脚本(m5_acceptance.py,httpx 调真后端 http://127.0.0.1:8000/api,全部断言打印 PASS/FAIL)**
 
 脚本按序执行并断言(伪码列全步骤,实现照此展开;沿用 M4 脚本的注册/SQL 晋升/轮询 helper):
 
@@ -2568,15 +2568,15 @@ def make_scanned_pdf(path: str) -> None:
 
 脚本结束打印 `M5 ACCEPTANCE: N/M PASS` 与失败明细。
 
-- [ ] **Step 4: 跑验收与全量回归**
+- [x] **Step 4: 跑验收与全量回归**
 
 Run: `cd E:\Projects\AIRag\backend && py -3.12 scripts/m5_acceptance.py`
 Expected: 全部 PASS(MinerU token 未提供时第 2/4 项记 SKIP 并在结尾提示)
 Run: `py -3.12 -m pytest -q`(101 passed)+ `pnpm build && pnpm test && pnpm oxlint`(绿/6 passed/0 errors)。
 
-- [ ] **Step 5: 浏览器走查留给用户**(同 M4 模式):审计页(登录 admin 账号)/导出按钮/OCR 标记/Alt+Enter/文档数列。清进程(后端/worker/前端 dev)。
+- [x] **Step 5: 浏览器走查留给用户**(同 M4 模式):审计页(登录 admin 账号)/导出按钮/OCR 标记/Alt+Enter/文档数列。清进程(后端/worker/前端 dev)。
 
-- [ ] **Step 6: 收尾提交与交接**
+- [x] **Step 6: 收尾提交与交接**
 
 ```bash
 git add backend/scripts/m5_acceptance.py backend/eval_sets
@@ -2595,3 +2595,21 @@ git commit --allow-empty -m "chore: m5 complete - acceptance verified"
 3. **类型一致性**:`maybe_ocr(path, ext, ocr_mode, primary)` 定义与 T5 pipeline 调用一致;`audit(db, username, action, target, detail, ip)` 六处挂点一致;`route_after_grade`/`transform_node`/`rewrite_node(state, llm)`/`grade_node(state, llm)` 在 T3 测试与 graph.py 接线一致;前端 `listAuditLogs(params)→{total,items}` 与 T2 API 返回一致;`upload(..., ocr)` 与后端 Form 字段名 `ocr` 一致;`export(id): Promise<Blob>` 与 responseType blob 一致。
 4. **计数一致性**(按测试函数):70 → T1+2=72 → T2+2=74 → T3+10=84 → T4+2=86 → T5+8=94 → T6+2=96 → T7+1=97 → T8+4=101;前端 4 → T10+2=6。(T5 计 8 个测试函数、T3 计 10 个,与上文列表一致。)
 5. **风险预置**:astream_events 的 tags 过滤对 FakeListChatModel 的兼容由 T4 第一个测试直接验证(不成立则按 spec §7 退化方案改 ev name/run_id 区分);MinerU API 字段漂移由 T5 Step 0 + MockTransport 双保险;`("grade","generate")` 条件边断言给了降级路径(不许改弱其他断言);conftest 三 env 必须先于 app import(T3 Step 1 置顶)。
+
+---
+
+## M5 执行记录(2026-09-16,验收后固化)
+
+### 结果
+- 计数:后端 **103 passed**(70→103,计划预算 101,图测试实增 11 项非 10);前端 build 绿 + vitest **6 passed**(4→6);**oxlint 0 warnings 0 errors**(三处存量旧错清偿)。
+- 无头验收 **19 PASS / 0 FAIL / 2 SKIP**:`.venv\Scripts\python scripts\m5_acceptance.py`——docx 真流水线 done、零文本层 PDF `ocr=off` 实测 failed、**多轮指代改写真调生效**(ask#2"它的负责人是谁"→答案含"张三丰",agentic 默认开)、SSE 契约不变、审计 10 类动作全覆盖+筛选分页+403、导出 markdown 含引用附录+owner-only、评估 CLI 3 题 hit@k/MRR=1.0、doc_count 聚合。OCR 真调 2 项 SKIP(MINERU_API_TOKEN 未提供;决策矩阵由 MockTransport 单测覆盖,token 填入后可单跑验收脚本补验)。
+- 浏览器走查留给用户(审计页/导出按钮/OCR 标记/Alt+Enter/文档数列)。
+
+### 偏差与修正(实现者对计划的增量)
+1. **运行命令**:计划通篇 `py -3.12` 实为全局解释器(无 pytest);实际全部用 `backend\.venv\Scripts\python.exe`。
+2. **MinerU v4 契约修正**(T5 Step 0 核对官方文档):不存在 `/api/v4/file/upload`——本地文件走 `POST /api/v4/file-urls/batch`(files[].name/is_ocr)拿预签名 URL → **PUT 字节(不带 Content-Type/Authorization)** → `GET /api/v4/extract-results/batch/{batch_id}` 轮询 `extract_result[0].state/full_zip_url`。客户端与 MockTransport 测试均按实测契约编写。
+3. **存量适配**:①`test_graph_always_has_rerank_node` 断言 `("rerank","generate")` → `("rerank","grade")`(M5 拓扑插入 grade,rerank 恒在拓扑的意图不变);②T2 审计计数测试被登录/注册挂点污染 → 改为按 seeded action 断言 + `total>=2`;③doc_count 测试改在建空库后取列表。
+4. **测试桩陷阱**:httpx.Client 打桩若在函数内捕获"原构造器",同测试二次打桩会嵌套旧桩(429 错误串进 timeout 用例)——改为模块级 `_REAL_CLIENT` 捕获。
+5. T4 实现时漏配 `CHECKPOINTER_ENABLED`(属该任务自身步骤,补上后绿)。
+6. throttle.spec 的 `vi.fn()` 需泛型参数(oxlint 规则),与 auth.store.spec 三旧错同批修复。
+7. T1 的迁移对开发库已执行(alembic head=a1b2c3d4e5f6);验收数据:M5验收库(id 5)含 m5事实文档.docx(done)与 m5空白页.pdf(failed),eval_sets/5.json 为验收产物。
