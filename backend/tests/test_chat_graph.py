@@ -366,3 +366,84 @@ async def test_retrieve_multi_query_caps_at_2x_topk(monkeypatch):
         {"question": "q", "kb_ids": [1], "sub_queries": ["甲", "乙"]}
     )
     assert len(out["hits"]) == 4
+
+
+async def test_route_after_grade_multihop_branches(monkeypatch):
+    from app.core.config import settings
+    from app.services.chat_graph.graph import route_after_grade
+
+    monkeypatch.setattr(settings, "MULTI_HOP_ENABLED", True)
+    assert route_after_grade(
+        {"grade": "insufficient", "retries": 0}) == "transform"  # 重检优先(M5)
+    assert route_after_grade(
+        {"grade": "insufficient", "retries": 1, "hits": [{}]}) == "decompose"
+    assert route_after_grade({"hits": []}) == "decompose"  # 零命中兜底
+    assert route_after_grade({"hits": [{}]}) == "generate"  # 正常
+    assert route_after_grade(
+        {"grade": "insufficient", "retries": 1, "hits": [{}], "hopped": True}
+    ) == "generate"  # 防环
+
+
+async def test_route_after_grade_multihop_disabled(monkeypatch):
+    from app.core.config import settings
+    from app.services.chat_graph.graph import route_after_grade
+
+    monkeypatch.setattr(settings, "MULTI_HOP_ENABLED", False)
+    assert route_after_grade(
+        {"grade": "insufficient", "retries": 1, "hits": [{}]}) == "generate"
+    assert route_after_grade({"hits": []}) == "generate"  # 回到 M5 行为
+
+
+async def test_route_after_rerank_bypasses_grade_when_hopped():
+    from app.services.chat_graph.graph import route_after_rerank
+
+    assert route_after_rerank({"hopped": True}) == "generate"
+    assert route_after_rerank({}) == "grade"
+    assert route_after_rerank({"hopped": False}) == "grade"
+
+
+async def test_graph_topology_contains_multihop_edges():
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+
+    from app.services.chat_graph.graph import build_graph
+
+    g = build_graph(llm=FakeListChatModel(responses=["x"]))
+    edges = {(e.source, e.target) for e in g.get_graph().edges}
+    assert ("decompose", "retrieve") in edges
+    assert ("rerank", "generate") in edges  # hopped 直通(条件边可达)
+    assert ("rerank", "grade") in edges  # 条件边两分支都在图结构里
+    assert ("grade", "decompose") in edges
+
+
+async def test_multihop_fallback_end_to_end(monkeypatch):
+    """CRAG+多跳全开:首轮不足→transform 重检→仍不足→decompose 拆两问→合并检索→直通 generate。"""
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+
+    from app.core.config import settings
+    from app.services.chat_graph.graph import build_graph
+    from app.services.retrieval.searcher import SearchHit
+
+    calls = []
+
+    async def fake_search(db, kb_ids, query, top_k=20):
+        calls.append(query)
+        return [SearchHit(len(calls), 1, 1, "a.pdf", 1, f"内容-{query}", 0.5, "vector")]
+
+    import app.services.chat_graph.nodes as nodes_mod
+
+    monkeypatch.setattr(nodes_mod, "hybrid_search", fake_search)
+    monkeypatch.setattr(settings, "AGENTIC_CRAG_ENABLED", True)
+    monkeypatch.setattr(settings, "MULTI_HOP_ENABLED", True)
+
+    llm = FakeListChatModel(responses=[
+        '{"verdict": "insufficient", "query": "重检词"}',   # grade 第 1 轮
+        '{"verdict": "insufficient", "query": "再改写"}',   # grade 第 2 轮(重检后)
+        '["子问题A", "子问题B"]',                            # decompose
+        "最终答案[1]",                                       # generate
+    ])
+    g = build_graph(llm=llm)
+    final = await g.ainvoke({"question": "复合问题", "kb_ids": [1]})
+    assert "子问题A" in calls and "子问题B" in calls  # 两个子查询都检索了
+    assert final["hopped"] is True
+    assert final["sub_queries"] == ["子问题A", "子问题B"]
+    assert "最终答案" in final["answer"]

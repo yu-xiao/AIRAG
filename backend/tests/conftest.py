@@ -15,6 +15,8 @@ os.environ["MINERU_API_TOKEN"] = ""
 os.environ["AGENTIC_REWRITE_ENABLED"] = "false"
 os.environ["AGENTIC_CRAG_ENABLED"] = "false"
 os.environ["CHECKPOINTER_ENABLED"] = "false"
+# M6:多跳兜底默认关闭(存量用例的 FakeListChatModel 只为 generate 准备了响应)
+os.environ["MULTI_HOP_ENABLED"] = "false"
 
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
