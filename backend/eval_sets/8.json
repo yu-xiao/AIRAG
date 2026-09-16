@@ -1,0 +1,1 @@
+{"kb_id": 8, "items": [{"question": "猎户座反应堆的功率是多少?", "expect_doc_ids": [20, 21], "expect_keywords": ["五十"]}, {"question": "北极星货运飞船的载重是多少?", "expect_doc_ids": [20, 21], "expect_keywords": ["三十"]}, {"question": "猎户座反应堆的功率和北极星飞船的载重分别是多少", "expect_doc_ids": [20, 21], "expect_keywords": ["五十", "三十"]}]}
