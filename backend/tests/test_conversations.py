@@ -78,3 +78,50 @@ async def test_delete_stranger_conversation_404(client, auth_headers):
     other = await _register_and_login(client, "del_other1")
     resp = await client.delete(f"/api/chat/conversations/{conv_id}", headers=other)
     assert resp.status_code == 404
+
+
+async def test_export_conversation_markdown(client, auth_headers, db_session):
+    kb = await client.post("/api/kbs", json={"name": "导出库"}, headers=auth_headers)
+    conv = await client.post(
+        "/api/chat/conversations",
+        json={"kb_ids": [kb.json()["id"]], "name": "导出会话"},
+        headers=auth_headers,
+    )
+    conv_id = conv.json()["id"]
+    from app.models import Message
+
+    db_session.add(Message(conversation_id=conv_id, role="user", content="问个问题"))
+    db_session.add(
+        Message(
+            conversation_id=conv_id, role="assistant", content="答案[1]",
+            citations=[
+                {
+                    "number": 1, "chunk_id": 1, "document_id": 2,
+                    "filename": "a.pdf", "page_no": 3, "excerpt": "引用摘录",
+                }
+            ],
+        )
+    )
+    await db_session.commit()
+
+    resp = await client.get(
+        f"/api/chat/conversations/{conv_id}/export", headers=auth_headers
+    )
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/markdown")
+    assert 'attachment; filename="conv' in resp.headers["content-disposition"]
+    body = resp.text
+    assert "导出会话" in body
+    assert "问个问题" in body
+    assert "答案[1]" in body
+    assert "a.pdf" in body and "引用摘录" in body  # 引用附录
+
+    await client.post(
+        "/api/auth/register", json={"username": "exp_other", "password": "secret123"}
+    )
+    login = await client.post(
+        "/api/auth/login", json={"username": "exp_other", "password": "secret123"}
+    )
+    h = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    denied = await client.get(f"/api/chat/conversations/{conv_id}/export", headers=h)
+    assert denied.status_code == 404

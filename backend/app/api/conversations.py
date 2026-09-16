@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -71,3 +71,44 @@ async def delete_conversation(
     await db.delete(conv)
     await db.commit()
     return None
+
+
+@router.get("/conversations/{conv_id}/export")
+async def export_conversation(
+    conv_id: int,
+    current: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    conv = await db.get(Conversation, conv_id)
+    if conv is None or conv.user_id != current.id:
+        raise HTTPException(status_code=404, detail="conversation not found")
+    rows = (
+        await db.execute(
+            select(Message).where(Message.conversation_id == conv_id).order_by(Message.id)
+        )
+    ).scalars().all()
+
+    lines = [f"# {conv.title}", "", f"> 创建时间:{conv.created_at:%Y-%m-%d %H:%M}", ""]
+    appendix: list[tuple[str, int | None, str]] = []
+    for m in rows:
+        speaker = "用户" if m.role == "user" else "助手"
+        lines.append(f"**{speaker}**:{m.content}")
+        lines.append("")
+        for c in m.citations or []:
+            appendix.append(
+                (c.get("filename", "?"), c.get("page_no"), c.get("excerpt", ""))
+            )
+    if appendix:
+        lines.append("---")
+        lines.append("")
+        lines.append("## 引用附录")
+        for i, (fname, page, excerpt) in enumerate(appendix, start=1):
+            page_s = f"第{page}页" if page else "页码未知"
+            lines.append(f"[{i}] {fname} {page_s}:{excerpt}")
+            lines.append("")
+    md_text = "\n".join(lines)
+    return Response(
+        content=md_text,
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="conv-{conv_id}.md"'},
+    )
