@@ -2602,7 +2602,9 @@ git commit --allow-empty -m "chore: m5 complete - acceptance verified"
 
 ### 结果
 - 计数:后端 **103 passed**(70→103,计划预算 101,图测试实增 11 项非 10);前端 build 绿 + vitest **6 passed**(4→6);**oxlint 0 warnings 0 errors**(三处存量旧错清偿)。
-- 无头验收 **19 PASS / 0 FAIL / 2 SKIP**:`.venv\Scripts\python scripts\m5_acceptance.py`——docx 真流水线 done、零文本层 PDF `ocr=off` 实测 failed、**多轮指代改写真调生效**(ask#2"它的负责人是谁"→答案含"张三丰",agentic 默认开)、SSE 契约不变、审计 10 类动作全覆盖+筛选分页+403、导出 markdown 含引用附录+owner-only、评估 CLI 3 题 hit@k/MRR=1.0、doc_count 聚合。OCR 真调 2 项 SKIP(MINERU_API_TOKEN 未提供;决策矩阵由 MockTransport 单测覆盖,token 填入后可单跑验收脚本补验)。
+- 无头验收 **19 PASS / 0 FAIL / 2 SKIP**(首轮,token 未配):`.venv\Scripts\python scripts\m5_acceptance.py`——docx 真流水线 done、零文本层 PDF `ocr=off` 实测 failed、**多轮指代改写真调生效**(ask#2"它的负责人是谁"→答案含"张三丰",agentic 默认开)、SSE 契约不变、审计 10 类动作全覆盖+筛选分页+403、导出 markdown 含引用附录+owner-only、评估 CLI 3 题 hit@k/MRR=1.0、doc_count 聚合。
+- **补验(2026-09-16 同日晚,用户配置 MINERU_API_TOKEN 后):21 PASS / 0 FAIL / 0 SKIP**——扫描件真调两项 PASS(图片型 PDF 经 MinerU 云 OCR done + ocr_used=true,OCR 分块含事实文本)。验收数据:KB"M5验收库"×2(id 5 无 token 轮 / id 6 补验轮),eval_sets/5.json、6.json。
+- 后续增补(commit 07d39d3):OCR 空结果改为确定性失败直落 failed(NoContentError 不重试,省云额度);conftest 隔离 MINERU_API_TOKEN 防真实云调用泄漏进测试;MinerU 免费额度实为 1000 页/天(以账号页为准)。
 - 浏览器走查留给用户(审计页/导出按钮/OCR 标记/Alt+Enter/文档数列)。
 
 ### 偏差与修正(实现者对计划的增量)
