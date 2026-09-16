@@ -28,4 +28,4 @@ start_worker.bat
 
 Redis:worker 需要 Redis(本机 6379 已有服务)。若该服务设置了 requirepass(本机当前如此),在 .env 配 `REDIS_URL=redis://:<密码>@localhost:6379/0`,否则 worker 连不上。
 
-Worker 带 `-B` 内嵌 beat(M6 起):每日 03:00 自动清理超期审计日志(`AUDIT_RETENTION_DAYS`,默认 180 天,0=禁用)。
+审计清理 beat(M6 起):Windows 不能用 worker -B 内嵌,另开窗口运行 backend\start_beat.bat(每日 03:00 清理,`AUDIT_RETENTION_DAYS` 默认 180 天,0=禁用;不开 beat 时可用 admin 手动 purge 端点)。
