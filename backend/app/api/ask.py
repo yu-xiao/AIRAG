@@ -1,15 +1,19 @@
 import json
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from loguru import logger
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.deps import get_current_user
 from app.core.perms import get_kb_perm
 from app.db.session import get_db, SessionLocal
 from app.models import Conversation, KnowledgeBase, Message, User
 from app.schemas.chat import AskIn
+from app.services.audit import audit
+from app.services.chat_graph.checkpointer import get_checkpointer
 from app.services.chat_graph.graph import build_graph
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -19,9 +23,22 @@ def _sse(evt_type: str, data) -> str:
     return f"data: {json.dumps({'type': evt_type, 'data': data}, ensure_ascii=False)}\n\n"
 
 
+async def _recent_history(db: AsyncSession, conv_id: int, limit: int = 6) -> list[dict]:
+    rows = (
+        await db.execute(
+            select(Message)
+            .where(Message.conversation_id == conv_id)
+            .order_by(Message.id.desc())
+            .limit(limit)
+        )
+    ).scalars().all()
+    return [{"role": m.role, "content": m.content} for m in reversed(rows)]
+
+
 @router.post("/ask")
 async def ask(
     payload: AskIn,
+    request: Request,
     current: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -45,14 +62,20 @@ async def ask(
         if conv is None or conv.user_id != current.id:
             raise HTTPException(status_code=404, detail="conversation not found")
 
+    # 历史要在落当前问题之前读(当前问题以 state.question 直达图,不进 history)
+    history = (
+        await _recent_history(db, conv.id) if payload.conversation_id is not None else []
+    )
     db.add(Message(conversation_id=conv.id, role="user", content=payload.question))
     await db.commit()
 
-    graph = build_graph()
+    checkpointer = await get_checkpointer() if settings.CHECKPOINTER_ENABLED else None
+    graph = build_graph(checkpointer=checkpointer)
     init = {
         "question": payload.question,
         "kb_ids": payload.kb_ids,
         "rerank": payload.rerank,
+        "history": history,
     }
     cfg = {"configurable": {"thread_id": str(conv.id)}}
 
@@ -60,7 +83,12 @@ async def ask(
         final_state = {}
         try:
             async for ev in graph.astream_events(init, config=cfg, version="v2"):
-                if ev["event"] == "on_chat_model_stream":
+                # 只放行 generate 的 LLM 流(带 answer tag);rewrite/grade 的
+                # 内部流式事件不得混入答案
+                if (
+                    ev["event"] == "on_chat_model_stream"
+                    and "answer" in (ev.get("tags") or [])
+                ):
                     chunk = ev["data"]["chunk"]
                     delta = getattr(chunk, "content", "") or ""
                     if isinstance(delta, str) and delta:
@@ -73,6 +101,11 @@ async def ask(
             async with SessionLocal() as s2:
                 s2.add(Message(conversation_id=conv.id, role="assistant",
                                content=answer, citations=citations))
+                await audit(
+                    s2, current.username, "ask", f"conv:{conv.id}",
+                    {"q": payload.question[:50], "kb_ids": payload.kb_ids},
+                    request.client.host if request.client else None,
+                )
                 await s2.commit()
             # langchain-core 1.6: chat models stream internally on ainvoke, and
             # FakeListChatModel yields per-char chunks — done 携带完整 answer 作为

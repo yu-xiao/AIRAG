@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     # M5 agentic:查询改写 / CRAG 检索自评(env 全局默认开,关闭即节点直通)
     AGENTIC_REWRITE_ENABLED: bool = True
     AGENTIC_CRAG_ENABLED: bool = True
+    # M5:checkpointer 恢复接线(M3 裁决 1 的可选增强;测试进程关)
+    CHECKPOINTER_ENABLED: bool = True
     RETRIEVAL_TOP_K: int = 8
     ZHIPU_API_KEY: str = ""
     ZHIPU_BASE_URL: str = "https://open.bigmodel.cn/api/paas/v4"
