@@ -23,6 +23,7 @@ engine = create_async_engine(settings.TEST_DATABASE_URL)
 TestSession = async_sessionmaker(engine, expire_on_commit=False)
 
 CLEANUP_ORDER = [
+    "audit_logs",
     "messages",
     "conversations",
     "chunks",

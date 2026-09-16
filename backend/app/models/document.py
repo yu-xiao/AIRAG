@@ -1,5 +1,5 @@
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin, TSVector
@@ -20,6 +20,9 @@ class Document(Base, TimestampMixin):
     error_msg: Mapped[str | None] = mapped_column(Text)
     page_count: Mapped[int | None] = mapped_column(Integer)
     chunk_count: Mapped[int] = mapped_column(Integer, default=0)
+    # M5 OCR:auto/force/off(上传表单);ocr_used 为实际解析是否走了 MinerU
+    ocr_mode: Mapped[str] = mapped_column(String(8), default="auto", server_default="auto")
+    ocr_used: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
 
 class Chunk(Base):
