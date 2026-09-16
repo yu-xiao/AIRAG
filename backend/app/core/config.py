@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     OCR_THIN_CHARS_PER_PAGE: int = 50
     MINERU_API_TOKEN: str = ""
     MINERU_BASE_URL: str = "https://mineru.net"
+    # M6 审计留存:超过天数自动/手动清理;0 = 禁用
+    AUDIT_RETENTION_DAYS: int = 180
     # M6 多跳兜底:检索不足且重检仍不足(或零命中)时拆子问题再检索
     MULTI_HOP_ENABLED: bool = True
     MULTI_HOP_MAX_SUBQ: int = 3

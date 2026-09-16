@@ -2,11 +2,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.deps import require_admin
 from app.db.session import get_db
 from app.models import AuditLog, User
 from app.schemas.admin import AdminUserIn, AdminUserOut, AuditLogOut
-from app.services.audit import audit
+from app.services.audit import audit, purge_expired
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -79,3 +80,13 @@ async def list_audit_logs(
         )
     ).scalars().all()
     return {"total": total, "items": [AuditLogOut.model_validate(r) for r in rows]}
+
+
+@router.post("/audit-logs/purge")
+async def purge_audit_logs(
+    current: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    deleted = await purge_expired(db)
+    await db.commit()
+    return {"deleted": deleted, "retention_days": settings.AUDIT_RETENTION_DAYS}
