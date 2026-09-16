@@ -1,3 +1,7 @@
+import json
+
+from loguru import logger
+
 from app.core.config import settings
 from app.db.session import SessionLocal
 from app.services.retrieval.searcher import SearchHit, hybrid_search
@@ -25,8 +29,9 @@ def build_citations(hits: list[SearchHit]) -> list[dict]:
 
 
 async def retrieve_node(state: dict) -> dict:
+    query = state.get("search_query") or state["question"]
     async with SessionLocal() as db:
-        hits = await hybrid_search(db, state["kb_ids"], state["question"])
+        hits = await hybrid_search(db, state["kb_ids"], query)
     return {"hits": [h.__dict__ for h in hits]}
 
 
@@ -41,7 +46,7 @@ async def rerank_node(state: dict) -> dict:
         reranker.rerank, state["question"],
         [h["content"] for h in hits], settings.RETRIEVAL_TOP_K,
     )
-    return {"hits": [hits[i] for i in order if i < len(hits)]}
+    return {"hits": [hits[i] for i in order if 0 <= i < len(hits)]}
 
 
 async def generate_node(state: dict, llm) -> dict:
@@ -54,7 +59,7 @@ async def generate_node(state: dict, llm) -> dict:
         ("system", SYSTEM_PROMPT),
         ("user", f"参考资料:\n{context}\n\n问题:{state['question']}"),
     ]
-    resp = await llm.ainvoke(messages)
+    resp = await llm.ainvoke(messages, config={"tags": ["answer"]})
     shits = [
         SearchHit(
             chunk_id=h["chunk_id"], document_id=h["document_id"], kb_id=h["kb_id"],
@@ -64,3 +69,83 @@ async def generate_node(state: dict, llm) -> dict:
         for h in hits
     ]
     return {"answer": resp.content, "citations": build_citations(shits)}
+
+
+REWRITE_SYSTEM = (
+    "你是检索查询改写器。根据对话历史把用户最新问题改写成独立、无指代的检索查询,"
+    "直接输出改写后的查询本身,不要任何解释或前后缀。无法改写时原样输出问题。"
+)
+
+GRADE_SYSTEM = (
+    "你是检索质量评审。根据问题判断参考资料是否足以回答。"
+    '只输出 JSON:{"verdict":"sufficient 或 insufficient",'
+    '"query":"当 insufficient 时,给出一个更利于检索的改写查询"}'
+)
+
+
+def _extract_json(text: str) -> str:
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.strip("`").strip()
+        if text.startswith("json"):
+            text = text[4:]
+    return text.strip()
+
+
+async def rewrite_node(state: dict, llm) -> dict:
+    question = state["question"]
+    reset = {"search_query": question, "retries": 0, "grade": ""}
+    if not settings.AGENTIC_REWRITE_ENABLED:
+        return reset
+    history = state.get("history") or []
+    if not history:
+        return reset
+    try:
+        msgs = [("system", REWRITE_SYSTEM)]
+        for m in history:
+            msgs.append((m["role"], m["content"]))
+        msgs.append(("user", f"最新问题:{question}"))
+        resp = await llm.ainvoke(msgs)
+        rewritten = (resp.content or "").strip()
+        if rewritten:
+            reset["search_query"] = rewritten
+    except Exception:
+        logger.exception("query rewrite failed; fallback to raw question")
+    return reset
+
+
+async def grade_node(state: dict, llm) -> dict:
+    if not settings.AGENTIC_CRAG_ENABLED:
+        return {}
+    hits = state.get("hits") or []
+    if not hits:
+        return {}
+    context = "\n".join(
+        f"[{i+1}] {h['filename']} 第{h['page_no'] or '?'}页:{h['content'][:120]}"
+        for i, h in enumerate(hits[: settings.RETRIEVAL_TOP_K])
+    )
+    try:
+        resp = await llm.ainvoke(
+            [
+                ("system", GRADE_SYSTEM),
+                ("user", f"问题:{state['question']}\n参考资料:\n{context}"),
+            ]
+        )
+        parsed = json.loads(_extract_json(resp.content))
+        verdict = parsed.get("verdict")
+        if verdict not in ("sufficient", "insufficient"):
+            return {"grade": "sufficient"}
+        out = {"grade": verdict}
+        if verdict == "insufficient" and parsed.get("query"):
+            out["proposed_query"] = str(parsed["query"])
+        return out
+    except Exception:
+        logger.exception("grade failed; degrade to sufficient")
+        return {"grade": "sufficient"}
+
+
+async def transform_node(state: dict) -> dict:
+    return {
+        "search_query": state.get("proposed_query") or state["question"],
+        "retries": state.get("retries", 0) + 1,
+    }

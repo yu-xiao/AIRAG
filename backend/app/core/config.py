@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     CHAT_MAX_TOKENS: int = 2048
     RERANK_ENABLED: bool = False
     RERANK_MODEL: str = "rerank"  # 智谱文本重排序模型编码,文档枚举仅此一个
+    # M5 agentic:查询改写 / CRAG 检索自评(env 全局默认开,关闭即节点直通)
+    AGENTIC_REWRITE_ENABLED: bool = True
+    AGENTIC_CRAG_ENABLED: bool = True
     RETRIEVAL_TOP_K: int = 8
     ZHIPU_API_KEY: str = ""
     ZHIPU_BASE_URL: str = "https://open.bigmodel.cn/api/paas/v4"

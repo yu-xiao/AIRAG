@@ -7,6 +7,11 @@ os.environ["DATABASE_URL"] = (
     "postgresql+asyncpg://airag:airag_dev_password@localhost:5432/airag_test"
 )
 os.environ["EMBED_PROVIDER"] = "fake"
+# M5:agentic 节点与 checkpointer 测试默认关闭(存量用例的 FakeListChatModel
+# 只为 generate 准备了一个响应);相关用例内 monkeypatch 打开。
+os.environ["AGENTIC_REWRITE_ENABLED"] = "false"
+os.environ["AGENTIC_CRAG_ENABLED"] = "false"
+os.environ["CHECKPOINTER_ENABLED"] = "false"
 
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
