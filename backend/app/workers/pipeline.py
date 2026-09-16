@@ -13,6 +13,7 @@ from app.models import Chunk, Document
 from app.services.chunking import split_blocks
 from app.services.embedding import get_provider
 from app.services.parsing import get_parser
+from app.services.parsing.ocr import maybe_ocr
 from app.services.retrieval.tokenize import tokenize as _tok
 from app.workers.celery_app import celery_app
 
@@ -65,6 +66,11 @@ async def _run(document_id: int, db_url: str) -> None:
             doc.status = "parsing"
             await session.commit()
             result = get_parser(file_path.suffix.lower()).parse(file_path)
+            ocr_result = maybe_ocr(
+                file_path, file_path.suffix.lower(), doc.ocr_mode, result
+            )
+            doc.ocr_used = ocr_result is not result
+            result = ocr_result
 
             doc.status = "chunking"
             await session.commit()

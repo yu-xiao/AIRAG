@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     AGENTIC_CRAG_ENABLED: bool = True
     # M5:checkpointer 恢复接线(M3 裁决 1 的可选增强;测试进程关)
     CHECKPOINTER_ENABLED: bool = True
+    # M5 OCR:MinerU 云 API(token 空 = OCR 整体关闭,行为同 M4)
+    OCR_THIN_CHARS_PER_PAGE: int = 50
+    MINERU_API_TOKEN: str = ""
+    MINERU_BASE_URL: str = "https://mineru.net"
     RETRIEVAL_TOP_K: int = 8
     ZHIPU_API_KEY: str = ""
     ZHIPU_BASE_URL: str = "https://open.bigmodel.cn/api/paas/v4"

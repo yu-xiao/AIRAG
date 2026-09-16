@@ -1,7 +1,8 @@
 import uuid
 from pathlib import Path
+from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,11 +12,12 @@ from app.core.perms import get_kb_perm, has_perm
 from app.db.session import get_db
 from app.models import Chunk, Document, KnowledgeBase, User
 from app.schemas.document import DocumentOut
+from app.services.audit import audit
 from app.workers.pipeline import process_document
 
 router = APIRouter(tags=["documents"])
 
-ALLOWED_EXTS = {".pdf", ".docx", ".xlsx"}
+ALLOWED_EXTS = {".pdf", ".docx", ".xlsx", ".jpg", ".jpeg", ".png"}
 
 
 async def _get_visible_kb_or_404(
@@ -35,6 +37,7 @@ async def _get_visible_kb_or_404(
 async def upload_document(
     kb_id: int,
     file: UploadFile,
+    ocr: Literal["auto", "force", "off"] = Form("auto"),
     current: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -76,8 +79,14 @@ async def upload_document(
         mime=file.content_type or "application/octet-stream",
         size=len(payload),
         sha256=sha256,
+        ocr_mode=ocr,
     )
     db.add(doc)
+    await db.flush()
+    await audit(
+        db, current.username, "doc_upload", f"doc:{doc.id}",
+        {"filename": original, "kb_id": kb_id},
+    )
     await db.commit()
     await db.refresh(doc)
     process_document.delay(doc.id)
