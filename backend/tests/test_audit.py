@@ -30,3 +30,67 @@ async def test_document_ocr_defaults(db_session):
     await db_session.commit()
     assert doc.ocr_mode == "auto"
     assert doc.ocr_used is False
+
+
+async def _make_admin(client, db_session, username="aud_admin"):
+    from sqlalchemy import text as _text
+
+    created = await client.post(
+        "/api/auth/register", json={"username": username, "password": "secret123"}
+    )
+    await db_session.execute(
+        _text("UPDATE users SET role = 'admin' WHERE id = :i"),
+        {"i": created.json()["id"]},
+    )
+    await db_session.commit()
+    resp = await client.post(
+        "/api/auth/login", json={"username": username, "password": "secret123"}
+    )
+    return {"Authorization": f"Bearer {resp.json()['access_token']}"}
+
+
+async def test_audit_helper_jsonifies_detail(db_session):
+    from app.services.audit import audit
+
+    await audit(db_session, "u1", "kb_grant", "kb:3", {"perm": "viewer"})
+    await db_session.commit()
+    row = (await db_session.execute(select(AuditLog))).scalars().one()
+    assert row.detail == '{"perm": "viewer"}'
+
+
+async def test_audit_logs_api_admin_only_and_filters(client, db_session):
+    from app.services.audit import audit
+
+    await audit(db_session, "alice", "login_fail", "user:1")
+    await audit(db_session, "bob", "doc_upload", "doc:9")
+    await db_session.commit()
+
+    admin = await _make_admin(client, db_session)
+    resp = await client.get("/api/admin/audit-logs", headers=admin)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 2
+    assert body["items"][0]["action"] == "doc_upload"  # 时间倒序(id desc 近似)
+
+    filtered = await client.get(
+        "/api/admin/audit-logs", params={"username": "alice"}, headers=admin
+    )
+    assert filtered.json()["total"] == 1
+    assert filtered.json()["items"][0]["username"] == "alice"
+
+    paged = await client.get(
+        "/api/admin/audit-logs", params={"page": 2, "page_size": 1}, headers=admin
+    )
+    assert paged.json()["total"] == 2
+    assert len(paged.json()["items"]) == 1
+
+    await client.post(
+        "/api/auth/register", json={"username": "aud_plain", "password": "secret123"}
+    )
+    login = await client.post(
+        "/api/auth/login", json={"username": "aud_plain", "password": "secret123"}
+    )
+    h = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    denied = await client.get("/api/admin/audit-logs", headers=h)
+    assert denied.status_code == 403
+

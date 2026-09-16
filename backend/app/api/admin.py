@@ -1,11 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import require_admin
 from app.db.session import get_db
-from app.models import User
-from app.schemas.admin import AdminUserIn, AdminUserOut
+from app.models import AuditLog, User
+from app.schemas.admin import AdminUserIn, AdminUserOut, AuditLogOut
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -38,3 +38,34 @@ async def update_user(
     await db.commit()
     await db.refresh(user)
     return user
+
+
+@router.get("/audit-logs")
+async def list_audit_logs(
+    username: str | None = None,
+    action: str | None = None,
+    page: int = 1,
+    page_size: int = 20,
+    current: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    page = max(page, 1)
+    page_size = min(max(page_size, 1), 100)
+    where = []
+    if username:
+        where.append(AuditLog.username == username)
+    if action:
+        where.append(AuditLog.action == action)
+    total = (
+        await db.execute(select(func.count(AuditLog.id)).where(*where))
+    ).scalar_one()
+    rows = (
+        await db.execute(
+            select(AuditLog)
+            .where(*where)
+            .order_by(AuditLog.id.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+    ).scalars().all()
+    return {"total": total, "items": [AuditLogOut.model_validate(r) for r in rows]}
