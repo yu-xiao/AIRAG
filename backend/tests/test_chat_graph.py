@@ -324,3 +324,45 @@ async def test_decompose_llm_exception_falls_back():
         llm=Boom(),
     )
     assert out == {"sub_queries": ["改写后"], "hopped": True}
+
+
+async def test_retrieve_multi_query_merges_round_robin(monkeypatch):
+    import app.services.chat_graph.nodes as nodes_mod
+    from app.services.retrieval.searcher import SearchHit
+
+    async def fake_search(db, kb_ids, query, top_k=20):
+        data = {
+            "甲": [(1, "甲一", 0.9), (2, "甲二", 0.7)],
+            "乙": [(2, "乙一", 0.8), (3, "乙二", 0.6)],
+        }[query]
+        return [
+            SearchHit(cid, 1, 1, "f.pdf", i + 1, txt, s, "vector")
+            for i, (cid, txt, s) in enumerate(data)
+        ]
+
+    monkeypatch.setattr(nodes_mod, "hybrid_search", fake_search)
+    out = await nodes_mod.retrieve_node(
+        {"question": "q", "kb_ids": [1], "sub_queries": ["甲", "乙"]}
+    )
+    # 轮转交错:甲1→乙1(chunk 2)→甲2(chunk 2 去重跳过)→乙2
+    assert [h["chunk_id"] for h in out["hits"]] == [1, 2, 3]
+
+
+async def test_retrieve_multi_query_caps_at_2x_topk(monkeypatch):
+    import app.services.chat_graph.nodes as nodes_mod
+    from app.core.config import settings
+    from app.services.retrieval.searcher import SearchHit
+
+    async def fake_search(db, kb_ids, query, top_k=20):
+        return [
+            SearchHit(query == "甲" and i or 100 + i, 1, 1, "f.pdf", i + 1,
+                      f"{query}-{i}", 0.9, "vector")
+            for i in range(8)
+        ]
+
+    monkeypatch.setattr(nodes_mod, "hybrid_search", fake_search)
+    monkeypatch.setattr(settings, "RETRIEVAL_TOP_K", 2)  # 合并上限 = 2*2 = 4
+    out = await nodes_mod.retrieve_node(
+        {"question": "q", "kb_ids": [1], "sub_queries": ["甲", "乙"]}
+    )
+    assert len(out["hits"]) == 4
