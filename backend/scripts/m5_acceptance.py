@@ -193,19 +193,18 @@ def main():
         skip("scanned pdf via mineru (auto)", "MINERU_API_TOKEN 未配置")
         skip("image png via mineru (auto)", "MINERU_API_TOKEN 未配置")
     else:
-        from PIL import Image, ImageDraw, ImageFont
-
-        img = Image.new("RGB", (600, 800), "white")
-        d = ImageDraw.Draw(img)
-        font = ImageFont.truetype("C:/Windows/Fonts/msyh.ttc", 24)
-        d.text((40, 80), FACTS["budget"], fill="black", font=font)
-        d.text((40, 130), FACTS["owner"], fill="black", font=font)
-        d.text((40, 180), FACTS["period"], fill="black", font=font)
+        # 图片型 PDF:文字渲染成位图再插入(无文本层),用 pymupdf 免 PIL 依赖
+        img_doc = fitz.open()
+        img_page = img_doc.new_page(width=612, height=792)
+        y = 80
+        for line in (FACTS["budget"], FACTS["owner"], FACTS["period"]):
+            img_page.insert_text((50, y), line, fontsize=14, fontname="china-s")
+            y += 40
+        pix = img_page.get_pixmap(matrix=fitz.Matrix(2, 2))
         scan_pdf = Path("storage/m5_scan.pdf")
         pdf = fitz.open()
-        page = pdf.new_page(width=600, height=800)
-        pix = fitz.Pixmap(img)
-        page.insert_image(fitz.Rect(0, 0, 600, 800), pixmap=pix)
+        page = pdf.new_page(width=612, height=792)
+        page.insert_image(fitz.Rect(0, 0, 612, 792), pixmap=pix)
         pdf.save(str(scan_pdf))
         with open(scan_pdf, "rb") as f:
             r = client.post(
