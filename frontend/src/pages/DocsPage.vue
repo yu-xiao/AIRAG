@@ -21,7 +21,7 @@ const loading = ref(false)
 const docs = ref<DocumentItem[]>([])
 
 const MAX_UPLOAD_MB = 20
-const ALLOWED_EXTS = ['.pdf', '.docx', '.xlsx']
+const ALLOWED_EXTS = ['.pdf', '.docx', '.xlsx', '.jpg', '.jpeg', '.png']
 const NON_TERMINAL = ['pending', 'parsing', 'chunking', 'embedding']
 
 const STATUS_META: Record<string, { label: string; type: 'info' | 'primary' | 'success' | 'danger' }> = {
@@ -44,7 +44,7 @@ const uploadPercent = ref(0)
 function beforeUpload(raw: UploadRawFile) {
   const ext = raw.name.slice(raw.name.lastIndexOf('.')).toLowerCase()
   if (!ALLOWED_EXTS.includes(ext)) {
-    ElMessage.error(`不支持的文件类型 ${ext},仅支持 .pdf/.docx/.xlsx`)
+    ElMessage.error(`不支持的文件类型 ${ext},仅支持 .pdf/.docx/.xlsx/.jpg/.png`)
     return false
   }
   if (raw.size > MAX_UPLOAD_MB * 1024 * 1024) {
@@ -74,28 +74,31 @@ async function doUpload(options: UploadRequestOptions) {
 
 // ---- 列表与非终态 3s 轮询,全部终态即停 ----
 let timer: number | undefined
+let disposed = false
 
 function hasActive() {
   return docs.value.some((d) => NON_TERMINAL.includes(d.status))
 }
 
 function syncPolling() {
+  if (disposed) return
   if (hasActive()) {
-    if (timer === undefined) timer = window.setInterval(load, 3000)
+    if (timer === undefined) timer = window.setInterval(() => load(true), 3000)
   } else if (timer !== undefined) {
     window.clearInterval(timer)
     timer = undefined
   }
 }
 
-async function load() {
-  loading.value = true
+async function load(silent = false) {
+  if (disposed) return
+  if (!silent) loading.value = true
   try {
     docs.value = await documentsApi.list(kbId)
   } catch {
-    ElMessage.error('加载文档列表失败')
+    if (!silent) ElMessage.error('加载文档列表失败')
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
     syncPolling()
   }
 }
@@ -175,6 +178,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  disposed = true
   if (timer !== undefined) window.clearInterval(timer)
 })
 </script>
@@ -192,7 +196,7 @@ onUnmounted(() => {
       <el-upload
         drag
         multiple
-        accept=".pdf,.docx,.xlsx"
+        accept=".pdf,.docx,.xlsx,.jpg,.jpeg,.png"
         :show-file-list="false"
         :disabled="uploading"
         :before-upload="beforeUpload"
@@ -200,7 +204,7 @@ onUnmounted(() => {
       >
         <div class="el-upload__text">将文件拖到此处,或点击上传</div>
         <template #tip>
-          <div class="el-upload__tip">支持 .pdf / .docx / .xlsx,单个文件不超过 20MB</div>
+          <div class="el-upload__tip">支持 .pdf / .docx / .xlsx / .jpg / .png(扫描件自动 OCR),单个文件不超过 20MB</div>
         </template>
       </el-upload>
       <el-progress
@@ -218,13 +222,16 @@ onUnmounted(() => {
       <el-table-column prop="filename" label="文件名" min-width="220" show-overflow-tooltip />
       <el-table-column label="状态" width="120" align="center">
         <template #default="{ row }">
-          <el-tooltip
-            :disabled="row.status !== 'failed' || !row.error_msg"
-            :content="row.error_msg ?? ''"
-            placement="top"
-          >
-            <el-tag :type="statusMeta(row.status).type">{{ statusMeta(row.status).label }}</el-tag>
-          </el-tooltip>
+          <span class="status-cell">
+            <el-tooltip
+              :disabled="row.status !== 'failed' || !row.error_msg"
+              :content="row.error_msg ?? ''"
+              placement="top"
+            >
+              <el-tag :type="statusMeta(row.status).type">{{ statusMeta(row.status).label }}</el-tag>
+            </el-tooltip>
+            <el-tag v-if="row.ocr_used" type="success" size="small">OCR</el-tag>
+          </span>
         </template>
       </el-table-column>
       <el-table-column prop="chunk_count" label="分块数" width="90" align="center" />
@@ -300,6 +307,11 @@ onUnmounted(() => {
 }
 .docs-table {
   width: 100%;
+}
+.status-cell {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
 }
 .drawer-head {
   display: flex;

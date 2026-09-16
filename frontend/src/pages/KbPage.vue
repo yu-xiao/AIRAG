@@ -182,6 +182,7 @@ onMounted(load)
           </el-tag>
         </template>
       </el-table-column>
+      <el-table-column prop="doc_count" label="文档数" width="90" align="center" />
       <el-table-column label="创建时间" width="170">
         <template #default="{ row }">{{ fmtTime(row.created_at) }}</template>
       </el-table-column>

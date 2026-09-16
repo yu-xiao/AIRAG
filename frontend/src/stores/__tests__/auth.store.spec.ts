@@ -4,9 +4,20 @@ import { useAuthStore } from '@/stores/auth'
 
 vi.mock('@/api/auth', () => ({
   authApi: {
-    login: vi.fn().mockResolvedValue({ access_token: 'jwt-token', token_type: 'bearer' }),
-    register: vi.fn().mockResolvedValue({ id: 1, username: 'alice', role: 'admin', is_active: true }),
-    me: vi.fn(),
+    login: vi
+      .fn<() => Promise<{ access_token: string; token_type: string }>>()
+      .mockResolvedValue({ access_token: 'jwt-token', token_type: 'bearer' }),
+    register: vi
+      .fn<
+        () => Promise<{
+          id: number
+          username: string
+          role: string
+          is_active: boolean
+        }>
+      >()
+      .mockResolvedValue({ id: 1, username: 'alice', role: 'admin', is_active: true }),
+    me: vi.fn<() => Promise<unknown>>(),
   },
 }))
 
