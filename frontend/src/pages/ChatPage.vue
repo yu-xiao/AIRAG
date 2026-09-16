@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Delete } from '@element-plus/icons-vue'
+import { Delete, Download } from '@element-plus/icons-vue'
 import DOMPurify from 'dompurify'
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js/lib/core'
@@ -13,6 +13,7 @@ import 'highlight.js/styles/github.css'
 import { conversationsApi, type Citation, type ConversationItem, type MessageItem } from '@/api/chat'
 import { kbApi, type KbItem } from '@/api/kb'
 import { useChatStream } from '@/composables/useChatStream'
+import { throttle } from '@/utils/throttle'
 import CitationList from '@/components/CitationList.vue'
 
 // ---- markdown 渲染:页面级单例;语言子集 python/ts/json/bash ----
@@ -46,6 +47,8 @@ interface ChatMessage {
   id?: number
   role: 'user' | 'assistant'
   content: string
+  /** 渲染缓存:消息创建/节流器写入,模板只 v-html m.html(避免每帧全量重渲) */
+  html?: string
   citations?: Citation[] | null
   /** 该条是否仍在流式生成中(仅本地追问消息使用) */
   pending?: boolean
@@ -90,6 +93,7 @@ function toChatMessage(m: MessageItem): ChatMessage {
     id: m.id,
     role: m.role === 'user' ? 'user' : 'assistant',
     content: m.content,
+    html: render(m.content),
     citations: m.citations,
   }
 }
@@ -146,6 +150,20 @@ async function removeConversation(c: ConversationItem) {
   }
 }
 
+async function exportConversation(c: ConversationItem) {
+  try {
+    const blob = await conversationsApi.export(c.id)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `conv-${c.id}.md`
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch {
+    ElMessage.error('导出失败')
+  }
+}
+
 // ---- 发送与 SSE 渲染契约 ----
 // token → 增量追加;done → 用 done.answer 整体替换(权威对账);
 // citations → 存入当前助手消息;error → 终止流 + ElMessage。
@@ -157,11 +175,12 @@ async function onSend() {
     return
   }
 
-  messages.value.push({ role: 'user', content: q })
+  messages.value.push({ role: 'user', content: q, html: render(q) })
   // reactive 保证 token 回调里的高频属性变更能触发视图更新
   const assistant: ChatMessage = reactive({
     role: 'assistant',
     content: '',
+    html: '',
     citations: null,
     pending: true,
   })
@@ -169,6 +188,11 @@ async function onSend() {
   question.value = ''
   streaming.value = true
   scrollToBottom()
+
+  // 节流渲染:token 高频追加只在 120ms 窗口内合并渲染一次
+  const flushRender = throttle(() => {
+    assistant.html = render(assistant.content)
+  }, 120)
 
   await ask(
     {
@@ -180,6 +204,7 @@ async function onSend() {
     {
       onToken(t) {
         assistant.content += t
+        flushRender()
         scrollToBottom()
       },
       onCitations(c) {
@@ -187,6 +212,7 @@ async function onSend() {
       },
       onDone(d) {
         assistant.content = d.answer // 权威终稿整体替换流式累积内容
+        assistant.html = render(d.answer)
         assistant.pending = false
         if (currentId.value === null) {
           currentId.value = d.conversation_id
@@ -204,11 +230,13 @@ async function onSend() {
   scrollToBottom()
 }
 
-// ---- 输入交互:Enter 发送 / Shift+Enter 换行;IME 组态确认不触发 ----
+// ---- 输入交互:Enter/Alt+Enter 发送 / Shift+Enter 换行;IME 组态确认不触发 ----
 function onEnterKey(e: KeyboardEvent) {
   if (e.isComposing || e.shiftKey) return
-  e.preventDefault()
-  onSend()
+  if (e.altKey || e.metaKey || e.key === 'Enter') {
+    e.preventDefault()
+    onSend()
+  }
 }
 
 const canSend = () => !streaming.value && question.value.trim().length > 0 && selectedKbIds.value.length > 0
@@ -245,6 +273,9 @@ onUnmounted(() => {
           @click="openConversation(c)"
         >
           <span class="conv-title" :title="c.title">{{ c.title }}</span>
+          <el-icon class="conv-export" :size="14" @click.stop="exportConversation(c)">
+            <Download />
+          </el-icon>
           <el-icon class="conv-delete" :size="14" @click.stop="removeConversation(c)">
             <Delete />
           </el-icon>
@@ -280,7 +311,7 @@ onUnmounted(() => {
         <el-empty v-if="messages.length === 0" description="选择知识库后开始提问" />
         <div v-for="(m, i) in messages" :key="m.id ?? `local-${i}`" class="msg-row" :class="m.role">
           <div class="bubble">
-            <div v-if="m.role === 'assistant'" class="markdown-body" v-html="render(m.content)" />
+            <div v-if="m.role === 'assistant'" class="markdown-body" v-html="m.html" />
             <div v-else class="plain-text">{{ m.content }}</div>
             <div v-if="m.pending && !m.content" class="typing">思考中…</div>
             <CitationList
@@ -299,7 +330,7 @@ onUnmounted(() => {
           :rows="3"
           resize="none"
           :disabled="streaming"
-          placeholder="Enter 发送,Shift+Enter 换行"
+          placeholder="Enter 或 Alt+Enter 发送,Shift+Enter 换行"
           @keydown.enter="onEnterKey"
         />
         <el-button type="primary" class="send-btn" :disabled="!canSend()" @click="onSend">
@@ -358,8 +389,17 @@ onUnmounted(() => {
   color: var(--el-text-color-secondary);
   visibility: hidden;
 }
+.conv-export {
+  flex-shrink: 0;
+  color: var(--el-text-color-secondary);
+  visibility: hidden;
+}
+.conv-item:hover .conv-export,
 .conv-item:hover .conv-delete {
   visibility: visible;
+}
+.conv-export:hover {
+  color: var(--el-color-primary);
 }
 .conv-delete:hover {
   color: var(--el-color-danger);
