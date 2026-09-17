@@ -61,6 +61,7 @@ async def run(kb_id: int, use_rerank: bool) -> list[dict]:
                     llm, item["question"], answer, contexts),
                 "relevancy": await relevancy_score(llm, item["question"], answer),
                 "citations": len(final.get("citations") or []),
+                "refused": bool(final.get("refused")),
             }
         )
     return results
@@ -87,11 +88,12 @@ def main():
         1 for r in results
         if r["faithfulness"]["score"] is None or r["relevancy"]["score"] is None
     )
+    refused_n = sum(1 for r in results if r["refused"])
     for key, label in (("faithfulness", "忠实度"), ("relevancy", "切题度")):
         vals = [r[key]["score"] for r in results if r[key]["score"] is not None]
         avg = f"{sum(vals) / len(vals):.2f}" if vals else "N/A"
         print(f"\n汇总:n={n}  {label}={avg}", end="")
-    print(f"  (parse_errors={parse_errors})")
+    print(f"  (parse_errors={parse_errors}  refused={refused_n}/{n})")
 
 
 if __name__ == "__main__":

@@ -15,6 +15,8 @@ start_dev.bat   # 2/3 迁移 + 热重载,后端 http://localhost:8001/docs
 cd ..\frontend && pnpm install && pnpm dev   # 3/3 前端 http://localhost:5173
 ```
 
+Windows 部署注意(M6 遗留):裸 uvicorn(非 `--reload`)在 Windows 走 ProactorEventLoop,会打断 psycopg checkpointer 导致 ask 500;后端启动必须用 `start_dev.bat`。
+
 ## 文档流水线(M2 起)
 
 除后端/前端两个窗口外,再开一个窗口启动 worker:
@@ -27,5 +29,7 @@ start_worker.bat
 上传:.env 填好 ZHIPU_API_KEY 后默认走智谱 embedding;未填 key 时可在 .env 设 EMBED_PROVIDER=fake 跑通全流程(向量无语义)。
 
 Redis:worker 需要 Redis(本机 6379 已有服务)。若该服务设置了 requirepass(本机当前如此),在 .env 配 `REDIS_URL=redis://:<密码>@localhost:6379/0`,否则 worker 连不上。
+
+问答检索(M7 起):`RETRIEVAL_MIN_SCORE`(默认 0.30)为 rerank 相关度阈值,仅 rerank 开启时生效——rerank 关闭时该阈值不生效,仅提示词兜底;前端精排开关 M7 起默认开,收益=阈值门控+排序质量,代价=每问一次 rerank 调用。
 
 审计清理 beat(M6 起):Windows 不能用 worker -B 内嵌,另开窗口运行 backend\start_beat.bat(每日 03:00 清理,`AUDIT_RETENTION_DAYS` 默认 180 天,0=禁用;不开 beat 时可用 admin 手动 purge 端点)。
