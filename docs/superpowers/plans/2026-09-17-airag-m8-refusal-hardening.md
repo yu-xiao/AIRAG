@@ -1030,3 +1030,5 @@ KB 删除端点(owner/admin,级联文档+chunk+权限+向量+eval_sets 钩子)�
 **终审增量**(全分支审查 Ready to merge):1 条 Important 已修——kbs.py 重名查询 `scalar_one_or_none()` 在库中同名≥2 条时抛 MultipleResultsFound(500)→改 `.scalars().first()` + 回归测试(种两条同名直接 ORM 提交再 POST 断言 409),commit 4488e29,test_kbs 11P,scoped 复审通过。测试计数更新:后端 **145P**(144+1)。Minors 分流维持递延(strip 冗余/子串误报面 spec 接受/check-then-insert M9/维护脚本边角/测试断言面/脚本全角标点)。
 
 **待办**:用户浏览器走查(重名内联报错/下拉后缀/暗色正则高亮/对话页回归)→ 通过后收官推送。
+
+**走查与收官(2026-09-17 深夜)**:用户走查通过("可以,没问题")。**推送推迟**——收官时发现另一会话正在本地 main 上执行 M9(agent 搜索/限流/MCP/API Keys,至 9903d60 共 16 提交,验收活跃中),此刻推送会把进行中的 M9 一并发布;待 M9 收官后统推。最终 HEAD 全量后端 180P=本里程碑 145P+M9 新增 35P(agent_api 12/agent_ratelimit 6/api_keys_service 5/auth_keys_api 5/mcp 7),全绿。服务保持运行供 M9 使用。
