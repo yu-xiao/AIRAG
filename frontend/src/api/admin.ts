@@ -31,6 +31,12 @@ export interface AuditLogResponse {
   items: AuditLogItem[]
 }
 
+/** 镜像后端 POST /admin/audit-logs/purge 响应 */
+export interface AuditPurgeResult {
+  deleted: number
+  retention_days: number
+}
+
 export const adminApi = {
   async listUsers(): Promise<AdminUser[]> {
     const { data } = await http.get<AdminUser[]>('/admin/users')
@@ -47,6 +53,11 @@ export const adminApi = {
 
   async listAuditLogs(params: AuditLogQuery): Promise<AuditLogResponse> {
     const { data } = await http.get<AuditLogResponse>('/admin/audit-logs', { params })
+    return data
+  },
+
+  async purgeExpiredLogs(): Promise<AuditPurgeResult> {
+    const { data } = await http.post<AuditPurgeResult>('/admin/audit-logs/purge')
     return data
   },
 }

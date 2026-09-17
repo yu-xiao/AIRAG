@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { adminApi, type AuditLogItem } from '@/api/admin'
+import { useAuthStore } from '@/stores/auth'
 
+const auth = useAuthStore()
 const loading = ref(false)
+const purging = ref(false)
 const logs = ref<AuditLogItem[]>([])
 const total = ref(0)
 const query = reactive({ username: '', action: '', page: 1, pageSize: 20 })
@@ -11,7 +14,7 @@ const query = reactive({ username: '', action: '', page: 1, pageSize: 20 })
 const ACTION_OPTIONS = [
   'login_success', 'login_fail', 'register', 'kb_create',
   'kb_grant', 'kb_revoke', 'doc_upload', 'doc_reprocess',
-  'conv_delete', 'user_admin_update', 'ask',
+  'conv_delete', 'user_admin_update', 'ask', 'audit_purge',
 ]
 
 const ACTION_LABEL: Record<string, string> = {
@@ -26,6 +29,7 @@ const ACTION_LABEL: Record<string, string> = {
   conv_delete: '删会话',
   user_admin_update: '用户管理变更',
   ask: '提问',
+  audit_purge: '清理审计',
 }
 
 const ACTION_TYPE: Record<string, 'success' | 'danger' | 'warning' | 'info' | 'primary'> = {
@@ -65,6 +69,32 @@ function search() {
   load()
 }
 
+async function purgeExpired() {
+  try {
+    await ElMessageBox.confirm(
+      '将删除超过保留期（默认 180 天）的审计日志，删除不可恢复。确定执行？',
+      '清理过期日志',
+      { type: 'warning', confirmButtonText: '清理', cancelButtonText: '取消' },
+    )
+  } catch {
+    return // 用户取消
+  }
+  purging.value = true
+  try {
+    const r = await adminApi.purgeExpiredLogs()
+    if (r.deleted > 0) {
+      ElMessage.success(`已清理 ${r.deleted} 条过期日志`)
+    } else {
+      ElMessage.info('没有超过保留期的日志')
+    }
+    await load()
+  } catch {
+    ElMessage.error('清理失败')
+  } finally {
+    purging.value = false
+  }
+}
+
 function fmtTime(iso: string) {
   return iso.replace('T', ' ').slice(0, 19)
 }
@@ -88,6 +118,13 @@ onMounted(load)
           <el-option v-for="a in ACTION_OPTIONS" :key="a" :label="label(a)" :value="a" />
         </el-select>
         <el-button type="primary" @click="search">查询</el-button>
+        <el-button
+          v-if="auth.user?.role === 'admin'"
+          type="danger"
+          plain
+          :loading="purging"
+          @click="purgeExpired"
+        >清理过期日志</el-button>
       </div>
     </div>
 
