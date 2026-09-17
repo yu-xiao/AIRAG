@@ -63,7 +63,9 @@ function fmtTime(iso: string) {
     <section class="stat-cards">
       <el-card v-for="s in stats" :key="s.label" shadow="never" class="stat-card">
         <div class="stat-body">
-          <el-icon :size="22" class="stat-icon"><component :is="s.icon" /></el-icon>
+          <div class="stat-icon-tile">
+            <el-icon :size="22"><component :is="s.icon" /></el-icon>
+          </div>
           <div>
             <div class="stat-value">{{ s.value }}</div>
             <div class="stat-label">{{ s.label }}</div>
@@ -73,7 +75,14 @@ function fmtTime(iso: string) {
     </section>
 
     <el-card shadow="never" class="recent-card">
-      <template #header>最近会话</template>
+      <template #header>
+        <div class="recent-header">
+          <span>最近会话</span>
+          <el-button link type="primary" size="small" @click="router.push('/chat')">
+            全部会话
+          </el-button>
+        </div>
+      </template>
       <div v-if="recentConversations.length === 0" class="recent-empty">
         还没有会话,去<a @click.prevent="router.push('/chat')" href="/chat">对话页</a>提第一个问题吧。
       </div>
@@ -81,8 +90,12 @@ function fmtTime(iso: string) {
         v-for="c in recentConversations"
         :key="c.id"
         class="recent-item"
+        role="button"
+        tabindex="0"
         @click="router.push(`/chat?conv=${c.id}`)"
+        @keyup.enter="router.push(`/chat?conv=${c.id}`)"
       >
+        <el-icon class="recent-item-icon" :size="15"><ChatDotRound /></el-icon>
         <span class="recent-title">{{ c.title }}</span>
         <span class="recent-time">{{ fmtTime(c.created_at) }}</span>
       </div>
@@ -95,7 +108,9 @@ function fmtTime(iso: string) {
   margin-bottom: var(--app-spacing-xl);
 }
 .hero h2 {
-  margin: 0 0 4px;
+  margin: 0 0 6px;
+  font-size: 24px;
+  font-weight: 700;
 }
 .hero p {
   margin: 0 0 var(--app-spacing-lg);
@@ -112,20 +127,33 @@ function fmtTime(iso: string) {
   margin-bottom: var(--app-spacing-lg);
 }
 .stat-card {
-  border-radius: var(--app-radius);
+  cursor: default;
+}
+.stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--app-shadow-hover);
 }
 .stat-body {
   display: flex;
   align-items: center;
   gap: var(--app-spacing-md);
 }
-.stat-icon {
+.stat-icon-tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  border-radius: var(--app-radius);
+  background: var(--el-color-primary-light-9);
   color: var(--el-color-primary);
+  flex-shrink: 0;
 }
 .stat-value {
-  font-size: 24px;
+  font-size: 26px;
   font-weight: 700;
   line-height: 1.2;
+  font-variant-numeric: tabular-nums;
 }
 .stat-label {
   font-size: 13px;
@@ -134,22 +162,35 @@ function fmtTime(iso: string) {
 .recent-card {
   border-radius: var(--app-radius);
 }
+.recent-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 600;
+}
 .recent-empty {
   font-size: 13px;
   color: var(--el-text-color-secondary);
 }
 .recent-item {
   display: flex;
-  justify-content: space-between;
-  padding: var(--app-spacing-sm) var(--app-spacing-xs);
+  align-items: center;
+  gap: var(--app-spacing-sm);
+  padding: 9px var(--app-spacing-sm);
   border-radius: var(--app-radius-sm);
   cursor: pointer;
+  transition: background-color 0.2s ease;
 }
 .recent-item:hover {
   background: var(--el-fill-color-light);
 }
+.recent-item-icon {
+  color: var(--el-color-primary);
+  flex-shrink: 0;
+}
 .recent-title {
-  max-width: 70%;
+  flex: 1;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -158,5 +199,6 @@ function fmtTime(iso: string) {
 .recent-time {
   font-size: 13px;
   color: var(--el-text-color-secondary);
+  flex-shrink: 0;
 }
 </style>

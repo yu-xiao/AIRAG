@@ -1,31 +1,112 @@
-/* M7 设计令牌:主色/文字/状态色直接沿用 EP 变量(--el-*),此处只补 EP 未覆盖的面 */
+/* ============================================================
+   AIRag 设计令牌(M9 视觉升级)
+   主色:靛蓝系(亮 #4F46E5 / 暗 #6366F1),完整覆盖 EP 色阶;
+   层次:页面底色 → 卡片面 → 悬浮面,配 12/16px 圆角与柔和分层阴影。
+   ============================================================ */
 :root {
-  --app-bg: #f5f7fa;
-  --app-bg-soft: #eef1f6;
+  /* EP 主色阶覆盖(light-N = 与白混合 N 成,与 EP 生成规则一致) */
+  --el-color-primary: #4f46e5;
+  --el-color-primary-light-3: #847eed;
+  --el-color-primary-light-5: #a7a3f2;
+  --el-color-primary-light-7: #cac8f7;
+  --el-color-primary-light-8: #dcdafa;
+  --el-color-primary-light-9: #ededfc;
+  --el-color-primary-dark-2: #3f38b7;
+
+  /* 品牌渐变对(品牌标 / 用户气泡 / 发送钮共用) */
+  --app-brand-grad: linear-gradient(135deg, #4f46e5, #8b5cf6);
+
+  /* 界面分层 */
+  --app-bg: #f6f7fb;
+  --app-bg-soft: #eef0f8;
   --app-card-bg: #ffffff;
   --app-card-border: var(--el-border-color-lighter);
-  --app-radius: 8px;
-  --app-radius-sm: 6px;
-  --app-shadow-card: 0 1px 4px rgba(0, 21, 41, 0.08);
+
+  /* 对话消息区:比卡片面更深一档,衬托白卡气泡 */
+  --app-chat-bg: #f1f3fa;
+
+  /* 圆角体系 */
+  --app-radius-sm: 8px;
+  --app-radius: 12px;
+  --app-radius-lg: 16px;
+
+  /* 分层阴影 */
+  --app-shadow-card: 0 1px 2px rgba(16, 24, 64, 0.04), 0 4px 12px rgba(16, 24, 64, 0.06);
+  --app-shadow-hover: 0 2px 4px rgba(16, 24, 64, 0.05), 0 10px 28px rgba(16, 24, 64, 0.1);
+  --app-shadow-pop: 0 8px 32px rgba(28, 25, 97, 0.16);
+  --app-shadow-brand: 0 4px 14px rgba(79, 70, 229, 0.28);
+
   --app-spacing-xs: 4px;
   --app-spacing-sm: 8px;
   --app-spacing-md: 12px;
   --app-spacing-lg: 16px;
   --app-spacing-xl: 24px;
+
+  /* 等宽字体栈(markdown 行内码 / 代码块) */
+  --app-font-mono: ui-monospace, SFMono-Regular, 'Cascadia Code', Consolas, 'Courier New',
+    monospace;
 }
 
 html.dark {
-  --app-bg: #0a0c10;
-  --app-bg-soft: #141721;
-  --app-card-bg: #141721;
-  --app-card-border: var(--el-border-color-dark);
-  --app-shadow-card: 0 1px 4px rgba(0, 0, 0, 0.4);
+  --el-color-primary: #6366f1;
+  --el-color-primary-light-3: #4b54af;
+  --el-color-primary-light-5: #3c4283;
+  --el-color-primary-light-7: #2c2f56;
+  --el-color-primary-light-8: #242640;
+  --el-color-primary-light-9: #1c1d2a;
+  --el-color-primary-dark-2: #828cf4;
+
+  --app-brand-grad: linear-gradient(135deg, #6366f1, #8b5cf6);
+
+  --app-bg: #0c0e15;
+  --app-bg-soft: #12151f;
+  --app-card-bg: #171b28;
+  --app-card-border: #262b3d;
+
+  --app-chat-bg: #11141d;
+
+  --app-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 12px rgba(0, 0, 0, 0.32);
+  --app-shadow-hover: 0 2px 4px rgba(0, 0, 0, 0.4), 0 10px 28px rgba(0, 0, 0, 0.45);
+  --app-shadow-pop: 0 8px 32px rgba(0, 0, 0, 0.55);
+  --app-shadow-brand: 0 4px 14px rgba(99, 102, 241, 0.35);
 }
 
 body {
   margin: 0;
   background: var(--app-bg);
   transition: background-color 0.2s;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ---------- EP 组件全局精修 ---------- */
+.el-card {
+  border-radius: var(--app-radius);
+  border-color: var(--app-card-border);
+  transition:
+    box-shadow 0.2s ease,
+    transform 0.2s ease,
+    border-color 0.2s ease;
+}
+.el-dialog {
+  border-radius: var(--app-radius-lg);
+}
+.el-message-box {
+  border-radius: var(--app-radius);
+}
+.el-table th.el-table__cell {
+  background: var(--el-fill-color-lighter);
+  color: var(--el-text-color-regular);
+  font-weight: 600;
+}
+
+/* 键盘可达:自绘交互元素统一聚焦环 */
+.conv-item:focus-visible,
+.recent-item:focus-visible,
+.cite-chip:focus-visible,
+.example-chip:focus-visible {
+  outline: 2px solid var(--el-color-primary);
+  outline-offset: 2px;
 }
 
 /* 细滚动条 */
@@ -39,6 +120,9 @@ body {
 *::-webkit-scrollbar-thumb {
   background: var(--el-border-color);
   border-radius: 3px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--el-text-color-disabled);
 }
 
 /* 暗色下覆盖 github.css 的亮色硬编码(代码块在暗色气泡内)。

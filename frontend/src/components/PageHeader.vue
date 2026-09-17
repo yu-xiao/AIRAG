@@ -25,6 +25,18 @@ defineProps<{ title: string; description?: string }>()
 .page-header-text h2 {
   margin: 0;
   font-size: 20px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.page-header-text h2::before {
+  content: '';
+  width: 4px;
+  height: 18px;
+  border-radius: 2px;
+  background: var(--app-brand-grad);
+  flex-shrink: 0;
 }
 .page-header-desc {
   margin: 4px 0 0;

@@ -46,6 +46,7 @@ async function submit() {
       <div class="login-brand">
         <span class="brand-mark">AI</span>
         <h2>AIRag 知识库</h2>
+        <p class="brand-tagline">私有知识 · 溯源问答</p>
       </div>
       <el-form ref="formRef" :model="form" :rules="rules" label-position="top">
         <el-form-item label="用户名" prop="username">
@@ -54,10 +55,10 @@ async function submit() {
         <el-form-item label="密码" prop="password">
           <el-input v-model="form.password" type="password" show-password placeholder="密码" />
         </el-form-item>
-        <el-button type="primary" :loading="loading" style="width: 100%" @click="submit">
+        <el-button type="primary" :loading="loading" class="login-submit" @click="submit">
           {{ isRegister ? '注册并登录' : '登录' }}
         </el-button>
-        <el-button link style="width: 100%; margin-top: 8px" @click="isRegister = !isRegister">
+        <el-button link class="login-switch" @click="isRegister = !isRegister">
           {{ isRegister ? '已有账号?去登录' : '没有账号?注册一个' }}
         </el-button>
       </el-form>
@@ -71,11 +72,17 @@ async function submit() {
   align-items: center;
   justify-content: center;
   height: 100vh;
-  background: var(--app-bg);
+  background:
+    radial-gradient(600px 420px at 18% 12%, var(--el-color-primary-light-8), transparent 60%),
+    radial-gradient(520px 420px at 85% 88%, rgba(139, 92, 246, 0.14), transparent 60%),
+    var(--app-bg);
 }
 .login-card {
-  width: 360px;
-  border-radius: var(--app-radius);
+  width: 380px;
+  border-radius: var(--app-radius-lg);
+  border: 1px solid var(--app-card-border);
+  box-shadow: var(--app-shadow-pop);
+  animation: login-in 0.35s ease-out;
 }
 .login-brand {
   display: flex;
@@ -88,14 +95,46 @@ async function submit() {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
-  border-radius: var(--app-radius);
-  background: var(--el-color-primary);
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  background: var(--app-brand-grad);
   color: #fff;
+  font-size: 18px;
   font-weight: 700;
+  box-shadow: var(--app-shadow-brand);
 }
 h2 {
+  margin: 4px 0 0;
+}
+.brand-tagline {
   margin: 0;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+  letter-spacing: 1px;
+}
+.login-submit {
+  width: 100%;
+  height: 38px;
+  font-weight: 600;
+}
+.login-switch {
+  width: 100%;
+  margin: 8px 0 0;
+}
+@keyframes login-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .login-card {
+    animation: none;
+  }
 }
 </style>

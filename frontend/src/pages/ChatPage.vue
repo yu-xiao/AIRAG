@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, type Component } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ChatDotRound, Delete, Download, Plus, Promotion, VideoPause } from '@element-plus/icons-vue'
+import { ChatLineRound, ChatDotRound, Delete, Download, MagicStick, Plus, Promotion, Search, VideoPause } from '@element-plus/icons-vue'
 import DOMPurify from 'dompurify'
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js/lib/core'
@@ -88,10 +88,10 @@ const greeting = computed(() => {
   return '晚上好'
 })
 
-const EXAMPLE_QUESTIONS = [
-  '帮我总结知识库的核心内容',
-  '文档里提到了哪些关键数字?',
-  '根据资料,主要的流程或结论是什么?',
+const EXAMPLE_QUESTIONS: { q: string; icon: Component }[] = [
+  { q: '帮我总结知识库的核心内容', icon: MagicStick },
+  { q: '文档里提到了哪些关键数字?', icon: Search },
+  { q: '根据资料,主要的流程或结论是什么?', icon: ChatLineRound },
 ]
 
 function useExample(q: string) {
@@ -328,7 +328,10 @@ onUnmounted(() => {
           :key="c.id"
           class="conv-item"
           :class="{ active: c.id === currentId }"
+          role="button"
+          tabindex="0"
           @click="openConversation(c)"
+          @keyup.enter="openConversation(c)"
         >
           <div class="conv-row">
             <el-icon class="conv-icon" :size="14"><ChatDotRound /></el-icon>
@@ -383,8 +386,16 @@ onUnmounted(() => {
           <h3>{{ greeting }},{{ auth.user?.username ?? '' }}</h3>
           <p>回答基于所选知识库的文档,并附引用溯源;库里没有的内容会明确告知。</p>
           <div class="hero-chips">
-            <el-button v-for="q in EXAMPLE_QUESTIONS" :key="q" round size="small" @click="useExample(q)">
-              {{ q }}
+            <el-button
+              v-for="ex in EXAMPLE_QUESTIONS"
+              :key="ex.q"
+              round
+              size="small"
+              class="example-chip"
+              @click="useExample(ex.q)"
+            >
+              <el-icon class="example-chip-icon"><component :is="ex.icon" /></el-icon>
+              {{ ex.q }}
             </el-button>
           </div>
         </div>
@@ -462,6 +473,9 @@ onUnmounted(() => {
 }
 .new-chat {
   width: 100%;
+  height: 38px;
+  border-radius: var(--app-radius-sm);
+  font-weight: 600;
 }
 .conv-list {
   flex: 1;
@@ -469,16 +483,37 @@ onUnmounted(() => {
   background: var(--app-card-bg);
   border: 1px solid var(--app-card-border);
   border-radius: var(--app-radius);
+  box-shadow: var(--app-shadow-card);
   padding: var(--app-spacing-sm);
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 .conv-item {
+  position: relative;
   padding: 8px 10px;
   border-radius: var(--app-radius-sm);
   cursor: pointer;
   color: var(--el-text-color-primary);
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease;
+}
+.conv-item::before {
+  /* 激活态左侧主色指示条 */
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 22%;
+  height: 56%;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--el-color-primary);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.conv-item.active::before {
+  opacity: 1;
 }
 .conv-row {
   display: flex;
@@ -499,7 +534,7 @@ onUnmounted(() => {
 }
 .conv-time {
   margin-left: 20px;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--el-text-color-secondary);
   opacity: 0.85;
 }
@@ -508,9 +543,12 @@ onUnmounted(() => {
   flex-shrink: 0;
   color: var(--el-text-color-secondary);
   visibility: hidden;
+  transition: color 0.15s ease;
 }
 .conv-item:hover .conv-export,
-.conv-item:hover .conv-delete {
+.conv-item:hover .conv-delete,
+.conv-item.active .conv-export,
+.conv-item.active .conv-delete {
   visibility: visible;
 }
 .conv-export:hover {
@@ -528,6 +566,9 @@ onUnmounted(() => {
 .conv-item.active .conv-title,
 .conv-item.active .conv-icon {
   color: var(--el-color-primary);
+}
+.conv-item.active .conv-title {
+  font-weight: 600;
 }
 .conv-empty {
   margin: auto;
@@ -551,16 +592,17 @@ onUnmounted(() => {
 .chat-toolbar {
   display: flex;
   align-items: center;
-  gap: var(--app-spacing-sm);
+  gap: var(--app-spacing-md);
   background: var(--app-card-bg);
   border: 1px solid var(--app-card-border);
   border-radius: var(--app-radius);
-  padding: 8px 12px;
   box-shadow: var(--app-shadow-card);
+  padding: 9px 14px;
 }
 .kb-label {
   font-size: 13px;
-  color: var(--el-text-color-secondary);
+  font-weight: 600;
+  color: var(--el-text-color-regular);
   flex-shrink: 0;
 }
 .kb-select {
@@ -583,13 +625,13 @@ onUnmounted(() => {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  background: var(--app-card-bg);
+  background: var(--app-chat-bg);
   border: 1px solid var(--app-card-border);
-  border-radius: var(--app-radius);
-  padding: var(--app-spacing-lg);
+  border-radius: var(--app-radius-lg);
+  padding: var(--app-spacing-lg) var(--app-spacing-xl) var(--app-spacing-xl);
   display: flex;
   flex-direction: column;
-  gap: var(--app-spacing-md);
+  gap: 20px;
 }
 
 /* 空态 Hero:品牌标 + 问候 + 示例问题 */
@@ -601,47 +643,102 @@ onUnmounted(() => {
   gap: var(--app-spacing-sm);
   text-align: center;
   padding: var(--app-spacing-xl);
-  max-width: 520px;
+  max-width: 540px;
+  animation: hero-in 0.4s ease-out;
 }
 .hero-mark {
-  width: 56px;
-  height: 56px;
-  border-radius: 16px;
-  background: linear-gradient(135deg, var(--el-color-primary), var(--el-color-primary-light-3));
+  width: 64px;
+  height: 64px;
+  border-radius: 18px;
+  background: var(--app-brand-grad);
   color: #fff;
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 700;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 4px 16px var(--el-color-primary-light-7);
+  box-shadow:
+    0 0 0 6px var(--el-color-primary-light-9),
+    var(--app-shadow-brand);
 }
 .chat-hero h3 {
-  margin: 4px 0 0;
+  margin: 10px 0 0;
+  font-size: 22px;
+  font-weight: 700;
 }
 .chat-hero p {
   margin: 0;
   color: var(--el-text-color-secondary);
-  font-size: 13px;
+  font-size: 14px;
+  line-height: 1.7;
+  max-width: 460px;
 }
 .hero-chips {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: var(--app-spacing-sm);
-  margin-top: var(--app-spacing-sm);
+  gap: 10px;
+  margin-top: var(--app-spacing-md);
 }
 .hero-chips :deep(.el-button) {
-  transition: transform 0.15s ease;
+  padding: 9px 16px;
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+  background: var(--app-card-bg);
+  border-color: var(--app-card-border);
+  box-shadow: var(--app-shadow-card);
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease,
+    color 0.18s ease,
+    border-color 0.18s ease;
+  animation: chip-in 0.35s ease-out backwards;
+}
+.hero-chips :deep(.el-button:nth-child(1)) {
+  animation-delay: 0.08s;
+}
+.hero-chips :deep(.el-button:nth-child(2)) {
+  animation-delay: 0.16s;
+}
+.hero-chips :deep(.el-button:nth-child(3)) {
+  animation-delay: 0.24s;
 }
 .hero-chips :deep(.el-button:hover) {
-  transform: translateY(-1px);
+  transform: translateY(-2px);
+  color: var(--el-color-primary);
+  border-color: var(--el-color-primary-light-5);
+  background: var(--el-color-primary-light-9);
+  box-shadow: var(--app-shadow-hover);
+}
+.example-chip-icon {
+  margin-right: 6px;
+  font-size: 14px;
+}
+@keyframes hero-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes chip-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
-/* 气泡:用户右侧(主色渐变) / 助手左侧(卡片,样式在 AssistantMessage 组件) */
+/* 气泡:用户右侧(品牌渐变) / 助手左侧(白卡,样式在 AssistantMessage 组件) */
 .msg-row {
   display: flex;
-  gap: var(--app-spacing-sm);
+  gap: var(--app-spacing-md);
   align-items: flex-start;
   animation: msg-in 0.25s ease-out;
 }
@@ -649,14 +746,15 @@ onUnmounted(() => {
   justify-content: flex-end;
 }
 .msg-row.user .bubble {
-  background: linear-gradient(135deg, var(--el-color-primary), var(--el-color-primary-light-5));
+  background: var(--app-brand-grad);
   color: #fff;
   max-width: 78%;
-  padding: var(--app-spacing-sm) var(--app-spacing-md);
-  border-radius: 12px 12px 4px 12px;
+  padding: 10px 16px;
+  border-radius: 14px 14px 4px 14px;
   font-size: 14px;
-  line-height: 1.6;
+  line-height: 1.65;
   word-break: break-word;
+  box-shadow: var(--app-shadow-brand);
   /* 保留 Shift+Enter 多行输入的换行(旧 .plain-text 语义,brief 遗漏系笔误) */
   white-space: pre-wrap;
 }
@@ -665,8 +763,8 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   border-radius: 50%;
   font-size: 12px;
   font-weight: 600;
@@ -691,7 +789,7 @@ onUnmounted(() => {
 .composer-wrap {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 .composer {
   display: flex;
@@ -699,15 +797,18 @@ onUnmounted(() => {
   gap: var(--app-spacing-sm);
   background: var(--app-card-bg);
   border: 1px solid var(--app-card-border);
-  border-radius: var(--app-radius);
-  padding: 8px 8px 8px 12px;
+  border-radius: var(--app-radius-lg);
+  box-shadow: var(--app-shadow-card);
+  padding: 10px 10px 10px 16px;
   transition:
     border-color 0.2s,
     box-shadow 0.2s;
 }
 .composer:focus-within {
-  border-color: var(--el-color-primary);
-  box-shadow: 0 0 0 2px var(--el-color-primary-light-8);
+  border-color: var(--el-color-primary-light-5);
+  box-shadow:
+    0 0 0 3px var(--el-color-primary-light-8),
+    var(--app-shadow-card);
 }
 .composer :deep(.el-textarea) {
   flex: 1;
@@ -717,11 +818,28 @@ onUnmounted(() => {
   background: transparent;
   box-shadow: none !important; /* 描边交给 composer:focus-within */
   padding: 6px 0;
+  font-size: 14px;
+  line-height: 1.6;
 }
 .send-fab {
   flex-shrink: 0;
-  width: 36px;
-  height: 36px;
+  width: 38px;
+  height: 38px;
+}
+.send-fab.el-button--primary {
+  background: var(--app-brand-grad);
+  border: none;
+  box-shadow: var(--app-shadow-brand);
+  transition:
+    transform 0.15s ease,
+    filter 0.15s ease;
+}
+.send-fab.el-button--primary:not(.is-disabled):hover {
+  transform: scale(1.06);
+  filter: brightness(1.05);
+}
+.send-fab.el-button--primary:not(.is-disabled):active {
+  transform: scale(0.94);
 }
 .composer-hint {
   font-size: 12px;
@@ -730,10 +848,15 @@ onUnmounted(() => {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .msg-row {
+  .msg-row,
+  .chat-hero,
+  .hero-chips :deep(.el-button) {
     animation: none;
   }
-  .hero-chips :deep(.el-button) {
+  .hero-chips :deep(.el-button),
+  .send-fab.el-button--primary,
+  .conv-item,
+  .conv-item::before {
     transition: none;
   }
 }

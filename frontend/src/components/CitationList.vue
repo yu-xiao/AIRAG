@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { Collection } from '@element-plus/icons-vue'
 import type { Citation } from '@/api/chat'
 
 defineProps<{ citations: Citation[] }>()
@@ -15,17 +16,22 @@ function open(c: Citation) {
 
 <template>
   <div class="citation-list">
-    <span class="citation-title">引用来源</span>
-    <el-tag
+    <span class="citation-title">
+      <el-icon :size="12"><Collection /></el-icon>
+      引用来源
+    </span>
+    <button
       v-for="c in citations"
       :key="c.number"
-      class="citation-tag"
-      type="info"
-      effect="plain"
+      type="button"
+      class="cite-chip"
+      :title="c.filename"
       @click="open(c)"
     >
-      [{{ c.number }}] {{ c.filename }}{{ c.page_no != null ? ` p.${c.page_no}` : '' }}
-    </el-tag>
+      <span class="cite-no">{{ c.number }}</span>
+      <span class="cite-name">{{ c.filename }}</span>
+      <span v-if="c.page_no != null" class="cite-page">p.{{ c.page_no }}</span>
+    </button>
 
     <el-dialog v-model="dialogVisible" title="引用详情" width="560px">
       <div v-if="active" class="citation-detail">
@@ -56,17 +62,62 @@ function open(c: Citation) {
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  margin-top: 8px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--el-border-color-lighter);
 }
 .citation-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 12px;
   color: var(--el-text-color-secondary);
 }
-.citation-tag {
-  cursor: pointer;
-}
-.citation-tag:hover {
+.cite-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 240px;
+  padding: 2px 10px 2px 3px;
+  border: 1px solid var(--el-color-primary-light-7);
+  border-radius: 999px;
+  background: var(--el-color-primary-light-9);
   color: var(--el-color-primary);
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+  transition:
+    box-shadow 0.18s ease,
+    transform 0.18s ease,
+    background-color 0.18s ease;
+}
+.cite-chip:hover {
+  background: var(--el-color-primary-light-8);
+  transform: translateY(-1px);
+  box-shadow: var(--app-shadow-card);
+}
+.cite-no {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: var(--el-color-primary);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.cite-name {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cite-page {
+  flex-shrink: 0;
+  opacity: 0.75;
 }
 .citation-detail {
   display: flex;
@@ -92,7 +143,7 @@ function open(c: Citation) {
   overflow-y: auto;
   padding: 8px 10px;
   background: var(--el-fill-color-light);
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 13px;
   line-height: 1.6;
   white-space: pre-wrap;

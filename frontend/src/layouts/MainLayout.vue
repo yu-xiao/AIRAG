@@ -67,10 +67,16 @@ function onLogout() {
       </el-menu>
     </el-aside>
     <el-container>
-      <el-header class="app-header">
+      <el-header class="app-header" height="56px">
         <span class="page-title">{{ pageTitle }}</span>
         <div class="header-actions">
-          <el-button :icon="isDark ? Sunny : Moon" circle @click="toggle" />
+          <el-button
+            :icon="isDark ? Sunny : Moon"
+            circle
+            aria-label="切换主题"
+            class="theme-toggle"
+            @click="toggle"
+          />
           <el-dropdown v-if="auth.user">
             <span class="user-chip">
               <span class="avatar">{{ auth.user.username.slice(0, 1).toUpperCase() }}</span>
@@ -110,20 +116,41 @@ function onLogout() {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: var(--app-radius-sm);
-  background: var(--el-color-primary);
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: var(--app-brand-grad);
   color: #fff;
   font-size: 14px;
   font-weight: 700;
+  box-shadow: var(--app-shadow-brand);
 }
 .brand-name {
-  font-weight: 600;
+  font-weight: 650;
   font-size: 15px;
+  letter-spacing: 0.2px;
 }
 .app-menu {
   border-right: none;
+  padding: 4px 8px;
+}
+.app-menu :deep(.el-menu-item) {
+  height: 42px;
+  line-height: 42px;
+  margin: 2px 0;
+  border-radius: var(--app-radius-sm);
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease;
+}
+.app-menu :deep(.el-menu-item:hover) {
+  background: var(--el-fill-color-light);
+}
+.app-menu :deep(.el-menu-item.is-active) {
+  background: var(--el-color-primary-light-9);
+}
+.app-menu :deep(.el-menu-item-group__title) {
+  padding-left: 12px;
 }
 .app-header {
   display: flex;
@@ -133,20 +160,37 @@ function onLogout() {
   background: var(--app-card-bg);
 }
 .page-title {
-  font-size: 15px;
-  font-weight: 600;
+  font-size: 16px;
+  font-weight: 650;
 }
 .header-actions {
   display: flex;
   align-items: center;
   gap: var(--app-spacing-md);
 }
+.theme-toggle :deep(.el-icon) {
+  transition: transform 0.3s ease;
+}
+.theme-toggle:hover :deep(.el-icon) {
+  transform: rotate(30deg);
+}
 .user-chip {
   display: inline-flex;
   align-items: center;
   gap: var(--app-spacing-sm);
+  padding: 4px 12px 4px 5px;
+  border: 1px solid var(--app-card-border);
+  border-radius: 999px;
+  background: var(--app-card-bg);
   cursor: pointer;
   outline: none;
+  transition:
+    box-shadow 0.2s ease,
+    border-color 0.2s ease;
+}
+.user-chip:hover {
+  border-color: var(--el-color-primary-light-5);
+  box-shadow: var(--app-shadow-card);
 }
 .avatar {
   display: inline-flex;
@@ -166,5 +210,14 @@ function onLogout() {
 }
 .app-main {
   background: var(--app-bg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .theme-toggle :deep(.el-icon) {
+    transition: none;
+  }
+  .app-menu :deep(.el-menu-item),
+  .user-chip {
+    transition: none;
+  }
 }
 </style>
