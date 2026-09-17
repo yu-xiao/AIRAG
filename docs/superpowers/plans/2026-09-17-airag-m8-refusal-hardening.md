@@ -1,6 +1,6 @@
 # AIRag M8 拒答加固 + 一致性收口 实施计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** 拒答判定子串化(包裹型加固)+ refused 每轮复位 + KB 重名 409 与下拉区分 + 暗色 hljs-regexp + 孤儿 eval_sets 清理脚本与真栈验收。
 
@@ -33,7 +33,7 @@
 - Consumes: `REFUSAL_PHRASE` 常量(nodes.py:10)、`generate_node(state, llm)` 既有签名。
 - Produces: `generate_node` 返回的 `refused` 语义变为"话术子串命中即 True";下游(SSE/落库/前端/导出)零改动。
 
-- [ ] **Step 1: 改造与新增失败测试**
+- [x] **Step 1: 改造与新增失败测试**
 
 把 `backend/tests/test_chat_graph.py:586` 的用例整体替换为以下三个(保留 `test_generate_marks_refusal`:575 与 `test_generate_normal_answer_not_refused`:596 不动):
 
@@ -72,12 +72,12 @@ async def test_generate_near_phrase_not_refused():
     assert out2["refused"] is False
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `.venv\Scripts\python -m pytest tests/test_chat_graph.py -k "refusal or refused or near_phrase" -v`
 Expected: `test_generate_refusal_containment_semantics` FAIL(包裹型变体 refused=False),`test_generate_near_phrase_not_refused` PASS(旧逻辑恰好也通过,作回归锚)。
 
-- [ ] **Step 3: 最小实现**
+- [x] **Step 3: 最小实现**
 
 `nodes.py:12-17` SYSTEM_PROMPT 第二行改为(原单行拆两行):
 
@@ -97,12 +97,12 @@ SYSTEM_PROMPT = (
         "refused": REFUSAL_PHRASE in (answer or "").strip(),
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `.venv\Scripts\python -m pytest tests/test_chat_graph.py -v`
 Expected: 全 PASS(含既有 575/596 两用例)。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/app/services/chat_graph/nodes.py backend/tests/test_chat_graph.py
@@ -121,7 +121,7 @@ git commit -m "feat: refusal detection upgraded to substring containment"
 - Consumes: `ChatState.refused: bool` 已声明(`app/services/chat_graph/state.py`),channel 存在,reset 合法。
 - Produces: `rewrite_node` 返回字典新增键 `refused: False`。
 
-- [ ] **Step 1: 改造既有断言并新增失败测试**
+- [x] **Step 1: 改造既有断言并新增失败测试**
 
 `test_rewrite_disabled_resets_state`(test_chat_graph.py:109-116)的期望字典追加一行:
 
@@ -153,12 +153,12 @@ async def test_rewrite_clears_stale_refused():
     assert out["refused"] is False
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `.venv\Scripts\python -m pytest tests/test_chat_graph.py -k "rewrite" -v`
 Expected: `test_rewrite_disabled_resets_state` 与 `test_rewrite_clears_stale_refused` FAIL(返回字典无 refused 键)。
 
-- [ ] **Step 3: 最小实现**
+- [x] **Step 3: 最小实现**
 
 `nodes.py:137-144` reset 字典追加(置于 `"proposed_query": "",` 之后):
 
@@ -174,12 +174,12 @@ Expected: `test_rewrite_disabled_resets_state` 与 `test_rewrite_clears_stale_re
     }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `.venv\Scripts\python -m pytest tests/test_chat_graph.py -v`
 Expected: 全 PASS。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/app/services/chat_graph/nodes.py backend/tests/test_chat_graph.py
@@ -198,7 +198,7 @@ git commit -m "fix: reset refused flag at turn start in rewrite node"
 - Consumes: conftest fixtures `client` / `auth_headers`(editor);`KBIn.name`(str, 1-128)。
 - Produces: `POST /api/kbs` 新语义——strip 后为空 → 422 `"knowledge base name cannot be blank"`;strip 后重名 → 409 `"knowledge base name already exists"`;入库 name 为 strip 后形态。Task 4 前端依赖 409 状态码与该 detail。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 `backend/tests/test_kbs.py` 文末追加:
 
@@ -226,12 +226,12 @@ async def test_create_kb_blank_after_strip_422(client, auth_headers):
     assert resp.json()["detail"] == "knowledge base name cannot be blank"
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `.venv\Scripts\python -m pytest tests/test_kbs.py -k "duplicate or blank" -v`
 Expected: 三个新用例 FAIL(现在返回 201)。
 
-- [ ] **Step 3: 最小实现**
+- [x] **Step 3: 最小实现**
 
 `kbs.py` `create_kb` 在 viewer 检查之后改为(替换 21-29 行对应片段;`select` 已在文件头导入):
 
@@ -256,12 +256,12 @@ Expected: 三个新用例 FAIL(现在返回 201)。
 
 (后续 commit/refresh/返回不变。)
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `.venv\Scripts\python -m pytest tests/test_kbs.py tests/test_kb_permissions.py -v`
 Expected: 全 PASS(权限套件不受影响)。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/app/api/kbs.py backend/tests/test_kbs.py
@@ -280,7 +280,7 @@ git commit -m "feat: reject duplicate knowledge base names with 409"
 - Consumes: Task 3 的 409 响应(`response.status === 409`);`kbApi.create` 抛 axios 形态错误。
 - Produces: 纯 UI 行为,无导出接口。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 新建 `frontend/src/pages/__tests__/KbPage.spec.ts`:
 
@@ -344,12 +344,12 @@ describe('KbPage create dialog', () => {
 
 (若对话框内容因 teleport 在 `w.find` 下取不到,给 mount 加 `attachTo: document.body` 并改用 `document.querySelector`;先按默认尝试。)
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run(frontend 目录): `pnpm vitest run src/pages/__tests__/KbPage.spec.ts`
 Expected: 用例 1 FAIL(无内联错误节点),用例 2 PASS(现状恰好不显示内联)。
 
-- [ ] **Step 3: 最小实现**
+- [x] **Step 3: 最小实现**
 
 `KbPage.vue` script 增加(挨着 `const form = reactive(...)`):
 
@@ -383,12 +383,12 @@ template 名称表单项与输入加联动清除:
         </el-form-item>
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `pnpm vitest run src/pages/__tests__/KbPage.spec.ts`
 Expected: 2 PASS。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add frontend/src/pages/KbPage.vue frontend/src/pages/__tests__/KbPage.spec.ts
@@ -408,7 +408,7 @@ git commit -m "feat: inline duplicate-name error on kb create dialog"
 - Consumes: `KbItem`(id: number, name: string;frontend/src/api/kb.ts)。
 - Produces: `disambiguateKbNames(kbs: Pick<KbItem, 'id' | 'name'>[]): Map<number, string>`——碰撞名映射为 `` `${name} ·#${id}` ``,唯一名映射纯名。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 新建 `frontend/src/utils/__tests__/kbLabel.spec.ts`:
 
@@ -443,12 +443,12 @@ describe('disambiguateKbNames', () => {
 })
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `pnpm vitest run src/utils/__tests__/kbLabel.spec.ts`
 Expected: FAIL,模块不存在。
 
-- [ ] **Step 3: 最小实现**
+- [x] **Step 3: 最小实现**
 
 新建 `frontend/src/utils/kbLabel.ts`:
 
@@ -469,7 +469,7 @@ export function disambiguateKbNames(
 }
 ```
 
-- [ ] **Step 4: 接线 ChatPage 并跑测试**
+- [x] **Step 4: 接线 ChatPage 并跑测试**
 
 `ChatPage.vue` script:`import { disambiguateKbNames } from '@/utils/kbLabel'`(挨着 kbApi import),挨着 `const kbs = ref<KbItem[]>([])`(67 行)加:
 
@@ -486,7 +486,7 @@ template 363 行改为:
 Run: `pnpm vitest run src/utils/__tests__/kbLabel.spec.ts`
 Expected: 3 PASS。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add frontend/src/utils/kbLabel.ts frontend/src/utils/__tests__/kbLabel.spec.ts frontend/src/pages/ChatPage.vue
@@ -504,7 +504,7 @@ git commit -m "feat: disambiguate duplicate kb names in chat selector"
 - Consumes: 暗色 string 组色值 `#98c379`(亮色 github.css 中 regexp 与 string 同为 #032f62,暗色保持同组)。
 - Produces: 无(纯样式)。
 
-- [ ] **Step 1: 修改规则组**
+- [x] **Step 1: 修改规则组**
 
 `tokens.css:64-67` 改为:
 
@@ -516,12 +516,12 @@ html.dark .hljs-regexp {
 }
 ```
 
-- [ ] **Step 2: 验证构建**
+- [x] **Step 2: 验证构建**
 
 Run: `pnpm build`
 Expected: 成功(vue-tsc + vite 无错)。
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add frontend/src/styles/tokens.css
@@ -540,7 +540,7 @@ git commit -m "fix: dark theme hljs-regexp color"
 - Consumes: `backend/eval_sets/*.json` 文件名约定 `{kb_id}.json`(README.md 不匹配);`app.db.session.SessionLocal`(真栈运行库)。
 - Produces: 纯函数 `find_orphans(existing_ids: set[int], files: list[Path]) -> list[Path]`;CLI `--apply` 开关(默认 dry-run)。Task 8 验收调用 dry-run 输出。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 新建 `backend/tests/test_purge_evalsets.py`:
 
@@ -565,12 +565,12 @@ def test_find_orphans_ignores_non_numeric_and_readme():
     assert find_orphans(set(), files) == [_p("9.json")]
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `.venv\Scripts\python -m pytest tests/test_purge_evalsets.py -v`
 Expected: FAIL,`ModuleNotFoundError: No module named 'scripts.purge_orphan_evalsets'`。
 
-- [ ] **Step 3: 最小实现**
+- [x] **Step 3: 最小实现**
 
 新建 `backend/scripts/purge_orphan_evalsets.py`:
 
@@ -633,12 +633,12 @@ if __name__ == "__main__":
     asyncio.run(main(ap.parse_args().apply))
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `.venv\Scripts\python -m pytest tests/test_purge_evalsets.py -v`
 Expected: 2 PASS。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/scripts/purge_orphan_evalsets.py backend/tests/test_purge_evalsets.py
@@ -656,7 +656,7 @@ git commit -m "feat: orphan eval_sets purge script"
 - Consumes: Task 1 的子串判定语义(断言用 `REFUSAL_PHRASE in answer`)、Task 3 的 409、Task 7 的 dry-run 输出;真栈 http://127.0.0.1:8001/api。
 - Produces: 退出码 0/1 与 PASS/FAIL 清单;收尾直接清 DB(系统无删除端点)。
 
-- [ ] **Step 1: 写脚本**
+- [x] **Step 1: 写脚本**
 
 新建 `backend/scripts/m8_acceptance.py`:
 
@@ -936,17 +936,17 @@ if __name__ == "__main__":
 
 注意:`summary_and_exit()` 在 FAIL 时 `sys.exit(1)` 会跳过 cleanup——真栈验收失败时残留 KB 由人工清(与 m7 同约定);成功路径必清。
 
-- [ ] **Step 2: 起真栈并运行**
+- [x] **Step 2: 起真栈并运行**
 
 前置(服务未起时):PG+Redis 服务 → `backend\start_dev.bat` → `backend\start_worker.bat`(beat 不需要)。
 Run(backend 目录): `.venv\Scripts\python scripts\m8_acceptance.py`
 Expected: `M8 ACCEPTANCE: 9/9 PASS`,末行 `cleanup done: [...]`。
 
-- [ ] **Step 3: 失败时处置**
+- [x] **Step 3: 失败时处置**
 
 任一 FAIL:按 systematic-debugging 排查(常见:S3 话术不精确→看模型原始输出;S5 导入失败→确认 scripts 包与 EVAL_DIR)。连续两次失败同一断言才 FAIL(脚本内置 attempts=2)。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add backend/scripts/m8_acceptance.py
@@ -964,31 +964,31 @@ git commit -m "test: m8 acceptance script (zero-hit substring + dup 409 + purge 
 **Interfaces:**
 - Consumes: Task 7 脚本 `--apply`;真栈仍在运行(Task 8 起的)。
 
-- [ ] **Step 1: 后端全量**
+- [x] **Step 1: 后端全量**
 
 Run(backend 目录): `.venv\Scripts\python -m pytest -q`
 Expected: 全 PASS,数量 = M7 基线 137 + M8 新增(Task1 净 +1、Task2 净 +1、Task3 +3、Task7 +2 ≈ 144,以实际输出为准记录到执行记录)。
 
-- [ ] **Step 2: 前端全量**
+- [x] **Step 2: 前端全量**
 
 Run(frontend 目录): `pnpm vitest run && pnpm build && pnpm lint`
 Expected: 全 PASS(11 + Task4 2 + Task5 3 = 16),build/lint 0 错 0 警。
 
-- [ ] **Step 3: 孤儿真清(对运行库)**
+- [x] **Step 3: 孤儿真清(对运行库)**
 
 Run(backend 目录,真栈保持运行): `.venv\Scripts\python scripts\purge_orphan_evalsets.py`
 先看 dry-run 清单(预期含 KB 已删的 5/6/8/9.json 中的孤儿),确认后:
 `.venv\Scripts\python scripts\purge_orphan_evalsets.py --apply`
 Expected: 逐行 `deleted: N.json`;`git status` 显示 eval_sets 下删除。
 
-- [ ] **Step 4: 提交清理**
+- [x] **Step 4: 提交清理**
 
 ```bash
 git add -A backend/eval_sets
 git commit -m "chore: purge orphaned eval sets against running db"
 ```
 
-- [ ] **Step 5: 计划回填**
+- [x] **Step 5: 计划回填**
 
 勾掉本文档全部 checkbox;文末追加"M8 执行记录"节(验收输出、测试计数、purge 清单、偏差与裁决)。commit:
 ```bash
@@ -996,7 +996,7 @@ git add docs/superpowers/plans/2026-09-17-airag-m8-refusal-hardening.md
 git commit -m "chore: m8 execution record"
 ```
 
-- [ ] **Step 6: 用户走查**
+- [x] **Step 6: 用户走查**
 
 浏览器过:创建重名库内联报错 / 下拉重名后缀 / 暗色代码块正则高亮(可在对话中让模型输出含正则的代码块验证)/ 对话页回归。走查增量照 M7 惯例记入执行记录。
 
@@ -1005,3 +1005,26 @@ git commit -m "chore: m8 execution record"
 ## M9 候选(执行后移交)
 
 KB 删除端点(owner/admin,级联文档+chunk+权限+向量+eval_sets 钩子)、DB 唯一约束+存量去重、包裹型拒答 LLM 二审(若子串+提示词实证不足)、评估入库/多跳并行/MinerU 本地化/LDAP(等输入)。
+
+---
+
+## M8 执行记录(2026-09-17)
+
+**验收**:`scripts/m8_acceptance.py` 真智谱 **11/11 PASS**(health/账号晋升/建库 201/重名 409/strip 重名 409/异名 201/pdf 本地解析 done/S3 零命中 rerank-on refused+子串/S3b 零命中 rerank-off 子串/S4 正常题不误伤+引用≥1/S5 purge dry-run);成功路径自动清库(KB 17/18,FK 顺序)。
+
+**测试计数**:后端 pytest **144P**(M7 基线 137 + 净 7:T1 +1/T2 +1/T3 +3/T7 +2);前端 vitest **16P/7 文件**(11 + T4 2 + T5 3,最终 HEAD 复跑);build/lint 0-0。
+
+**purge 落地**:孤儿 6.json/8.json 已 `--apply` 删除(b5f9d86);5.json/9.json/README.md 保留——审查者独立 SELECT 核验 KB 集合 {1,2,3,4,5,7,9} 存活。
+
+**偏差与裁决**(SDD ledger 同步):
+1. 计划笔误:Task 8 预期"9/9"实为脚本 11 项断言,以脚本为准记 11/11。
+2. Task 8 脚本两处缺陷由实现者修复(均 script-only,复审通过):①brief 的薄文本 PDF(<50 字/页)被管道自动路由 MinerU 云 OCR 且其 OSS 上传主机当前网络不可达→补一段文本保持本地解析路径,断言未动;②promote_roles/cleanup_kbs 复用池化 SessionLocal 跨 asyncio.run 崩溃("Event loop is closed")→改 per-call NullPool 引擎(app/workers/pipeline.py 同款)。
+3. Task 4 修复环 1 轮(8b0339d):Task 9 lint 门拦下 3 处裸 vi.fn() 违反 vitest/require-mock-type-parameters→补类型参数(镜像 kbApi 真实签名),vitest 2/2+全量 lint/build 复绿。
+4. Task 4 测试适配(生产代码与计划逐字一致):mount 需 EP 全局插件(裸 mount 组件不解析,RED 仍命中预期断言);EP form-item 错误显示 100ms 防抖→vi.waitFor。
+5. Task 1 brief"替换为以下三个"实为两函数三场景(审查确认无缺失),按代码块执行。
+
+**环境备注**:mineru.oss-cn-shanghai.aliyuncs.com 当前 TLS 握手超时(非 M8 缺陷,M5 上午真调尚通)——后续云 OCR 上传会失败直至网络恢复。
+
+**实现提交**(10 个,不含 spec/plan 文档):de9f069/50a67d5/3551e39/a645284/80bc812/62462b5/9a3f2dd/c8c3994/8b0339d/b5f9d86。
+
+**待办**:用户浏览器走查(重名内联报错/下拉后缀/暗色正则高亮/对话页回归)→ 通过后收官推送。
