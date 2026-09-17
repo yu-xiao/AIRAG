@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     # M9 Agent 对外开放
     AGENT_API_ENABLED: bool = True
     AGENT_MAX_KEYS_PER_USER: int = 10
+    AGENT_RATE_LIMIT_PER_MIN: int = 60
     MAX_UPLOAD_MB: int = 20
 
 

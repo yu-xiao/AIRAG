@@ -15,6 +15,7 @@ from app.schemas.agent import (
     AgentSearchOut,
 )
 from app.services import agent_facade
+from app.services.agent_ratelimit import allow as rate_allow
 from app.services.audit import audit
 
 router = APIRouter(prefix="/agent", tags=["agent"])
@@ -24,12 +25,25 @@ def _ip(request: Request) -> str | None:
     return request.client.host if request.client else None
 
 
+async def _check_rate(principal: Principal) -> None:
+    """仅对 API Key 生效;JWT(人工调试)不限流。"""
+    if principal.kind != "api_key" or principal.key_id is None:
+        return
+    ok, retry_after = await rate_allow(f"key:{principal.key_id}")
+    if not ok:
+        raise HTTPException(
+            status_code=429,
+            detail={"code": "rate_limited", "retry_after": retry_after},
+        )
+
+
 @router.get("/kbs", response_model=AgentKbListOut)
 async def agent_kbs(
     request: Request,
     principal: Principal = Depends(get_agent_principal),
     db: AsyncSession = Depends(get_db),
 ):
+    await _check_rate(principal)
     items = await agent_facade.list_kbs_for(db, principal.user)
     await audit(
         db, principal.user.username, "agent.list_kbs", "agent",
@@ -47,6 +61,7 @@ async def agent_search(
     principal: Principal = Depends(get_agent_principal),
     db: AsyncSession = Depends(get_db),
 ):
+    await _check_rate(principal)
     try:
         outcome = await agent_facade.agent_search(
             db, principal.user, payload.kb_ids, payload.query,

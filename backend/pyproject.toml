@@ -26,6 +26,7 @@ dependencies = [
     "langgraph-checkpoint-postgres>=2.0",
     "psycopg[binary]>=3.2",
     "jieba>=0.42",
+    "redis>=5",
 ]
 
 [project.optional-dependencies]
