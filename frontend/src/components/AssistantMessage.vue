@@ -50,17 +50,18 @@ defineProps<{
   font-weight: 600;
 }
 .bot-avatar {
-  background: var(--el-color-primary);
+  background: linear-gradient(135deg, var(--el-color-primary), var(--el-color-primary-light-3));
   color: #fff;
 }
 .bubble {
   max-width: 78%;
   padding: var(--app-spacing-sm) var(--app-spacing-md);
-  border-radius: var(--app-radius);
+  border-radius: 12px 12px 12px 4px;
   font-size: 14px;
   line-height: 1.6;
   word-break: break-word;
-  background: var(--el-fill-color-light);
+  background: var(--app-card-bg);
+  border: 1px solid var(--app-card-border);
 }
 .bubble.refused {
   background: var(--el-fill-color-lighter);
@@ -83,7 +84,7 @@ defineProps<{
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--el-text-color-secondary);
+  background: var(--el-color-primary);
   animation: typing-blink 1.2s infinite ease-in-out;
 }
 .dot:nth-child(2) {

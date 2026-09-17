@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Delete, Download } from '@element-plus/icons-vue'
+import { ChatDotRound, Delete, Download, Plus, Promotion, VideoPause } from '@element-plus/icons-vue'
 import DOMPurify from 'dompurify'
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js/lib/core'
@@ -69,12 +69,33 @@ const selectedKbIds = ref<number[]>([])
 const question = ref('')
 const streaming = ref(false)
 const bottomAnchor = ref<HTMLElement>()
+const inputRef = ref<{ focus: () => void }>()
 /** M4:请求级精排开关;M7 起默认开(阈值门控生效);localStorage 记忆用户选择 */
 const rerankEnabled = ref(
   localStorage.getItem('airag_rerank') === null
     ? true
     : localStorage.getItem('airag_rerank') === '1',
 )
+
+// ---- 空态 Hero:问候 + 示例问题(点击仅填入输入框,不代发) ----
+const greeting = computed(() => {
+  const h = new Date().getHours()
+  if (h < 6) return '夜深了'
+  if (h < 12) return '早上好'
+  if (h < 18) return '下午好'
+  return '晚上好'
+})
+
+const EXAMPLE_QUESTIONS = [
+  '帮我总结知识库的核心内容',
+  '文档里提到了哪些关键数字?',
+  '根据资料,主要的流程或结论是什么?',
+]
+
+function useExample(q: string) {
+  question.value = q
+  inputRef.value?.focus()
+}
 
 function onRerankChange(v: boolean) {
   localStorage.setItem('airag_rerank', v ? '1' : '0')
@@ -174,6 +195,23 @@ async function exportConversation(c: ConversationItem) {
   } catch {
     ElMessage.error('导出失败')
   }
+}
+
+/** 会话列表相对时间:刚刚/N 分钟前/N 小时前/昨天/日期(同年省年份) */
+function fmtRelative(iso: string): string {
+  const t = new Date(iso).getTime()
+  if (Number.isNaN(t)) return ''
+  const m = Math.floor((Date.now() - t) / 60000)
+  if (m < 1) return '刚刚'
+  if (m < 60) return `${m} 分钟前`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h} 小时前`
+  if (h < 48) return '昨天'
+  const d = new Date(t)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return d.getFullYear() === new Date().getFullYear()
+    ? `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+    : `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
 // ---- 发送与 SSE 渲染契约 ----
@@ -280,7 +318,7 @@ onUnmounted(() => {
   <div class="chat-page">
     <aside class="chat-side">
       <el-button type="primary" class="new-chat" :disabled="streaming" @click="newConversation">
-        新对话
+        <el-icon style="margin-right: 6px"><Plus /></el-icon>新对话
       </el-button>
       <div class="conv-list">
         <div
@@ -290,15 +328,22 @@ onUnmounted(() => {
           :class="{ active: c.id === currentId }"
           @click="openConversation(c)"
         >
-          <span class="conv-title" :title="c.title">{{ c.title }}</span>
-          <el-icon class="conv-export" :size="14" @click.stop="exportConversation(c)">
-            <Download />
-          </el-icon>
-          <el-icon class="conv-delete" :size="14" @click.stop="removeConversation(c)">
-            <Delete />
-          </el-icon>
+          <div class="conv-row">
+            <el-icon class="conv-icon" :size="14"><ChatDotRound /></el-icon>
+            <span class="conv-title" :title="c.title">{{ c.title }}</span>
+            <el-icon class="conv-export" :size="13" @click.stop="exportConversation(c)">
+              <Download />
+            </el-icon>
+            <el-icon class="conv-delete" :size="13" @click.stop="removeConversation(c)">
+              <Delete />
+            </el-icon>
+          </div>
+          <div class="conv-time">{{ fmtRelative(c.created_at) }}</div>
         </div>
-        <el-empty v-if="conversations.length === 0" description="暂无会话" :image-size="48" />
+        <div v-if="conversations.length === 0" class="conv-empty">
+          <el-icon :size="20"><ChatDotRound /></el-icon>
+          <span>暂无会话,发起第一问吧</span>
+        </div>
       </div>
     </aside>
 
@@ -317,17 +362,30 @@ onUnmounted(() => {
         >
           <el-option v-for="k in kbs" :key="k.id" :label="k.name" :value="k.id" />
         </el-select>
-        <el-switch
-          :model-value="rerankEnabled"
-          label="精排"
-          active-text="精排"
-          @change="onRerankChange"
-          @update:model-value="rerankEnabled = $event"
-        />
+        <el-tooltip content="重排序提升检索相关性,每次提问多一次轻量调用" placement="bottom">
+          <div class="rerank-group">
+            <span class="rerank-label">精排</span>
+            <el-switch
+              size="small"
+              :model-value="rerankEnabled"
+              @change="onRerankChange"
+              @update:model-value="rerankEnabled = $event"
+            />
+          </div>
+        </el-tooltip>
       </div>
 
       <div class="chat-messages">
-        <el-empty v-if="messages.length === 0" description="选择知识库后开始提问" />
+        <div v-if="messages.length === 0" class="chat-hero">
+          <div class="hero-mark">AI</div>
+          <h3>{{ greeting }},{{ auth.user?.username ?? '' }}</h3>
+          <p>回答基于所选知识库的文档,并附引用溯源;库里没有的内容会明确告知。</p>
+          <div class="hero-chips">
+            <el-button v-for="q in EXAMPLE_QUESTIONS" :key="q" round size="small" @click="useExample(q)">
+              {{ q }}
+            </el-button>
+          </div>
+        </div>
         <div v-for="(m, i) in messages" :key="m.id ?? `local-${i}`" class="msg-row" :class="m.role">
           <span v-if="m.role === 'user'" class="avatar user-avatar">
             {{ auth.user?.username?.slice(0, 1).toUpperCase() ?? '?' }}
@@ -345,28 +403,40 @@ onUnmounted(() => {
         <div ref="bottomAnchor"></div>
       </div>
 
-      <div class="chat-input">
-        <el-input
-          v-model="question"
-          type="textarea"
-          :rows="3"
-          resize="none"
-          :disabled="streaming"
-          placeholder="Enter 或 Alt+Enter 发送,Shift+Enter 换行"
-          @keydown.enter="onEnterKey"
-        />
-        <el-button
-          v-if="streaming"
-          type="danger"
-          plain
-          class="send-btn"
-          @click="abort()"
-        >
-          停止
-        </el-button>
-        <el-button v-else type="primary" class="send-btn" :disabled="!canSend()" @click="onSend">
-          发送
-        </el-button>
+      <div class="composer-wrap">
+        <div class="composer">
+          <el-input
+            ref="inputRef"
+            v-model="question"
+            type="textarea"
+            :autosize="{ minRows: 2, maxRows: 4 }"
+            resize="none"
+            :disabled="streaming"
+            placeholder="输入你的问题…"
+            @keydown.enter="onEnterKey"
+          />
+          <el-button
+            v-if="streaming"
+            type="danger"
+            plain
+            circle
+            :icon="VideoPause"
+            class="send-fab"
+            aria-label="停止生成"
+            @click="abort()"
+          />
+          <el-button
+            v-else
+            type="primary"
+            circle
+            :icon="Promotion"
+            class="send-fab"
+            aria-label="发送"
+            :disabled="!canSend()"
+            @click="onSend"
+          />
+        </div>
+        <div class="composer-hint">Enter 发送 · Shift+Enter 换行 · 回答基于所选知识库并附引用</div>
       </div>
     </div>
   </div>
@@ -375,7 +445,7 @@ onUnmounted(() => {
 <style scoped>
 .chat-page {
   display: flex;
-  gap: 12px;
+  gap: var(--app-spacing-md);
   height: 100%;
   min-height: 0;
 }
@@ -384,9 +454,9 @@ onUnmounted(() => {
 .chat-side {
   display: flex;
   flex-direction: column;
-  width: 200px;
+  width: 216px;
   flex-shrink: 0;
-  gap: 8px;
+  gap: var(--app-spacing-sm);
 }
 .new-chat {
   width: 100%;
@@ -394,19 +464,28 @@ onUnmounted(() => {
 .conv-list {
   flex: 1;
   overflow-y: auto;
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 4px;
-  padding: 4px;
+  background: var(--app-card-bg);
+  border: 1px solid var(--app-card-border);
+  border-radius: var(--app-radius);
+  padding: var(--app-spacing-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 .conv-item {
   padding: 8px 10px;
-  border-radius: 4px;
+  border-radius: var(--app-radius-sm);
   cursor: pointer;
-  font-size: 13px;
   color: var(--el-text-color-primary);
+}
+.conv-row {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
+}
+.conv-icon {
+  flex-shrink: 0;
+  color: var(--el-text-color-secondary);
 }
 .conv-title {
   flex: 1;
@@ -414,12 +493,15 @@ onUnmounted(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-size: 13px;
 }
-.conv-delete {
-  flex-shrink: 0;
+.conv-time {
+  margin-left: 20px;
+  font-size: 12px;
   color: var(--el-text-color-secondary);
-  visibility: hidden;
+  opacity: 0.85;
 }
+.conv-delete,
 .conv-export {
   flex-shrink: 0;
   color: var(--el-text-color-secondary);
@@ -440,7 +522,20 @@ onUnmounted(() => {
 }
 .conv-item.active {
   background: var(--el-color-primary-light-9);
+}
+.conv-item.active .conv-title,
+.conv-item.active .conv-icon {
   color: var(--el-color-primary);
+}
+.conv-empty {
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 24px 0;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
 }
 
 /* 主区:KB 选择 + 消息 + 输入 */
@@ -449,50 +544,114 @@ onUnmounted(() => {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--app-spacing-sm);
 }
 .chat-toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--app-spacing-sm);
+  background: var(--app-card-bg);
+  border: 1px solid var(--app-card-border);
+  border-radius: var(--app-radius);
+  padding: 8px 12px;
+  box-shadow: var(--app-shadow-card);
 }
 .kb-label {
   font-size: 13px;
   color: var(--el-text-color-secondary);
+  flex-shrink: 0;
 }
 .kb-select {
+  flex: 1;
   min-width: 280px;
 }
+.rerank-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  cursor: default;
+}
+.rerank-label {
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+}
+
 .chat-messages {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 4px;
-  padding: 12px;
+  background: var(--app-card-bg);
+  border: 1px solid var(--app-card-border);
+  border-radius: var(--app-radius);
+  padding: var(--app-spacing-lg);
   display: flex;
   flex-direction: column;
-  gap: 12px;
-}
-.chat-messages :deep(.el-empty) {
-  margin: auto;
+  gap: var(--app-spacing-md);
 }
 
-/* 气泡:用户右侧 / 助手左侧(助手气泡与 markdown 样式已迁入 AssistantMessage 组件) */
+/* 空态 Hero:品牌标 + 问候 + 示例问题 */
+.chat-hero {
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--app-spacing-sm);
+  text-align: center;
+  padding: var(--app-spacing-xl);
+  max-width: 520px;
+}
+.hero-mark {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, var(--el-color-primary), var(--el-color-primary-light-3));
+  color: #fff;
+  font-size: 20px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 16px var(--el-color-primary-light-7);
+}
+.chat-hero h3 {
+  margin: 4px 0 0;
+}
+.chat-hero p {
+  margin: 0;
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+}
+.hero-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--app-spacing-sm);
+  margin-top: var(--app-spacing-sm);
+}
+.hero-chips :deep(.el-button) {
+  transition: transform 0.15s ease;
+}
+.hero-chips :deep(.el-button:hover) {
+  transform: translateY(-1px);
+}
+
+/* 气泡:用户右侧(主色渐变) / 助手左侧(卡片,样式在 AssistantMessage 组件) */
 .msg-row {
   display: flex;
   gap: var(--app-spacing-sm);
   align-items: flex-start;
+  animation: msg-in 0.25s ease-out;
 }
 .msg-row.user {
   justify-content: flex-end;
 }
 .msg-row.user .bubble {
-  background: var(--el-color-primary);
+  background: linear-gradient(135deg, var(--el-color-primary), var(--el-color-primary-light-5));
   color: #fff;
   max-width: 78%;
   padding: var(--app-spacing-sm) var(--app-spacing-md);
-  border-radius: var(--app-radius);
+  border-radius: 12px 12px 4px 12px;
   font-size: 14px;
   line-height: 1.6;
   word-break: break-word;
@@ -515,17 +674,65 @@ onUnmounted(() => {
   color: var(--el-color-primary);
   order: 2; /* 用户消息头像在气泡右侧 */
 }
-
-/* 输入区 */
-.chat-input {
-  display: flex;
-  gap: 8px;
-  align-items: flex-end;
+@keyframes msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
-.chat-input :deep(.el-textarea) {
+
+/* 输入区:composer 卡片 + 圆形发送钮 + 快捷键提示 */
+.composer-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.composer {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--app-spacing-sm);
+  background: var(--app-card-bg);
+  border: 1px solid var(--app-card-border);
+  border-radius: var(--app-radius);
+  padding: 8px 8px 8px 12px;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
+}
+.composer:focus-within {
+  border-color: var(--el-color-primary);
+  box-shadow: 0 0 0 2px var(--el-color-primary-light-8);
+}
+.composer :deep(.el-textarea) {
   flex: 1;
 }
-.send-btn {
-  height: 32px;
+.composer :deep(.el-textarea__inner) {
+  border: none;
+  background: transparent;
+  box-shadow: none !important; /* 描边交给 composer:focus-within */
+  padding: 6px 0;
+}
+.send-fab {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+}
+.composer-hint {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .msg-row {
+    animation: none;
+  }
+  .hero-chips :deep(.el-button) {
+    transition: none;
+  }
 }
 </style>
