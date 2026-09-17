@@ -1,0 +1,1 @@
+{"kb_id": 9, "items": [{"question": "青鸾号高空气船的巡航升限是多少米?", "expect_doc_ids": [22, 23], "expect_keywords": ["八千五百"]}, {"question": "赤霄超导电缆的传输容量是多少兆瓦?", "expect_doc_ids": [22, 23], "expect_keywords": ["三百二十"]}, {"question": "珠穆朗玛峰的海拔是多少米?", "expect_doc_ids": [], "expect_keywords": []}, {"question": "世界杯足球赛每几年举办一次?", "expect_doc_ids": [], "expect_keywords": []}]}
