@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 
@@ -23,3 +25,24 @@ class LoginIn(BaseModel):
 class TokenOut(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+class ApiKeyCreateIn(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+    expires_in_days: int | None = Field(default=None, ge=1, le=3650)  # None=永久
+
+
+class ApiKeyOut(BaseModel):
+    id: int
+    name: str
+    key_prefix: str
+    is_active: bool
+    expires_at: datetime | None
+    last_used_at: datetime | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ApiKeyCreatedOut(ApiKeyOut):
+    key: str  # 唯一一次返回明文

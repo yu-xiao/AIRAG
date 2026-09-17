@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     EMBED_MODEL: str = "embedding-3"
     EMBED_DIMS: int = 1024
     UPLOAD_DIR: str = "storage/uploads"  # 相对 backend 运行目录
+    # M9 Agent 对外开放
+    AGENT_MAX_KEYS_PER_USER: int = 10
     MAX_UPLOAD_MB: int = 20
 
 
