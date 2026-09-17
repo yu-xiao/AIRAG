@@ -647,7 +647,7 @@ async def test_audit_written(client, auth_headers, db_session):
     await _create_key(client, auth_headers, name="审计key")
     key = await _create_key(client, auth_headers)
     await client.get("/api/agent/kbs", headers={"Authorization": f"Bearer {key}"})
-    await db_session.expire_all()
+    db_session.expire_all()  # expire_all 是同步方法,不可 await
     rows = (await db_session.execute(
         select(AuditLog).where(AuditLog.action == "agent.list_kbs")
     )).scalars().all()
