@@ -211,13 +211,16 @@ def main():
           up2["status"] == 201 and doc2["status"] == "done"
           and doc2["chunk_count"] > 0, f"{up2} {doc2}")
 
-    # ---- S1: rerank on + 零命中 → 阈值门控 → refused ----
+    # ---- S1: rerank on + 零命中 → refused ----
+    # 2026-09-17 裁决:智谱 rerank relevance_score 全量饱和 0.92~1.0(零命中/正常
+    # 分布重叠,无可行阈值,默认已改 0=禁用);citations 可能非空,由前端 refused
+    # 样式隐藏引用(设计 UX 路径),断言=refused=true + 固定话术,不要求 citations==[]。
     s1, s1_ok = ask_with_retry(
         client, owner, kb_id, ZERO_HIT_Q1, rerank=True,
         judge=lambda r: (r["done"] is not None and r["error"] is None
                          and r["done"].get("refused") is True
-                         and r["citations"] == []))
-    check("S1 rerank-on zero-hit refused, citations empty", s1_ok,
+                         and final_answer(r).strip().startswith(REFUSAL_PHRASE)))
+    check("S1 rerank-on zero-hit refused, fixed refusal phrase", s1_ok,
           str(s1)[:300])
 
     # ---- S2: rerank on + 正常题 → 不误伤 ----
@@ -238,14 +241,14 @@ def main():
           final_answer(s3)[:200])
 
     # ---- S4: 消息落库 refused 与 S1/S2 一致 ----
+    # (S1 侧同 2026-09-17 裁决:citations 可能非空,只断 refused 持久化)
     if s1["done"]:
         conv1 = s1["done"]["conversation_id"]
         msgs = client.get(f"{BASE}/chat/conversations/{conv1}/messages",
                           headers=owner).json()
         asst = [m for m in msgs if m["role"] == "assistant"]
         check("S4 s1 conversation assistant refused persisted True",
-              bool(asst) and asst[-1]["refused"] is True
-              and (asst[-1]["citations"] or []) == [], str(asst[-1:])[:300])
+              bool(asst) and asst[-1]["refused"] is True, str(asst[-1:])[:300])
     else:
         check("S4 s1 conversation assistant refused persisted True", False,
               "S1 无 done 帧,无法对账")

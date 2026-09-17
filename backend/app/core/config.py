@@ -33,8 +33,10 @@ class Settings(BaseSettings):
     MULTI_HOP_ENABLED: bool = True
     MULTI_HOP_MAX_SUBQ: int = 3
     RETRIEVAL_TOP_K: int = 8
-    # M7:rerank 相关度阈值(仅 rerank 开启路径生效;0 = 禁用过滤)
-    RETRIEVAL_MIN_SCORE: float = 0.30
+    # M7:rerank 相关度阈值,默认禁用;智谱 rerank relevance_score 实测全量饱和
+    # 0.92~1.0(零命中/正常分布重叠,无可行阈值);换用有真实分数分布的 rerank
+    # 供应商时手动开启(env),作为纵深防御。
+    RETRIEVAL_MIN_SCORE: float = 0.0
     ZHIPU_API_KEY: str = ""
     ZHIPU_BASE_URL: str = "https://open.bigmodel.cn/api/paas/v4"
     EMBED_PROVIDER: str = "zhipu"  # zhipu|fake

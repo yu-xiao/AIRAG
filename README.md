@@ -30,6 +30,6 @@ start_worker.bat
 
 Redis:worker 需要 Redis(本机 6379 已有服务)。若该服务设置了 requirepass(本机当前如此),在 .env 配 `REDIS_URL=redis://:<密码>@localhost:6379/0`,否则 worker 连不上。
 
-问答检索(M7 起):`RETRIEVAL_MIN_SCORE`(默认 0.30)为 rerank 相关度阈值,仅 rerank 开启时生效——rerank 关闭时该阈值不生效,仅提示词兜底;前端精排开关 M7 起默认开,收益=阈值门控+排序质量,代价=每问一次 rerank 调用。
+问答检索(M7 起):`RETRIEVAL_MIN_SCORE` 为 rerank 相关度阈值,仅 rerank 开启时生效——默认 0=禁用;智谱 rerank 分数饱和实测(见 M7 验收),阈值仅在供应商分数分布有效时手动开启;零命中防线=收紧提示词+refused 标记(前端隐藏引用)。前端精排开关 M7 起默认开,收益=排序质量,代价=每问一次 rerank 调用。
 
 审计清理 beat(M6 起):Windows 不能用 worker -B 内嵌,另开窗口运行 backend\start_beat.bat(每日 03:00 清理,`AUDIT_RETENTION_DAYS` 默认 180 天,0=禁用;不开 beat 时可用 admin 手动 purge 端点)。
