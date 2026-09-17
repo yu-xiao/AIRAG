@@ -62,7 +62,8 @@ html.dark .hljs-type {
   color: #c678dd;
 }
 html.dark .hljs-string,
-html.dark .hljs-attr {
+html.dark .hljs-attr,
+html.dark .hljs-regexp {
   color: #98c379;
 }
 html.dark .hljs-number,
