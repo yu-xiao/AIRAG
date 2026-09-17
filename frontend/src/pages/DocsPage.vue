@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, type UploadRawFile, type UploadRequestOptions } from 'element-plus'
-import { ArrowLeft } from '@element-plus/icons-vue'
+import { ArrowLeft, Search } from '@element-plus/icons-vue'
 import { documentsApi, type ChunksResponse, type DocumentItem } from '@/api/documents'
 import { kbApi } from '@/api/kb'
+import PageHeader from '@/components/PageHeader.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -36,6 +37,32 @@ const STATUS_META: Record<string, { label: string; type: 'info' | 'primary' | 's
 function statusMeta(status: string) {
   return STATUS_META[status] ?? { label: status, type: 'info' as const }
 }
+
+// ---- 工具行:搜索 / 状态筛选 / 客户端分页 ----
+const keyword = ref('')
+const statusFilter = ref<string>('')
+const page = reactive({ page: 1, pageSize: 20 })
+
+const processingCount = computed(
+  () => docs.value.filter((d) => NON_TERMINAL.includes(d.status)).length,
+)
+
+const filteredDocs = computed(() => {
+  const k = keyword.value.trim().toLowerCase()
+  return docs.value.filter((d) => {
+    const okKw = !k || d.filename.toLowerCase().includes(k)
+    const okStatus = !statusFilter.value || d.status === statusFilter.value
+    return okKw && okStatus
+  })
+})
+
+const pagedDocs = computed(() =>
+  filteredDocs.value.slice((page.page - 1) * page.pageSize, page.page * page.pageSize),
+)
+
+watch([keyword, statusFilter], () => {
+  page.page = 1
+})
 
 // ---- 上传(手动模式:http-request 调 documentsApi.upload)----
 const uploading = ref(false)
@@ -185,12 +212,26 @@ onUnmounted(() => {
 
 <template>
   <div class="docs-page">
-    <div class="page-header">
-      <div class="page-title">
-        <el-button :icon="ArrowLeft" link @click="router.push({ name: 'kb' })">返回知识库</el-button>
-        <h2>{{ kbName }}</h2>
-      </div>
-    </div>
+    <PageHeader :title="kbName" :description="`共 ${docs.length} 篇 · ${processingCount} 个处理中`">
+      <template #actions>
+        <el-select v-model="statusFilter" placeholder="全部状态" clearable class="status-filter">
+          <el-option
+            v-for="(meta, key) in STATUS_META"
+            :key="key"
+            :label="meta.label"
+            :value="key"
+          />
+        </el-select>
+        <el-input
+          v-model="keyword"
+          :prefix-icon="Search"
+          placeholder="搜索文件名"
+          clearable
+          class="doc-search"
+        />
+        <el-button :icon="ArrowLeft" @click="router.push({ name: 'kb' })">返回</el-button>
+      </template>
+    </PageHeader>
 
     <el-card v-if="canEdit" class="upload-card" shadow="never">
       <el-upload
@@ -215,7 +256,7 @@ onUnmounted(() => {
       />
     </el-card>
 
-    <el-table v-loading="loading" :data="docs" class="docs-table">
+    <el-table v-loading="loading" :data="pagedDocs" class="docs-table">
       <template #empty>
         <el-empty description="暂无文档,上传一个试试" />
       </template>
@@ -254,6 +295,15 @@ onUnmounted(() => {
       </el-table-column>
     </el-table>
 
+    <el-pagination
+      v-if="filteredDocs.length > page.pageSize"
+      v-model:current-page="page.page"
+      :page-size="page.pageSize"
+      class="docs-pagination"
+      layout="total, prev, pager, next"
+      :total="filteredDocs.length"
+    />
+
     <el-drawer v-model="drawerVisible" title="文档分块" size="50%">
       <div v-if="drawerDoc" class="drawer-head">
         <span>{{ drawerDoc.filename }}</span>
@@ -285,16 +335,15 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.page-header {
-  margin-bottom: 16px;
+.doc-search {
+  width: 200px;
 }
-.page-title {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+.status-filter {
+  width: 130px;
 }
-.page-title h2 {
-  margin: 0;
+.docs-pagination {
+  margin-top: var(--app-spacing-md);
+  justify-content: flex-end;
 }
 .upload-card {
   margin-bottom: 16px;
