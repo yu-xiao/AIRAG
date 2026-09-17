@@ -1,0 +1,42 @@
+/* M7 设计令牌:主色/文字/状态色直接沿用 EP 变量(--el-*),此处只补 EP 未覆盖的面 */
+:root {
+  --app-bg: #f5f7fa;
+  --app-bg-soft: #eef1f6;
+  --app-card-bg: #ffffff;
+  --app-card-border: var(--el-border-color-lighter);
+  --app-radius: 8px;
+  --app-radius-sm: 6px;
+  --app-shadow-card: 0 1px 4px rgba(0, 21, 41, 0.08);
+  --app-spacing-xs: 4px;
+  --app-spacing-sm: 8px;
+  --app-spacing-md: 12px;
+  --app-spacing-lg: 16px;
+  --app-spacing-xl: 24px;
+}
+
+html.dark {
+  --app-bg: #0a0c10;
+  --app-bg-soft: #141721;
+  --app-card-bg: #141721;
+  --app-card-border: var(--el-border-color-dark);
+  --app-shadow-card: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+body {
+  margin: 0;
+  background: var(--app-bg);
+  transition: background-color 0.2s;
+}
+
+/* 细滚动条 */
+* {
+  scrollbar-width: thin;
+}
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--el-border-color);
+  border-radius: 3px;
+}
