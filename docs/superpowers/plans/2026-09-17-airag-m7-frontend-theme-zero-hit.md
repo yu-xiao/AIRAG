@@ -1,6 +1,6 @@
 # AIRag M7 实施计划(前端全站体验升级 / 零命中双门控)
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** 前端全站视觉/交互升级(设计令牌+亮暗双主题+7 页改造),后端零命中双门控(提示词收紧+rerank 相关度阈值)与 refused 全链路。
 
@@ -37,7 +37,7 @@
 **Interfaces:**
 - Produces: `RerankProvider.rerank(query: str, documents: list[str], top_n: int = 8) -> list[tuple[int, float]]`(index, 相关度分,乱序允许);`settings.RETRIEVAL_MIN_SCORE: float = 0.30`;`rerank_node` 过滤后 hits 的 `hit["score"]` = 相关度分(保留 6 位小数)。Task 2/3/12 依赖。
 
-- [ ] **Step 1: 写失败测试(test_rerank.py)**
+- [x] **Step 1: 写失败测试(test_rerank.py)**
 
 改 `test_zhipu_rerank_parses_response` 为带分断言(重命名),并新增缺分兜底,替换为以下两个测试:
 
@@ -84,7 +84,7 @@ def test_zhipu_rerank_defaults_missing_score(monkeypatch):
 
 (删除原 `test_zhipu_rerank_parses_response`,由上面两个测试替代。)
 
-- [ ] **Step 2: 写失败测试(test_chat_graph.py,文件末尾追加)**
+- [x] **Step 2: 写失败测试(test_chat_graph.py,文件末尾追加)**
 
 ```python
 def _hit(cid: int, content: str) -> dict:
@@ -151,12 +151,12 @@ async def test_rerank_node_filters_all_to_empty(monkeypatch):
 
 (on 分支断言 `ids == [2, 1]` 不变。)
 
-- [ ] **Step 3: 跑测试确认失败**
+- [x] **Step 3: 跑测试确认失败**
 
 Run: `.venv\Scripts\python.exe -m pytest tests/test_rerank.py tests/test_chat_graph.py -v`
 Expected: 新增 4 个 FAIL(类型不匹配/断言失败),`test_rerank_node_respects_state_flag` FAIL。
 
-- [ ] **Step 4: 实现**
+- [x] **Step 4: 实现**
 
 `base.py` 抽象方法签名与 docstring:
 
@@ -215,12 +215,12 @@ async def rerank_node(state: dict) -> dict:
     return {"hits": out}
 ```
 
-- [ ] **Step 5: 跑测试确认通过 + 全量回归**
+- [x] **Step 5: 跑测试确认通过 + 全量回归**
 
 Run: `.venv\Scripts\python.exe -m pytest tests/test_rerank.py tests/test_chat_graph.py -v` → PASS
 Run: `.venv\Scripts\python.exe -m pytest tests -q` → ≥127 passed(127 基线 + 本任务净增约 3)。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/app/services/rerank backend/app/services/chat_graph/nodes.py backend/app/core/config.py backend/tests/test_rerank.py backend/tests/test_chat_graph.py
@@ -239,7 +239,7 @@ git commit -m "feat: rerank relevance scores with min-score threshold gating"
 **Interfaces:**
 - Produces: `generate_node` 返回 dict 增 `refused: bool`;`ChatState` 增 `refused: bool` 键;模块常量 `REFUSAL_PHRASE = "知识库中未找到相关内容"`。Task 3(ask.py 读 final_state["refused"])与 Task 12 依赖。
 
-- [ ] **Step 1: 写失败测试(test_chat_graph.py 追加)**
+- [x] **Step 1: 写失败测试(test_chat_graph.py 追加)**
 
 ```python
 async def test_generate_marks_refusal():
@@ -276,12 +276,12 @@ async def test_generate_normal_answer_not_refused():
 
 注:`_hit` 与 `_LLMScript` 均已存在于本文件(Task 1/既有),复用。
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `.venv\Scripts\python.exe -m pytest tests/test_chat_graph.py -v -k generate`
 Expected: 3 FAIL(KeyError 'refused' / 断言失败)。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `nodes.py` SYSTEM_PROMPT 替换为:
 
@@ -314,12 +314,12 @@ SYSTEM_PROMPT = (
     refused: bool
 ```
 
-- [ ] **Step 4: 跑测试确认通过 + 全量**
+- [x] **Step 4: 跑测试确认通过 + 全量**
 
 Run: `.venv\Scripts\python.exe -m pytest tests/test_chat_graph.py -v` → PASS
 Run: `.venv\Scripts\python.exe -m pytest tests -q` → 全绿(既有端到端用例的正常答案不触话术,不受影响)。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/app/services/chat_graph/nodes.py backend/app/services/chat_graph/state.py backend/tests/test_chat_graph.py
@@ -341,7 +341,7 @@ git commit -m "feat: tighten refusal prompt and emit refused flag from generate"
 - Consumes: Task 2 的 `final_state["refused"]`。
 - Produces: `messages.refused boolean not null default false`;`MessageOut.refused: bool`;SSE done 帧 `{"conversation_id", "answer", "refused"}`。Task 9(前端 DonePayload/MessageItem)与 Task 12 依赖。
 
-- [ ] **Step 1: 写失败测试(test_ask.py 追加)**
+- [x] **Step 1: 写失败测试(test_ask.py 追加)**
 
 ```python
 async def test_ask_done_frame_and_persistence_carry_refused(
@@ -411,12 +411,12 @@ async def test_messages_include_refused_flag(client, auth_headers, db_session):
     assert refused_flags == [True, False]  # 旧数据/未传 → 默认 False
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `.venv\Scripts\python.exe -m pytest tests/test_ask.py tests/test_conversations.py -v -k refused`
 Expected: 2 FAIL(Message() 无 refused 参数 / done 帧无字段)。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `app/models/chat.py`:import 行加 `Boolean`,Message 类 citations 行后加:
 
@@ -481,14 +481,14 @@ done 帧:
                                 "refused": refused})
 ```
 
-- [ ] **Step 4: 跑测试确认通过 + 迁移验证 + 全量**
+- [x] **Step 4: 跑测试确认通过 + 迁移验证 + 全量**
 
 Run: `.venv\Scripts\python.exe -m pytest tests/test_ask.py tests/test_conversations.py -v` → PASS
 Run: `.venv\Scripts\python.exe -m alembic upgrade head` → 开发库加列成功
 Run: `.venv\Scripts\python.exe -m alembic downgrade -1 && .venv\Scripts\python.exe -m alembic upgrade head` → up/down 可逆
 Run: `.venv\Scripts\python.exe -m pytest tests -q` → 全绿。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/alembic/versions/a7b8c9d0e1f2_m7_messages_refused.py backend/app/models/chat.py backend/app/schemas/chat.py backend/app/api/ask.py backend/tests/test_ask.py backend/tests/test_conversations.py
@@ -508,7 +508,7 @@ git commit -m "feat: persist and stream refused flag end to end"
 **Interfaces:**
 - Produces: `useTheme()` → `{ isDark: Ref<boolean>, init(): void, toggle(): void }`;CSS 变量 `--app-bg/--app-bg-soft/--app-card-bg/--app-card-border/--app-radius/--app-radius-sm/--app-shadow-card/--app-spacing-{xs,sm,md,lg,xl}`;localStorage 键 `airag_theme`('light'|'dark',默认 light);`<html class="dark">`。Task 5-10 全部依赖。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 `frontend/src/composables/__tests__/useTheme.spec.ts`:
 
@@ -548,12 +548,12 @@ describe('useTheme', () => {
 })
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `npx vitest run src/composables/__tests__/useTheme.spec.ts`
 Expected: FAIL(模块不存在)。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `useTheme.ts`:
 
@@ -669,12 +669,12 @@ app.mount('#app')
 </template>
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `npx vitest run src/composables/__tests__/useTheme.spec.ts` → 3 PASS
 Run: `npm run build` → 绿(vue-tsc 通过)。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add frontend/src/styles frontend/src/composables frontend/src/main.ts frontend/src/App.vue
@@ -693,7 +693,7 @@ git commit -m "feat: design tokens and light/dark theme foundation"
 **Interfaces:**
 - Produces: `PageHeader` 组件 props `{ title: string; description?: string }` + slot `actions`;路由 meta `title`(afterEach 同步 `document.title = "<title> · AIRag"`)。Task 6-10 使用。视觉任务,无新增单测(Task 12 双主题走查覆盖);验证=build+lint。
 
-- [ ] **Step 1: 实现 router 标题**
+- [x] **Step 1: 实现 router 标题**
 
 `router/index.ts` 每个 route 对象加 `meta: { title: '...' }`:home=首页、kb=知识库、kb-docs=知识库文档、chat=对话、admin-users=用户管理、admin-audit-logs=审计日志;文件末尾 `router.beforeEach` 后追加:
 
@@ -703,7 +703,7 @@ router.afterEach((to) => {
 })
 ```
 
-- [ ] **Step 2: 实现 PageHeader 组件**
+- [x] **Step 2: 实现 PageHeader 组件**
 
 ```vue
 <script setup lang="ts">
@@ -747,7 +747,7 @@ defineProps<{ title: string; description?: string }>()
 </style>
 ```
 
-- [ ] **Step 3: 重写 MainLayout**
+- [x] **Step 3: 重写 MainLayout**
 
 逻辑红线:菜单 index/路由、admin 可见性 `v-if`、fetchUser 兜底、登出行为全部不变。
 
@@ -924,12 +924,12 @@ function onLogout() {
 </style>
 ```
 
-- [ ] **Step 4: 构建与静态检查**
+- [x] **Step 4: 构建与静态检查**
 
 Run: `npm run build` → 绿;Run: `npm run lint` → 0/0。
 手动(可选,dev 起前端):侧栏品牌/图标/管理分组、头部标题/主题切换/用户下拉、`document.title` 跟随。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add frontend/src/layouts/MainLayout.vue frontend/src/components/PageHeader.vue frontend/src/router/index.ts
@@ -947,7 +947,7 @@ git commit -m "feat: redesigned app shell with brand, icons, theme toggle and pa
 - Consumes: `kbApi.list()`(既有)、`conversationsApi.list()`(既有)、Task 4 令牌。
 - Produces: 快捷入口路由 `/kb?create=1`、`/chat`、`/kb`(Task 7 需支持 `?create=1`;Task 9 需支持 `/chat?conv=`)。零后端改动;无单测(Task 12 走查),验证=build+lint。
 
-- [ ] **Step 1: 实现**
+- [x] **Step 1: 实现**
 
 ```vue
 <script setup lang="ts">
@@ -1116,11 +1116,11 @@ function fmtTime(iso: string) {
 
 注:`stats` 里 Document 图标需从 `@element-plus/icons-vue` 一并 import(script 顶部 import 行补 `Document`)。
 
-- [ ] **Step 2: 构建与静态检查**
+- [x] **Step 2: 构建与静态检查**
 
 Run: `npm run build` → 绿;Run: `npm run lint` → 0/0;Run: `npx vitest run` → 既有测试不回归。
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add frontend/src/pages/HomePage.vue
@@ -1138,7 +1138,7 @@ git commit -m "feat: home workspace with stats, quick actions and recent chats"
 - Consumes: Task 6 的 `/kb?create=1`;既有 kbApi 全套;Task 4 令牌。
 - Produces: 无下游依赖。成员/创建对话框、权限逻辑全部不动。
 
-- [ ] **Step 1: script 增量改动**
+- [x] **Step 1: script 增量改动**
 
 在既有 script(保持 load/openCreate/submit/openDocs/成员管理全部不动)上:
 
@@ -1173,7 +1173,7 @@ onMounted(() => {
 })
 ```
 
-- [ ] **Step 2: template 替换(表格式页头+表格 → PageHeader+统计+搜索+卡片网格)**
+- [x] **Step 2: template 替换(表格式页头+表格 → PageHeader+统计+搜索+卡片网格)**
 
 页头与列表区替换为(两个对话框模板原样保留在文件末尾):
 
@@ -1280,12 +1280,12 @@ import 行补:`import PageHeader from '@/components/PageHeader.vue'`。scoped st
 }
 ```
 
-- [ ] **Step 3: 构建与静态检查**
+- [x] **Step 3: 构建与静态检查**
 
 Run: `npm run build` → 绿;`npm run lint` → 0/0;`npx vitest run` 不回归。
 手动(可选):`/kb?create=1` 自动弹新建对话框;搜索过滤;viewer 不见新建按钮。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add frontend/src/pages/KbPage.vue
@@ -1302,7 +1302,7 @@ git commit -m "feat: kb card grid with search and create deep-link"
 **Interfaces:**
 - Consumes: Task 5 PageHeader。轮询/上传/分块抽屉/重新解析逻辑全部不动。无下游依赖。
 
-- [ ] **Step 1: script 增量**
+- [x] **Step 1: script 增量**
 
 ```ts
 import { watch } from 'vue' // vue import 行补 watch
@@ -1335,7 +1335,7 @@ watch([keyword, statusFilter], () => {
 })
 ```
 
-- [ ] **Step 2: template 替换页头与表格**
+- [x] **Step 2: template 替换页头与表格**
 
 `page-header` 区块替换为:
 
@@ -1390,12 +1390,12 @@ scoped style 补:
 }
 ```
 
-- [ ] **Step 3: 构建与静态检查**
+- [x] **Step 3: 构建与静态检查**
 
 Run: `npm run build` → 绿;`npm run lint` → 0/0;`npx vitest run` 不回归。
 手动(可选):搜索/状态筛选联动分页重置;处理中徽章数字随轮询刷新。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add frontend/src/pages/DocsPage.vue
@@ -1417,7 +1417,7 @@ git commit -m "feat: docs toolbar with search, status filter and client paginati
 - Consumes: Task 3 的 `MessageOut.refused` 与 done 帧 `refused`;Task 4 令牌。
 - Produces: `MessageItem.refused?: boolean`、`DonePayload.refused?: boolean`、`AssistantMessage` 组件(props: html/content/pending/refused/citations)。
 
-- [ ] **Step 1: 写失败组件测试**
+- [x] **Step 1: 写失败组件测试**
 
 `frontend/src/components/__tests__/AssistantMessage.spec.ts`:
 
@@ -1461,12 +1461,12 @@ describe('AssistantMessage', () => {
 })
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `npx vitest run src/components/__tests__/AssistantMessage.spec.ts`
 Expected: FAIL(组件不存在)。
 
-- [ ] **Step 3: 实现 AssistantMessage.vue(最终形态:含 AI 头像/拒答样式/打字动画/markdown 深度样式,后者从 ChatPage 原样迁入)**
+- [x] **Step 3: 实现 AssistantMessage.vue(最终形态:含 AI 头像/拒答样式/打字动画/markdown 深度样式,后者从 ChatPage 原样迁入)**
 
 ```vue
 <script setup lang="ts">
@@ -1605,11 +1605,11 @@ defineProps<{
 
 (el-icon/InfoFilled 走 Element Plus 全局注册,组件内不显式 import el-icon 本体。)
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `npx vitest run src/components/__tests__/AssistantMessage.spec.ts` → 2 PASS
 
-- [ ] **Step 5: 类型与 ChatPage 接线**
+- [x] **Step 5: 类型与 ChatPage 接线**
 
 `api/chat.ts` MessageItem 加字段(citations 行后):
 
@@ -1730,11 +1730,11 @@ onMounted(async () => {
 }
 ```
 
-- [ ] **Step 6: 构建与全量前端检查**
+- [x] **Step 6: 构建与全量前端检查**
 
 Run: `npx vitest run` → ≥11 PASS(6 既有 + useTheme 3 + AssistantMessage 2);`npm run build` → 绿;`npm run lint` → 0/0。
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add frontend/src/api/chat.ts frontend/src/composables/useChatStream.ts frontend/src/components/AssistantMessage.vue frontend/src/components/__tests__/AssistantMessage.spec.ts frontend/src/pages/ChatPage.vue
@@ -1753,7 +1753,7 @@ git commit -m "feat: chat polish with refusal rendering, stop button, deep link 
 **Interfaces:**
 - Consumes: Task 5 PageHeader、Task 4 令牌。逻辑零改动红线(角色切换/启停/审计筛选/清理按钮/登录注册全部不动)。
 
-- [ ] **Step 1: UsersPage 页头替换**
+- [x] **Step 1: UsersPage 页头替换**
 
 `<div class="page-header"><h2>用户管理</h2></div>` 替换为:
 
@@ -1771,7 +1771,7 @@ import `PageHeader`;scoped 删旧 `.page-header` 规则;`.users-table` 加圆角
 }
 ```
 
-- [ ] **Step 2: AuditLogPage 页头替换**
+- [x] **Step 2: AuditLogPage 页头替换**
 
 `page-header` 区块替换为(筛选行移入 actions):
 
@@ -1787,7 +1787,7 @@ import `PageHeader`;scoped 删旧 `.page-header` 规则;`.users-table` 加圆角
 
 import `PageHeader`;scoped 保留 `.filters/.filter-input/.filter-select` 规则,删旧 `.page-header` 规则;`.audit-table` 加 `border-radius: var(--app-radius);`。
 
-- [ ] **Step 3: LoginPage 品牌化**
+- [x] **Step 3: LoginPage 品牌化**
 
 template 替换(表单逻辑/校验/按钮全部不动,仅外壳):
 
@@ -1844,11 +1844,11 @@ h2 {
 }
 ```
 
-- [ ] **Step 4: 构建与静态检查**
+- [x] **Step 4: 构建与静态检查**
 
 Run: `npm run build` → 绿;`npm run lint` → 0/0;`npx vitest run` 不回归。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add frontend/src/pages/UsersPage.vue frontend/src/pages/AuditLogPage.vue frontend/src/pages/LoginPage.vue
@@ -1866,7 +1866,7 @@ git commit -m "feat: unified page headers and themed login"
 **Interfaces:**
 - Produces: eval_generation JSON 结果每项含 `"refused": bool`,汇总行含拒答计数。Task 12 验收断言依赖。
 
-- [ ] **Step 1: eval_generation.py 结果增 refused**
+- [x] **Step 1: eval_generation.py 结果增 refused**
 
 `results.append({...})` 内 `"citations": ...` 行后加:
 
@@ -1886,7 +1886,7 @@ git commit -m "feat: unified page headers and themed login"
     print(f"  (parse_errors={parse_errors}  refused={refused_n}/{n})")
 ```
 
-- [ ] **Step 2: 配置与文档**
+- [x] **Step 2: 配置与文档**
 
 `backend/.env.example` 在 RETRIEVAL 相关配置区(若无则 RERANK 区)加:
 
@@ -1899,7 +1899,7 @@ RETRIEVAL_MIN_SCORE=0.30
 1. 检索/问答配置说明处:`RETRIEVAL_MIN_SCORE`(默认 0.30;rerank 关闭时该阈值不生效,仅提示词兜底;前端精排开关 M7 起默认开,收益=阈值门控+排序质量,代价=每问一次 rerank 调用)。
 2. 部署节 Windows 注意事项:裸 uvicorn(非 --reload)在 Windows 走 ProactorEventLoop 会打断 psycopg checkpointer 导致 ask 500;后端启动必须 `start_dev.bat`(M6 遗留文档化)。
 
-- [ ] **Step 3: 全量回归 + Commit**
+- [x] **Step 3: 全量回归 + Commit**
 
 Run: `.venv\Scripts\python.exe -m pytest tests -q` → 全绿(既有 test_eval_generation 不读新字段,不回归)。
 
@@ -1920,7 +1920,7 @@ git commit -m "feat: eval refused metric and retrieval threshold docs"
 **Interfaces:**
 - Consumes: Task 1-11 全部。
 
-- [ ] **Step 1: 写验收脚本**
+- [x] **Step 1: 写验收脚本**
 
 对齐 `scripts/m6_acceptance.py` 的结构复用其 helpers(注册登录/建库/传文档/轮询 done/SSE 解析/asyncpg 直连;首行注释写明对真后端 127.0.0.1:8001 执行、ZHIPU_API_KEY 空则打印 SKIP 退出)。场景骨架:
 
@@ -1955,13 +1955,13 @@ eval set 内容(上传 2 篇内容明确的 txt→pdf 或复用 m6 的验收文�
 
 (具体库内题以实际上传文档内容为准,实现者按 m6 验收文档同款造两篇含明确事实的 PDF;两道零命中题固定用上面两题。)
 
-- [ ] **Step 2: 跑无头验收(真后端+真智谱)**
+- [x] **Step 2: 跑无头验收(真后端+真智谱)**
 
 前置:后端 start_dev.bat、worker/beat bat 启动;.env 有 ZHIPU_API_KEY 与 RERANK_ENABLED=true。
 Run: `.venv\Scripts\python.exe -m scripts.m7_acceptance`
 Expected: 全场景 PASS(0 SKIP);若阈值误伤按脚本提示下调重跑并记录终值。
 
-- [ ] **Step 3: 全量回归双栈**
+- [x] **Step 3: 全量回归双栈**
 
 Run(backend): `.venv\Scripts\python.exe -m pytest tests -q` → ≥127 基线只增不减,记录终值。
 Run(frontend): `npx vitest run` + `npm run build` + `npm run lint` → 全绿记录终值。
@@ -1975,7 +1975,7 @@ Run(frontend): `npx vitest run` + `npm run build` + `npm run lint` → 全绿记
 - 对话页(精排默认开/停止生成/拒答样式无引用/历史会话 refused 样式/头像/打字动画)
 - 用户管理/审计日志(含清理按钮)/主题切换往返/侧栏高亮
 
-- [ ] **Step 5: 收尾提交与交接**
+- [x] **Step 5: 收尾提交与交接**
 
 勾选本计划全部步骤;追加"M7 执行记录"节(结果/偏差与修正,对齐 M6 计划格式);spec 附录回填阈值终值与 eval 数据;记忆更新(M7 完成状态 + M8 交接)。
 
@@ -1992,3 +1992,23 @@ git push
 1. **Spec 覆盖**:§1 令牌/主题=Task 4;§2 布局壳/PageHeader=Task 5;§3 七页=Task 6/7/8/9/10(HomePage 快捷入口三项与 ?create=1 在 Task 6/7 对齐);§4.1 提示词=Task 2;§4.2 阈值=Task 1;§4.3 refused=Task 2/3;§4.4 精排默认开=Task 9;§4.5 README=Task 11;§5 eval=Task 11/12;§6 测试验收=各任务+Task 12;§6.4 双主题走查=Task 12 Step 4。无缺口。
 2. **占位扫描**:Task 6 stats 数组引用 Document 图标已在注中要求补 import;Task 10 两个"原样保留"注释指向的是既有代码区块而非计划缺失;Task 12 场景为骨架+断言语句(验收脚本含真实断言语义,零命中两题给定)。无 TBD。
 3. **类型一致性**:`rerank -> list[tuple[int, float]]` 在 base/zhipu/nodes/测试四处一致;`refused` 布尔流经 state→generate→ask.py 落库→done 帧→DonePayload/MessageItem→AssistantMessage props,命名一致;`RETRIEVAL_MIN_SCORE` 拼写全文一致。
+
+## M7 执行记录(2026-09-17,验收后固化;Step 4 用户走查待做)
+
+### 结果
+- 计数:后端 127→**137 passed**(+4 rerank 带分阈值、+3 refused 判定、+2 refused 全链路、+1 export refused);前端 vitest 6→**11 passed**(+3 useTheme、+2 AssistantMessage),build 绿,oxlint/eslint 0/0。
+- 无头验收 **12/12 PASS / 0 SKIP**(真智谱,threshold=0):零命中题(rerank on)done 帧 refused=true+固定话术、正常题引用≥1 不误拒、rerank off 提示词兜底成立、refused 落库回读一致、eval 零命中拒答率 100%(2/2)+正常题 faithfulness 均值 1.00。验收数据:KB「M7验收库」(id 9,复跑另留 id 10)+ `eval_sets/9.json`。
+- SDD 执行:12 任务(T6-8 同构批派遣)+逐任务双段审查;T9 修复环 1 轮;终审(whole-branch,14 commits)With fixes→修复波 59ce488 复审通过。
+
+### 偏差与修正(实现者/审查者对计划的增量,均已 ledger 裁决)
+1. T7 brief `description` 属性内 mustache 不插值(计划笔误)→ `:description` 绑定。
+2. T9 brief 样式块漏 `white-space: pre-wrap`(违反显示语义红线)→ 修复环补回。
+3. T10 brief"五个控件"计数笔误 → 按枚举四控件搬移。
+4. T11 brief `.env.example` 路径笔误(实际在仓库根)→ 编辑根文件。
+5. conftest 未隔离 RERANK_ENABLED(验收前置 dev .env 暴露)→ 按 M2/M5/M6 先例显式封 false(c164730)。
+6. **[载荷性] 智谱 rerank relevance_score 饱和**:裸 API 实测任意查询全文档 0.92~1.0,零命中 max 0.999996 > 正常题次高 0.996584——无可行阈值。裁决:`RETRIEVAL_MIN_SCORE` 默认 0.30→**0(禁用)**,机制保留为 opt-in 纵深防御,收紧提示词+refused 为零命中主防线;config/.env.example/README/spec/验收断言五处同步(064f947)。证据链见 spec 附录与 backend/m7_acceptance_run*.log。
+7. 终审跨任务缺口两处:export 端点未按 refused 跳过引用附录(该缝隙零覆盖)→ 守卫+测试;暗色下 hljs 亮色硬编码泄漏 → `html.dark` 作用域覆盖(均 59ce488)。
+
+### 待办
+- Step 4 用户浏览器双主题走查(7 页×亮/暗,含拒答样式/停止生成/精排默认开)通过后 push 收官。
+- M8 候选(终审分流):包裹型拒答检测加固(**升级**:阈值禁用后提示词门控是主防线)、refused 入 rewrite reset(拓扑护栏测试)、DocsPage 状态图标(spec 有计划无,已裁定接受偏差)、过滤空态文案/?create=1 残留、下拉键盘可达性、暗色 hljs-regexp 对比度一行修、--app-bg-soft 未消费、zhipu null 分防护、eval_sets 残留自动清理、既有 M8 池(评估入库/多跳并行/MinerU 本地化/LDAP 等)。
