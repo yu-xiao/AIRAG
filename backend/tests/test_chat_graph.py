@@ -52,7 +52,7 @@ async def test_rerank_node_respects_state_flag(monkeypatch):
 
     class FakeReranker:
         def rerank(self, query, documents, top_n=8):
-            return list(range(len(documents)))[::-1]  # 全量倒序
+            return [(i, 0.9) for i in range(len(documents))][::-1]  # 全量倒序
 
     monkeypatch.setattr(nodes_mod, "get_reranker", lambda: FakeReranker())
     hits = [
@@ -516,3 +516,57 @@ async def test_multihop_state_does_not_leak_across_turns(monkeypatch):
     final2 = await g.ainvoke({"question": "第二问新问题", "kb_ids": [1]}, config=cfg)
     assert calls == ["第二问新问题"]  # 新问题本身被检索;旧子查询未泄漏
     assert "第二轮答案" in final2["answer"]
+
+
+def _hit(cid: int, content: str) -> dict:
+    return {"chunk_id": cid, "document_id": 1, "kb_id": 1,
+            "filename": "a.pdf", "page_no": 1, "content": content,
+            "score": 0.01, "source": "vector"}
+
+
+async def test_rerank_node_sorts_and_filters_by_threshold(monkeypatch):
+    from app.core.config import settings
+    from app.services.chat_graph import nodes as nodes_mod
+
+    class FakeReranker:
+        def rerank(self, query, documents, top_n=8):
+            return [(0, 0.4), (1, 0.9), (2, 0.1)]  # 乱序,含低于阈值
+
+    monkeypatch.setattr(nodes_mod, "get_reranker", lambda: FakeReranker())
+    monkeypatch.setattr(settings, "RETRIEVAL_MIN_SCORE", 0.3)
+    out = await nodes_mod.rerank_node(
+        {"question": "q", "hits": [_hit(1, "甲"), _hit(2, "乙"), _hit(3, "丙")],
+         "rerank": True})
+    assert [h["chunk_id"] for h in out["hits"]] == [2, 1]  # 按分降序,丙被滤
+    assert out["hits"][0]["score"] == 0.9  # relevance 回写 score
+    assert out["hits"][1]["score"] == 0.4
+
+
+async def test_rerank_node_threshold_zero_disables_filter(monkeypatch):
+    from app.core.config import settings
+    from app.services.chat_graph import nodes as nodes_mod
+
+    class FakeReranker:
+        def rerank(self, query, documents, top_n=8):
+            return [(0, 0.05), (1, 0.02)]
+
+    monkeypatch.setattr(nodes_mod, "get_reranker", lambda: FakeReranker())
+    monkeypatch.setattr(settings, "RETRIEVAL_MIN_SCORE", 0.0)
+    out = await nodes_mod.rerank_node(
+        {"question": "q", "hits": [_hit(1, "甲"), _hit(2, "乙")], "rerank": True})
+    assert [h["chunk_id"] for h in out["hits"]] == [1, 2]  # 全保留,仅按分排序
+
+
+async def test_rerank_node_filters_all_to_empty(monkeypatch):
+    from app.core.config import settings
+    from app.services.chat_graph import nodes as nodes_mod
+
+    class FakeReranker:
+        def rerank(self, query, documents, top_n=8):
+            return [(0, 0.1), (1, 0.2)]
+
+    monkeypatch.setattr(nodes_mod, "get_reranker", lambda: FakeReranker())
+    monkeypatch.setattr(settings, "RETRIEVAL_MIN_SCORE", 0.3)
+    out = await nodes_mod.rerank_node(
+        {"question": "q", "hits": [_hit(1, "甲"), _hit(2, "乙")], "rerank": True})
+    assert out == {"hits": []}

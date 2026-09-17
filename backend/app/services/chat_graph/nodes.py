@@ -61,11 +61,23 @@ async def rerank_node(state: dict) -> dict:
     import asyncio
 
     hits = state["hits"]
-    order = await asyncio.to_thread(
+    scored = await asyncio.to_thread(
         reranker.rerank, state["question"],
         [h["content"] for h in hits], settings.RETRIEVAL_TOP_K,
     )
-    return {"hits": [hits[i] for i in order if 0 <= i < len(hits)]}
+    # M7:排序取 top_k 后按相关度阈值过滤;relevance 回写 score
+    # (rerank 开启时 score 语义=相关度分;关闭时保持 RRF 融合分)
+    ranked = sorted(scored, key=lambda p: p[1], reverse=True)[: settings.RETRIEVAL_TOP_K]
+    out = []
+    for idx, rel in ranked:
+        if not 0 <= idx < len(hits):
+            continue
+        if settings.RETRIEVAL_MIN_SCORE > 0 and rel < settings.RETRIEVAL_MIN_SCORE:
+            continue
+        h = dict(hits[idx])
+        h["score"] = round(float(rel), 6)
+        out.append(h)
+    return {"hits": out}
 
 
 async def generate_node(state: dict, llm) -> dict:

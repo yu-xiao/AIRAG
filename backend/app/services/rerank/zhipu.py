@@ -5,7 +5,9 @@ from app.services.rerank.base import RerankProvider
 
 
 class ZhipuRerank(RerankProvider):
-    def rerank(self, query: str, documents: list[str], top_n: int = 8) -> list[int]:
+    def rerank(
+        self, query: str, documents: list[str], top_n: int = 8
+    ) -> list[tuple[int, float]]:
         resp = httpx.post(
             f"{settings.ZHIPU_BASE_URL}/rerank",
             headers={"Authorization": f"Bearer {settings.ZHIPU_API_KEY}"},
@@ -19,4 +21,7 @@ class ZhipuRerank(RerankProvider):
         )
         resp.raise_for_status()
         results = resp.json()["results"]
-        return [r["index"] for r in results][:top_n]
+        return [
+            (int(r["index"]), float(r.get("relevance_score", 0.0)))
+            for r in results
+        ][:top_n]
