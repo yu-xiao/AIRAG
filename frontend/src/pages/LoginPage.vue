@@ -42,8 +42,11 @@ async function submit() {
 
 <template>
   <div class="login-page">
-    <el-card class="login-card">
-      <h2>AIRag 知识库</h2>
+    <el-card class="login-card" shadow="never">
+      <div class="login-brand">
+        <span class="brand-mark">AI</span>
+        <h2>AIRag 知识库</h2>
+      </div>
       <el-form ref="formRef" :model="form" :rules="rules" label-position="top">
         <el-form-item label="用户名" prop="username">
           <el-input v-model="form.username" placeholder="用户名" />
@@ -68,13 +71,31 @@ async function submit() {
   align-items: center;
   justify-content: center;
   height: 100vh;
-  background: #f5f7fa;
+  background: var(--app-bg);
 }
 .login-card {
   width: 360px;
+  border-radius: var(--app-radius);
+}
+.login-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--app-spacing-sm);
+  margin-bottom: var(--app-spacing-lg);
+}
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--app-radius);
+  background: var(--el-color-primary);
+  color: #fff;
+  font-weight: 700;
 }
 h2 {
-  text-align: center;
-  margin-bottom: 16px;
+  margin: 0;
 }
 </style>

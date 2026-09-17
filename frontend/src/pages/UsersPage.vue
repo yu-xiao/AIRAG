@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { adminApi, type AdminUser } from '@/api/admin'
+import PageHeader from '@/components/PageHeader.vue'
 
 const loading = ref(false)
 const users = ref<AdminUser[]>([])
@@ -52,9 +53,7 @@ onMounted(load)
 
 <template>
   <div class="users-page">
-    <div class="page-header">
-      <h2>用户管理</h2>
-    </div>
+    <PageHeader title="用户管理" description="管理系统用户角色与启用状态" />
 
     <el-table v-loading="loading" :data="users" class="users-table">
       <el-table-column prop="id" label="ID" width="70" align="center" />
@@ -81,14 +80,9 @@ onMounted(load)
 </template>
 
 <style scoped>
-.page-header {
-  margin-bottom: 16px;
-}
-.page-header h2 {
-  margin: 0;
-}
 .users-table {
   width: 100%;
   max-width: 720px;
+  border-radius: var(--app-radius);
 }
 </style>

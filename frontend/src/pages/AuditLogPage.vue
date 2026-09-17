@@ -3,6 +3,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { adminApi, type AuditLogItem } from '@/api/admin'
 import { useAuthStore } from '@/stores/auth'
+import PageHeader from '@/components/PageHeader.vue'
 
 const auth = useAuthStore()
 const loading = ref(false)
@@ -104,29 +105,30 @@ onMounted(load)
 
 <template>
   <div class="audit-page">
-    <div class="page-header">
-      <h2>审计日志</h2>
-      <div class="filters">
-        <el-input
-          v-model="query.username"
-          placeholder="用户名"
-          clearable
-          class="filter-input"
-          @keyup.enter="search"
-        />
-        <el-select v-model="query.action" placeholder="动作" clearable class="filter-select">
-          <el-option v-for="a in ACTION_OPTIONS" :key="a" :label="label(a)" :value="a" />
-        </el-select>
-        <el-button type="primary" @click="search">查询</el-button>
-        <el-button
-          v-if="auth.user?.role === 'admin'"
-          type="danger"
-          plain
-          :loading="purging"
-          @click="purgeExpired"
-        >清理过期日志</el-button>
-      </div>
-    </div>
+    <PageHeader title="审计日志" description="用户操作与系统动作记录">
+      <template #actions>
+        <div class="filters">
+          <el-input
+            v-model="query.username"
+            placeholder="用户名"
+            clearable
+            class="filter-input"
+            @keyup.enter="search"
+          />
+          <el-select v-model="query.action" placeholder="动作" clearable class="filter-select">
+            <el-option v-for="a in ACTION_OPTIONS" :key="a" :label="label(a)" :value="a" />
+          </el-select>
+          <el-button type="primary" @click="search">查询</el-button>
+          <el-button
+            v-if="auth.user?.role === 'admin'"
+            type="danger"
+            plain
+            :loading="purging"
+            @click="purgeExpired"
+          >清理过期日志</el-button>
+        </div>
+      </template>
+    </PageHeader>
 
     <el-table v-loading="loading" :data="logs" class="audit-table">
       <template #empty>
@@ -160,15 +162,6 @@ onMounted(load)
 </template>
 
 <style scoped>
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
-}
-.page-header h2 {
-  margin: 0;
-}
 .filters {
   display: flex;
   gap: 8px;
@@ -181,6 +174,7 @@ onMounted(load)
 }
 .audit-table {
   width: 100%;
+  border-radius: var(--app-radius);
 }
 .audit-pagination {
   margin-top: 12px;
