@@ -33,3 +33,30 @@ Redis:worker 需要 Redis(本机 6379 已有服务)。若该服务设置了 requ
 问答检索(M7 起):`RETRIEVAL_MIN_SCORE` 为 rerank 相关度阈值,仅 rerank 开启时生效——默认 0=禁用;智谱 rerank 分数饱和实测(见 M7 验收),阈值仅在供应商分数分布有效时手动开启;零命中防线=收紧提示词+refused 标记(前端隐藏引用)。前端精排开关 M7 起默认开,收益=排序质量,代价=每问一次 rerank 调用。
 
 审计清理 beat(M6 起):Windows 不能用 worker -B 内嵌,另开窗口运行 backend\start_beat.bat(每日 03:00 清理,`AUDIT_RETENTION_DAYS` 默认 180 天,0=禁用;不开 beat 时可用 admin 手动 purge 端点)。
+
+## 外部 Agent 接入(M9)
+
+知识库可通过 API Key 只读开放给外部 Agent(检索 + 知识库发现)。密钥在「API 密钥」页面创建,权限与创建者账号一致,可随时吊销。
+
+### 1. 创建密钥
+登录 Web → 左侧「API 密钥」→ 创建(明文只显示一次)。
+
+### 2. MCP 客户端(Claude Code / Cursor / ZCode 等)
+```bash
+claude mcp add --transport http airag http://<host>:8001/mcp --header "Authorization: Bearer airag_xxxx"
+```
+可用工具:`list_knowledge_bases` / `search_knowledge_base`。
+
+### 3. REST 客户端(Dify / Coze / 内部系统)
+OpenAPI 文档:`http://<host>:8001/openapi.json`(tag `agent`)。
+```bash
+# 知识库发现
+curl -H "Authorization: Bearer airag_xxxx" http://127.0.0.1:8001/api/agent/kbs
+# 混合检索
+curl -X POST -H "Authorization: Bearer airag_xxxx" -H "Content-Type: application/json" \
+  -d '{"kb_ids":[1],"query":"退货流程","top_k":8}' \
+  http://127.0.0.1:8001/api/agent/search
+```
+
+### 限流与审计
+每密钥每分钟 `AGENT_RATE_LIMIT_PER_MIN`(默认 60)次;所有调用记入审计日志(action `agent.*`)。紧急关闭:`AGENT_API_ENABLED=false` 后重启。
