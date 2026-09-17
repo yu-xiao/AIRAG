@@ -2096,6 +2096,9 @@ git commit -m "feat(frontend): api key management page with one-time reveal"
 
 ---
 
+
+> **执行勘误(2026-09-17)**: Step 3 的 KeysPage.vue 中一次性明文展示不可用 el-input :model-value(input 值不进 textContent,与自身测试断言 w.text() 矛盾),应使用 ``<code class="key-value">{{ created?.key }}</code>`` 文本节点+复制按钮;KeysPage.spec.ts 中 ``{ ...items[0], id: 9, ... }`` 需写作 ``{ ...items[0]!, ... }``(tsconfig noUncheckedIndexedAccess)。
+
 ### Task 8: 配置样例、README 接入指南、无头验收脚本、全量收口
 
 **Files:**
