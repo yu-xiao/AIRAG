@@ -11,3 +11,6 @@ pnpm-debug.log*
 .zcode/
 *.egg-info/
 storage/
+
+backend/celerybeat-schedule.*
+backend/*.log
