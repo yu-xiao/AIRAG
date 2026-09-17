@@ -1725,6 +1725,11 @@ git add backend/app/mcp_server.py backend/app/main.py backend/pyproject.toml bac
 git commit -m "feat(agent): MCP streamable-http face at /mcp with ASGI auth"
 ```
 
+> **执行勘误(2026-09-17,实测 fastmcp 2.14.7 / starlette 1.6 后修正)**:
+> ① `http_app(path="/")` + `app.mount("/mcp", ...)` 在裸 `/mcp` 会 307(Starlette Mount 正则要求尾随路径);实际采用 `mcp.http_app(path="/mcp", transport="streamable-http", json_response=True)` + `app.mount("/", wrapped)`——MCP 端点仍恰为 `POST /mcp`,副作用是未匹配的顶层路径返回 401 而非 404(已注册路由不受影响)。
+> ② `StreamableHTTPSessionManager.run()` 每实例只能执行一次:测试的 lifespan fixture 需 session 级复用,测试体本身不变。
+> ③ Step 1 的 429 测试中 `lambda: FakeRedis()` 每次调用新建实例、窗口永不填满,须改为共享同一 FakeRedis 实例(与 Task 5 fixture 同法)。
+
 ---
 
 ### Task 7: 前端——API 密钥管理页
