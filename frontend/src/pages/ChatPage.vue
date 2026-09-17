@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete, Download } from '@element-plus/icons-vue'
 import DOMPurify from 'dompurify'
@@ -13,8 +14,9 @@ import 'highlight.js/styles/github.css'
 import { conversationsApi, type Citation, type ConversationItem, type MessageItem } from '@/api/chat'
 import { kbApi, type KbItem } from '@/api/kb'
 import { useChatStream } from '@/composables/useChatStream'
+import { useAuthStore } from '@/stores/auth'
 import { throttle } from '@/utils/throttle'
-import CitationList from '@/components/CitationList.vue'
+import AssistantMessage from '@/components/AssistantMessage.vue'
 
 // ---- markdown 渲染:页面级单例;语言子集 python/ts/json/bash ----
 // 注:M4 起 v-html 前统一过 DOMPurify(markdown html:false 之外的第二道防线)。
@@ -43,6 +45,9 @@ function render(src: string): string {
 }
 
 // ---- 状态 ----
+const route = useRoute()
+const auth = useAuthStore()
+
 interface ChatMessage {
   id?: number
   role: 'user' | 'assistant'
@@ -52,6 +57,8 @@ interface ChatMessage {
   citations?: Citation[] | null
   /** 该条是否仍在流式生成中(仅本地追问消息使用) */
   pending?: boolean
+  /** M7:拒答标记(refused=true 时隐藏 markdown 渲染与引用) */
+  refused?: boolean
 }
 
 const conversations = ref<ConversationItem[]>([])
@@ -62,8 +69,12 @@ const selectedKbIds = ref<number[]>([])
 const question = ref('')
 const streaming = ref(false)
 const bottomAnchor = ref<HTMLElement>()
-/** M4:请求级精排开关,localStorage 记忆;provider 未开时后端直通 */
-const rerankEnabled = ref(localStorage.getItem('airag_rerank') === '1')
+/** M4:请求级精排开关;M7 起默认开(阈值门控生效);localStorage 记忆用户选择 */
+const rerankEnabled = ref(
+  localStorage.getItem('airag_rerank') === null
+    ? true
+    : localStorage.getItem('airag_rerank') === '1',
+)
 
 function onRerankChange(v: boolean) {
   localStorage.setItem('airag_rerank', v ? '1' : '0')
@@ -95,6 +106,7 @@ function toChatMessage(m: MessageItem): ChatMessage {
     content: m.content,
     html: render(m.content),
     citations: m.citations,
+    refused: m.refused ?? false,
   }
 }
 
@@ -214,6 +226,7 @@ async function onSend() {
         assistant.content = d.answer // 权威终稿整体替换流式累积内容
         assistant.html = render(d.answer)
         assistant.pending = false
+        assistant.refused = d.refused ?? false
         if (currentId.value === null) {
           currentId.value = d.conversation_id
           loadConversations() // 首问建会话,侧栏同步
@@ -247,9 +260,14 @@ function scrollToBottom() {
   })
 }
 
-onMounted(() => {
+onMounted(async () => {
   loadKbs()
-  loadConversations()
+  await loadConversations()
+  const cv = Number(route.query.conv)
+  if (cv) {
+    const target = conversations.value.find((c) => c.id === cv)
+    if (target) openConversation(target)
+  }
 })
 
 onUnmounted(() => {
@@ -310,15 +328,18 @@ onUnmounted(() => {
       <div class="chat-messages">
         <el-empty v-if="messages.length === 0" description="选择知识库后开始提问" />
         <div v-for="(m, i) in messages" :key="m.id ?? `local-${i}`" class="msg-row" :class="m.role">
-          <div class="bubble">
-            <div v-if="m.role === 'assistant'" class="markdown-body" v-html="m.html" />
-            <div v-else class="plain-text">{{ m.content }}</div>
-            <div v-if="m.pending && !m.content" class="typing">思考中…</div>
-            <CitationList
-              v-if="!m.pending && m.citations && m.citations.length > 0"
-              :citations="m.citations"
-            />
-          </div>
+          <span v-if="m.role === 'user'" class="avatar user-avatar">
+            {{ auth.user?.username?.slice(0, 1).toUpperCase() ?? '?' }}
+          </span>
+          <AssistantMessage
+            v-if="m.role === 'assistant'"
+            :html="m.html"
+            :content="m.content"
+            :pending="m.pending"
+            :refused="m.refused"
+            :citations="m.citations"
+          />
+          <div v-else class="bubble">{{ m.content }}</div>
         </div>
         <div ref="bottomAnchor"></div>
       </div>
@@ -333,8 +354,17 @@ onUnmounted(() => {
           placeholder="Enter 或 Alt+Enter 发送,Shift+Enter 换行"
           @keydown.enter="onEnterKey"
         />
-        <el-button type="primary" class="send-btn" :disabled="!canSend()" @click="onSend">
-          {{ streaming ? '回答中' : '发送' }}
+        <el-button
+          v-if="streaming"
+          type="danger"
+          plain
+          class="send-btn"
+          @click="abort()"
+        >
+          停止
+        </el-button>
+        <el-button v-else type="primary" class="send-btn" :disabled="!canSend()" @click="onSend">
+          发送
         </el-button>
       </div>
     </div>
@@ -447,64 +477,42 @@ onUnmounted(() => {
   margin: auto;
 }
 
-/* 气泡:用户右侧 / 助手左侧 */
+/* 气泡:用户右侧 / 助手左侧(助手气泡与 markdown 样式已迁入 AssistantMessage 组件) */
 .msg-row {
   display: flex;
+  gap: var(--app-spacing-sm);
+  align-items: flex-start;
 }
 .msg-row.user {
   justify-content: flex-end;
 }
-.msg-row.assistant {
-  justify-content: flex-start;
-}
-.bubble {
-  max-width: 78%;
-  padding: 8px 12px;
-  border-radius: 8px;
-  font-size: 14px;
-  line-height: 1.6;
-  word-break: break-word;
-}
 .msg-row.user .bubble {
   background: var(--el-color-primary);
   color: #fff;
-}
-.msg-row.assistant .bubble {
-  background: var(--el-fill-color-light);
-}
-.plain-text {
+  max-width: 78%;
+  padding: var(--app-spacing-sm) var(--app-spacing-md);
+  border-radius: var(--app-radius);
+  font-size: 14px;
+  line-height: 1.6;
+  word-break: break-word;
+  /* 保留 Shift+Enter 多行输入的换行(旧 .plain-text 语义,brief 遗漏系笔误) */
   white-space: pre-wrap;
 }
-.typing {
-  color: var(--el-text-color-secondary);
-  font-size: 13px;
+.avatar {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 600;
 }
-
-/* markdown 渲染区(assistant) */
-.markdown-body :deep(p) {
-  margin: 0 0 8px;
-}
-.markdown-body :deep(p:last-child) {
-  margin-bottom: 0;
-}
-.markdown-body :deep(pre.hljs) {
-  margin: 8px 0;
-  padding: 10px 12px;
-  border-radius: 4px;
-  overflow-x: auto;
-  font-size: 13px;
-}
-.markdown-body :deep(code) {
-  font-family: var(--el-font-family);
-}
-.markdown-body :deep(table) {
-  border-collapse: collapse;
-  margin: 8px 0;
-}
-.markdown-body :deep(th),
-.markdown-body :deep(td) {
-  border: 1px solid var(--el-border-color);
-  padding: 4px 10px;
+.user-avatar {
+  background: var(--el-color-primary-light-8);
+  color: var(--el-color-primary);
+  order: 2; /* 用户消息头像在气泡右侧 */
 }
 
 /* 输入区 */

@@ -24,6 +24,8 @@ export interface MessageItem {
   role: string
   content: string
   citations: Citation[] | null
+  /** M7:拒答标记(后端 MessageOut.refused;旧数据缺省 false) */
+  refused?: boolean
   created_at: string
 }
 

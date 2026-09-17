@@ -19,6 +19,8 @@ export interface DonePayload {
   conversation_id: number
   /** 权威终稿:到达后整体替换流式累积的内容 */
   answer: string
+  /** M7:拒答标记(refused=true 时前端隐藏引用) */
+  refused?: boolean
 }
 
 export interface AskPayload {
