@@ -142,6 +142,7 @@ async def rewrite_node(state: dict, llm) -> dict:
         "hopped": False,
         "sub_queries": [],
         "proposed_query": "",
+        "refused": False,  # M8:异常中断路径下防上一轮拒答标记跨轮残留
     }
     if not settings.AGENTIC_REWRITE_ENABLED:
         return reset

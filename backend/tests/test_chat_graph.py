@@ -113,7 +113,21 @@ async def test_rewrite_disabled_resets_state():
         "hopped": False,
         "sub_queries": [],  # M6:每轮清空,防 checkpointer 跨轮残留
         "proposed_query": "",
+        "refused": False,  # M8:拒答标记同样防跨轮残留
     }
+
+
+async def test_rewrite_clears_stale_refused():
+    """上一轮残留的 refused 必须在本轮 rewrite 被复位(M8 拓扑护栏)。"""
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+
+    from app.services.chat_graph.nodes import rewrite_node
+
+    out = await rewrite_node(
+        {"question": "新问题", "refused": True},
+        llm=FakeListChatModel(responses=["不该被调用"]),
+    )
+    assert out["refused"] is False
 
 
 async def test_rewrite_clears_stale_multihop_state():
