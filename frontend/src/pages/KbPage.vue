@@ -1,16 +1,31 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
+import { Search } from '@element-plus/icons-vue'
 import { kbApi, type KbItem, type KbMember } from '@/api/kb'
 import { useAuthStore } from '@/stores/auth'
+import PageHeader from '@/components/PageHeader.vue'
 
 const router = useRouter()
+const route = useRoute()
 const auth = useAuthStore()
 const loading = ref(false)
 const list = ref<KbItem[]>([])
 
 const isViewer = () => auth.user?.role === 'viewer'
+
+const keyword = ref('')
+const filteredList = computed(() => {
+  const k = keyword.value.trim().toLowerCase()
+  if (!k) return list.value
+  return list.value.filter(
+    (kb) =>
+      kb.name.toLowerCase().includes(k) ||
+      (kb.description ?? '').toLowerCase().includes(k),
+  )
+})
+const totalDocs = computed(() => list.value.reduce((s, kb) => s + (kb.doc_count ?? 0), 0))
 
 const PERM_META: Record<string, { label: string; type: 'danger' | 'warning' | 'info' }> = {
   owner: { label: '库主', type: 'danger' },
@@ -153,48 +168,52 @@ function fmtTime(iso: string) {
   return iso.replace('T', ' ').slice(0, 19)
 }
 
-onMounted(load)
+onMounted(() => {
+  load()
+  // 工作台快捷入口:自动打开新建对话框(viewer 无权创建,跳过)
+  if (route.query.create === '1' && !isViewer()) {
+    openCreate()
+  }
+})
 </script>
 
 <template>
   <div class="kb-page">
-    <div class="page-header">
-      <h2>知识库</h2>
-      <el-button v-if="!isViewer()" type="primary" @click="openCreate">新建知识库</el-button>
-    </div>
-
-    <el-table v-loading="loading" :data="list" class="kb-table">
-      <template #empty>
-        <el-empty description="暂无知识库,点击右上角新建" />
+    <PageHeader title="知识库" :description="`共 ${list.length} 个库 · ${totalDocs} 篇文档`">
+      <template #actions>
+        <el-input
+          v-model="keyword"
+          :prefix-icon="Search"
+          placeholder="搜索名称/描述"
+          clearable
+          class="kb-search"
+        />
+        <el-button v-if="!isViewer()" type="primary" @click="openCreate">新建知识库</el-button>
       </template>
-      <el-table-column label="名称" min-width="180">
-        <template #default="{ row }">
-          <el-link type="primary" @click="openDocs(row)">{{ row.name }}</el-link>
-        </template>
-      </el-table-column>
-      <el-table-column prop="description" label="描述" min-width="220">
-        <template #default="{ row }">{{ row.description ?? '—' }}</template>
-      </el-table-column>
-      <el-table-column label="我的权限" width="110" align="center">
-        <template #default="{ row }">
+    </PageHeader>
+
+    <div v-loading="loading" class="kb-grid">
+      <el-empty v-if="filteredList.length === 0" description="暂无知识库,点击右上角新建" class="kb-empty" />
+      <el-card v-for="row in filteredList" :key="row.id" shadow="never" class="kb-card" @click="openDocs(row)">
+        <div class="kb-card-head">
+          <span class="kb-card-name">{{ row.name }}</span>
           <el-tag :type="permMeta(row.my_perm).type" size="small">
             {{ permMeta(row.my_perm).label }}
           </el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column prop="doc_count" label="文档数" width="90" align="center" />
-      <el-table-column label="创建时间" width="170">
-        <template #default="{ row }">{{ fmtTime(row.created_at) }}</template>
-      </el-table-column>
-      <el-table-column label="操作" width="170" align="center">
-        <template #default="{ row }">
-          <el-button link type="primary" @click="openDocs(row)">进入</el-button>
-          <el-button v-if="row.my_perm === 'owner'" link type="primary" @click="openMembers(row)">
+        </div>
+        <p class="kb-card-desc">{{ row.description ?? '暂无描述' }}</p>
+        <div class="kb-card-meta">
+          <span>{{ row.doc_count }} 篇文档</span>
+          <span>{{ fmtTime(row.created_at) }}</span>
+        </div>
+        <div class="kb-card-actions" @click.stop>
+          <el-button size="small" type="primary" plain @click="openDocs(row)">进入</el-button>
+          <el-button v-if="row.my_perm === 'owner'" size="small" plain @click="openMembers(row)">
             成员
           </el-button>
-        </template>
-      </el-table-column>
-    </el-table>
+        </div>
+      </el-card>
+    </div>
 
     <el-dialog v-model="dialogVisible" title="新建知识库" width="480px">
       <el-form ref="formRef" :model="form" :rules="rules" label-position="top">
@@ -259,17 +278,59 @@ onMounted(load)
 </template>
 
 <style scoped>
-.page-header {
+.kb-search {
+  width: 220px;
+}
+.kb-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--app-spacing-md);
+  min-height: 120px;
+}
+.kb-empty {
+  grid-column: 1 / -1;
+}
+.kb-card {
+  cursor: pointer;
+  border-radius: var(--app-radius);
+  transition: box-shadow 0.2s;
+}
+.kb-card:hover {
+  box-shadow: var(--app-shadow-card);
+}
+.kb-card-head {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
+  gap: var(--app-spacing-sm);
 }
-.page-header h2 {
-  margin: 0;
+.kb-card-name {
+  font-weight: 600;
+  font-size: 15px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.kb-table {
-  width: 100%;
+.kb-card-desc {
+  margin: var(--app-spacing-sm) 0;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: 40px;
+}
+.kb-card-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  margin-bottom: var(--app-spacing-md);
+}
+.kb-card-actions {
+  display: flex;
+  gap: var(--app-spacing-sm);
 }
 .grant-row {
   display: flex;
