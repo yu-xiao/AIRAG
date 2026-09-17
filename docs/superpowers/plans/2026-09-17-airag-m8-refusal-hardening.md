@@ -1027,4 +1027,6 @@ KB 删除端点(owner/admin,级联文档+chunk+权限+向量+eval_sets 钩子)�
 
 **实现提交**(10 个,不含 spec/plan 文档):de9f069/50a67d5/3551e39/a645284/80bc812/62462b5/9a3f2dd/c8c3994/8b0339d/b5f9d86。
 
+**终审增量**(全分支审查 Ready to merge):1 条 Important 已修——kbs.py 重名查询 `scalar_one_or_none()` 在库中同名≥2 条时抛 MultipleResultsFound(500)→改 `.scalars().first()` + 回归测试(种两条同名直接 ORM 提交再 POST 断言 409),commit 4488e29,test_kbs 11P,scoped 复审通过。测试计数更新:后端 **145P**(144+1)。Minors 分流维持递延(strip 冗余/子串误报面 spec 接受/check-then-insert M9/维护脚本边角/测试断言面/脚本全角标点)。
+
 **待办**:用户浏览器走查(重名内联报错/下拉后缀/暗色正则高亮/对话页回归)→ 通过后收官推送。
