@@ -1,1 +1,0 @@
-{"kb_id": 6, "items": [{"question": "星际探索项目的预算总额是多少?", "expect_doc_ids": [15], "expect_keywords": ["三千"]}, {"question": "星际探索项目的负责人是谁?", "expect_doc_ids": [15], "expect_keywords": ["张三丰"]}, {"question": "项目周期是什么时候?", "expect_doc_ids": [15], "expect_keywords": ["2026"]}]}
