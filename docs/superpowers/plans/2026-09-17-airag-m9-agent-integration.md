@@ -1209,7 +1209,7 @@ async def test_ident_isolated(fake_redis, monkeypatch):
 
 async def test_api_429(client, auth_headers, monkeypatch):
     # 集成:第 2 次(配额 1)触发 429;JWT 不限流
-    from test_agent_api import _create_kb, _create_key
+    from tests.test_agent_api import _create_kb, _create_key
 
     kb_id = await _create_kb(client, auth_headers, "限流库")
     key = await _create_key(client, auth_headers)
@@ -1277,7 +1277,7 @@ async def allow(ident: str) -> tuple[bool, int]:
             oldest = await r.zrange(rkey, 0, 0, withscores=True)
             retry = 1
             if oldest:
-                retry = max(1, int(WINDOW_SECONDS - (now - oldest[0][1])) + 1)
+                retry = min(WINDOW_SECONDS, max(1, int(WINDOW_SECONDS - (now - oldest[0][1])) + 1))  # 钳到窗口内(elapsed<=0 时公式会给 61)
             return False, retry
         await r.zadd(rkey, {f"{now:.6f}:{uuid.uuid4().hex[:6]}": now})
         await r.expire(rkey, WINDOW_SECONDS * 2)
@@ -1409,7 +1409,7 @@ async def test_mcp_401_bad_key(mcp_client):
 
 
 async def test_mcp_initialize_and_tools_list(mcp_client, auth_headers):
-    from test_agent_api import _create_key
+    from tests.test_agent_api import _create_key
 
     key = await _create_key(mcp_client, auth_headers)
     hdr = {"Authorization": f"Bearer {key}"}
@@ -1425,7 +1425,7 @@ async def test_mcp_initialize_and_tools_list(mcp_client, auth_headers):
 
 
 async def test_mcp_tool_list_kbs(mcp_client, auth_headers):
-    from test_agent_api import _create_kb, _create_key
+    from tests.test_agent_api import _create_kb, _create_key
 
     kb_id = await _create_kb(mcp_client, auth_headers, "MCP可见库")
     key = await _create_key(mcp_client, auth_headers)
@@ -1442,7 +1442,7 @@ async def test_mcp_tool_list_kbs(mcp_client, auth_headers):
 
 
 async def test_mcp_tool_search(mcp_client, auth_headers, monkeypatch):
-    from test_agent_api import _create_kb, _create_key
+    from tests.test_agent_api import _create_kb, _create_key
     from app.services.retrieval.searcher import SearchHit
 
     kb_id = await _create_kb(mcp_client, auth_headers, "MCP检索库")
@@ -1468,7 +1468,7 @@ async def test_mcp_tool_search(mcp_client, auth_headers, monkeypatch):
 
 
 async def test_mcp_tool_denied_kb(mcp_client, auth_headers):
-    from test_agent_api import _create_key
+    from tests.test_agent_api import _create_key
 
     key = await _create_key(mcp_client, auth_headers)
     hdr = {"Authorization": f"Bearer {key}"}
@@ -1485,7 +1485,7 @@ async def test_mcp_tool_denied_kb(mcp_client, auth_headers):
 
 
 async def test_mcp_rate_limited_429(mcp_client, auth_headers, monkeypatch):
-    from test_agent_api import _create_key
+    from tests.test_agent_api import _create_key
     from app.core.config import settings
     from app.services import agent_ratelimit
     from tests.test_agent_ratelimit import FakeRedis
