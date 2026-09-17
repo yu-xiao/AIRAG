@@ -583,14 +583,38 @@ async def test_generate_marks_refusal():
     assert out["citations"] == []
 
 
-async def test_generate_refusal_startswith_semantics():
+async def test_generate_refusal_containment_semantics():
+    """M8:话术出现在回答任意位置即拒答(含包裹型礼貌前缀)。"""
     from app.services.chat_graph.nodes import generate_node
 
     out = await generate_node(
         {"question": "q", "hits": [_hit(1, "不相关资料")]},
         llm=_LLMScript(["知识库中未找到相关内容。"]),
     )
-    assert out["refused"] is True  # 以话术开头即拒答(含尾标点变体)
+    assert out["refused"] is True  # 开头命中(原 startswith 语义兼容)
+
+    out2 = await generate_node(
+        {"question": "q", "hits": [_hit(1, "不相关资料")]},
+        llm=_LLMScript(["很抱歉,知识库中未找到相关内容,建议换个问法。"]),
+    )
+    assert out2["refused"] is True  # 包裹型:话术居中
+
+
+async def test_generate_near_phrase_not_refused():
+    """近似措辞(缺字/改字)不含完整话术,不得误判。"""
+    from app.services.chat_graph.nodes import generate_node
+
+    out = await generate_node(
+        {"question": "q", "hits": []},
+        llm=_LLMScript(["知识库中未找到相关文档"]),
+    )
+    assert out["refused"] is False
+
+    out2 = await generate_node(
+        {"question": "q", "hits": []},
+        llm=_LLMScript(["关于知识库的使用说明如下[1]"]),
+    )
+    assert out2["refused"] is False
 
 
 async def test_generate_normal_answer_not_refused():

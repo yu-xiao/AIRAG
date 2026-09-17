@@ -12,7 +12,8 @@ REFUSAL_PHRASE = "知识库中未找到相关内容"
 SYSTEM_PROMPT = (
     "你是企业知识库助手。只依据下面提供的参考资料回答;"
     "引用资料时标注编号如 [1][2];若资料与问题不相关或不足以回答,"
-    f'只回复"{REFUSAL_PHRASE}",不得罗列、摘要或拼凑返回的资料;'
+    f'只回复"{REFUSAL_PHRASE}"本身,不得添加任何前后缀或礼貌用语,'
+    "不得罗列、摘要或拼凑返回的资料;"
     "用中文,简洁分点。"
 )
 
@@ -106,7 +107,7 @@ async def generate_node(state: dict, llm) -> dict:
     return {
         "answer": answer,
         "citations": build_citations(shits),
-        "refused": (answer or "").strip().startswith(REFUSAL_PHRASE),
+        "refused": REFUSAL_PHRASE in (answer or "").strip(),
     }
 
 
