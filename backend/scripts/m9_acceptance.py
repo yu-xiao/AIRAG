@@ -206,10 +206,12 @@ async def main():
             # ---- 2. 创建 key（+ 列表可见；生命周期：创建/列表/吊销）----
             created = await create_key(c, owner, "验收key")
             raw_key, key_id = created["key"], created["id"]
+            # 失败详情不得回显明文 key（安全卫生：脱敏后再拼 detail）
+            safe_created = {k: v for k, v in created.items() if k != "key"}
             check("key created & plaintext once",
                   raw_key.startswith("airag_") and key_id > 0
                   and created["expires_at"] is not None,
-                  str(created)[:200])
+                  str(safe_created)[:200])
             keys_list = (await c.get(f"{API}/auth/keys", headers=owner)).json()
             check("key listed", any(k["id"] == key_id and k["is_active"]
                                     for k in keys_list), str(keys_list)[:200])

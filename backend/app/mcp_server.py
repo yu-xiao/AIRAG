@@ -9,7 +9,12 @@ from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 
 from app.core.config import settings
-from app.core.deps import Principal, current_principal, resolve_bearer_principal
+from app.core.deps import (
+    Principal,
+    current_client_ip,
+    current_principal,
+    resolve_bearer_principal,
+)
 from app.db.session import SessionLocal
 from app.services import agent_facade
 from app.services.agent_ratelimit import allow as rate_allow
@@ -37,7 +42,8 @@ async def list_knowledge_bases() -> dict:
         items = await agent_facade.list_kbs_for(db, p.user)
         await audit(db, p.user.username, "agent.list_kbs", "agent",
                     {"client": "mcp", "key_name": p.key_name,
-                     "kb_count": len(items)})
+                     "kb_count": len(items)},
+                    ip=current_client_ip.get())
         await db.commit()
         return {"items": [asdict(i) for i in items]}
 
@@ -75,7 +81,8 @@ async def search_knowledge_base(
             raise ToolError(f"kb_forbidden, denied_kb_ids={e.denied_kb_ids}")
         await audit(db, p.user.username, "agent.search", "agent",
                     {"client": "mcp", "key_name": p.key_name, "kb_ids": kb_ids,
-                     "query": query[:200], "hit_count": len(outcome.hits)})
+                     "query": query[:200], "hit_count": len(outcome.hits)},
+                    ip=current_client_ip.get())
         await db.commit()
         return {"hits": [asdict(h) for h in outcome.hits],
                 "total": len(outcome.hits),
@@ -96,6 +103,12 @@ class AgentAuthMiddleware:
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
             await self.app(scope, receive, send)
+            return
+        # mount("/") 是兜底路由:宿主中一切未匹配路径(/api 拼写错、错误方法、
+        # 尾斜杠变体等)都会落进本中间件,若一律鉴权会把正常 404/405/307 变成
+        # 401。仅 /mcp(含尾斜杠变体)归我们管,其余直接 404 保持路由语义。
+        if scope["path"] not in ("/mcp", "/mcp/"):
+            await _send_json(send, 404, {"detail": "not found"})
             return
         headers = {
             k.decode("latin-1").lower(): v.decode("latin-1")
@@ -120,11 +133,15 @@ class AgentAuthMiddleware:
                 await _send_json(send, 429, {"detail": {
                     "code": "rate_limited", "retry_after": retry_after}})
                 return
-        token = current_principal.set(principal)
+        client = scope.get("client")  # (host, port);与 api/agent._ip 同语义
+        ip = client[0] if client else None
+        principal_token = current_principal.set(principal)
+        ip_token = current_client_ip.set(ip)
         try:
             await self.app(scope, receive, send)
         finally:
-            current_principal.reset(token)
+            current_client_ip.reset(ip_token)
+            current_principal.reset(principal_token)
 
 
 async def _send_json(send, status: int, body: dict) -> None:

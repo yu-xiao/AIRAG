@@ -49,6 +49,12 @@ current_principal: ContextVar[Principal | None] = ContextVar(
     "current_principal", default=None
 )
 
+# 同上:中间件从 ASGI scope 提取的客户端 ip(纯 ASGI 无 Request 对象,
+# REST 面走 api/agent._ip,MCP 工具审计从这里取,满足 spec B 节 ip 要求)
+current_client_ip: ContextVar[str | None] = ContextVar(
+    "current_client_ip", default=None
+)
+
 
 async def resolve_bearer_principal(db: AsyncSession, raw: str) -> Principal:
     """把 Bearer 凭证解析为 Principal;失败抛 401 HTTPException。"""

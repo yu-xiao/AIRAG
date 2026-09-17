@@ -146,6 +146,39 @@ async def test_mcp_tool_denied_kb(mcp_client, auth_headers):
     assert "kb_forbidden" in text
 
 
+async def test_mcp_tool_list_kbs_audit_ip(mcp_client, auth_headers, db_session):
+    """spec B:MCP 面审计须落客户端 ip(修:此前仅 REST 面带 ip)。"""
+    from sqlalchemy import select
+
+    from app.models import AuditLog
+    from tests.test_agent_api import _create_key
+
+    key = await _create_key(mcp_client, auth_headers)
+    hdr = {"Authorization": f"Bearer {key}"}
+    sid = await _init(mcp_client, hdr)
+    resp = await mcp_client.post(
+        "/mcp",
+        json=_rpc("tools/call",
+                  {"name": "list_knowledge_bases", "arguments": {}}, 6),
+        headers={"Accept": ACCEPT, **hdr, "mcp-session-id": sid},
+    )
+    assert isinstance(_tool_result(resp.json())["items"], list)
+    db_session.expire_all()  # AsyncSession.expire_all 为同步方法,不可 await
+    rows = (await db_session.execute(
+        select(AuditLog).where(AuditLog.action == "agent.list_kbs")
+    )).scalars().all()
+    assert len(rows) == 1 and rows[0].ip
+
+
+async def test_mcp_unmatched_path_404_not_401(mcp_client):
+    """mount("/") 是兜底,非 /mcp 路径应 404 而非 401;/mcp 本体仍须鉴权。"""
+    resp = await mcp_client.post("/nope", json={})
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "not found"
+    resp = await mcp_client.get("/mcp", headers={"Accept": ACCEPT})
+    assert resp.status_code == 401
+
+
 async def test_mcp_rate_limited_429(mcp_client, auth_headers, monkeypatch):
     from tests.test_agent_api import _create_key
     from app.core.config import settings

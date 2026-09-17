@@ -36,7 +36,8 @@ async function load() {
 
 async function submit(formEl: FormInstance | undefined) {
   if (!formEl) return
-  await formEl.validate()
+  const valid = await formEl.validate().catch(() => false)
+  if (!valid) return
   submitting.value = true
   try {
     created.value = await keysApi.create({
