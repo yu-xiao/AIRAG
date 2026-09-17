@@ -98,9 +98,10 @@ async def ask(
             citations = final_state.get("citations") or []
             yield _sse("citations", citations)
             answer = final_state.get("answer") or ""
+            refused = bool(final_state.get("refused"))
             async with SessionLocal() as s2:
                 s2.add(Message(conversation_id=conv.id, role="assistant",
-                               content=answer, citations=citations))
+                               content=answer, citations=citations, refused=refused))
                 await audit(
                     s2, current.username, "ask", f"conv:{conv.id}",
                     {"q": payload.question[:50], "kb_ids": payload.kb_ids},
@@ -110,7 +111,8 @@ async def ask(
             # langchain-core 1.6: chat models stream internally on ainvoke, and
             # FakeListChatModel yields per-char chunks — done 携带完整 answer 作为
             # 权威终稿(客户端可对账),详见 task-5 报告"偏差"一节。
-            yield _sse("done", {"conversation_id": conv.id, "answer": answer})
+            yield _sse("done", {"conversation_id": conv.id, "answer": answer,
+                                "refused": refused})
         except Exception:  # 断连/取消也会走这里
             # 真实异常只进日志;SSE 帧对客户端输出通用文案,避免泄露内部细节
             logger.exception("SSE 回答生成失败 conversation_id={}", conv.id)

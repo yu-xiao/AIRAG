@@ -1,4 +1,4 @@
-from sqlalchemy import ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -24,3 +24,4 @@ class Message(Base, TimestampMixin):
     role: Mapped[str] = mapped_column(String(16))  # user|assistant
     content: Mapped[str] = mapped_column(Text)
     citations = mapped_column(JSONB)  # [{document_id,page_no,excerpt}]
+    refused: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")

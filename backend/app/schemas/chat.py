@@ -22,6 +22,7 @@ class MessageOut(BaseModel):
     role: str
     content: str
     citations: list | None
+    refused: bool = False
     created_at: datetime
 
     model_config = {"from_attributes": True}

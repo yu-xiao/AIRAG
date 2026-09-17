@@ -125,3 +125,28 @@ async def test_export_conversation_markdown(client, auth_headers, db_session):
     h = {"Authorization": f"Bearer {login.json()['access_token']}"}
     denied = await client.get(f"/api/chat/conversations/{conv_id}/export", headers=h)
     assert denied.status_code == 404
+
+
+async def test_messages_include_refused_flag(client, auth_headers, db_session):
+    from app.models import Message
+
+    kb = await client.post("/api/kbs", json={"name": "refused库"}, headers=auth_headers)
+    conv = await client.post(
+        "/api/chat/conversations",
+        json={"kb_ids": [kb.json()["id"]], "name": "c"},
+        headers=auth_headers,
+    )
+    conv_id = conv.json()["id"]
+    db_session.add(Message(conversation_id=conv_id, role="user", content="q"))
+    db_session.add(Message(conversation_id=conv_id, role="assistant",
+                           content="知识库中未找到相关内容", refused=True))
+    db_session.add(Message(conversation_id=conv_id, role="assistant",
+                           content="正常回答"))
+    await db_session.commit()
+
+    resp = await client.get(
+        f"/api/chat/conversations/{conv_id}/messages", headers=auth_headers
+    )
+    items = resp.json()
+    refused_flags = [m["refused"] for m in items if m["role"] == "assistant"]
+    assert refused_flags == [True, False]  # 旧数据/未传 → 默认 False

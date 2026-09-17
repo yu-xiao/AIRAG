@@ -189,3 +189,42 @@ async def test_ask_checkpointer_wired_when_enabled(
     )
     assert resp.status_code == 200
     assert seen["checkpointer"] is sentinel
+
+
+async def test_ask_done_frame_and_persistence_carry_refused(
+    client, auth_headers, monkeypatch, db_session
+):
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+
+    import app.services.chat_graph.nodes as nodes_mod
+    from app.services.chat_graph.graph import build_graph
+
+    async def fake_search(db, kb_ids, query, top_k=20):
+        return []  # 零命中(conftest 已关 MULTI_HOP → 直通 generate)
+
+    monkeypatch.setattr(nodes_mod, "hybrid_search", fake_search)
+    real_build = build_graph
+    monkeypatch.setattr(
+        "app.api.ask.build_graph",
+        lambda **kw: real_build(
+            llm=FakeListChatModel(responses=["知识库中未找到相关内容"])
+        ),
+    )
+
+    kb = await client.post("/api/kbs", json={"name": "拒答链路库"}, headers=auth_headers)
+    resp = await client.post(
+        "/api/chat/ask",
+        json={"kb_ids": [kb.json()["id"]], "question": "无关问题"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    body = resp.text
+    assert '"type": "done"' in body or '"type":"done"' in body
+    assert '"refused": true' in body  # done 帧带拒答标记
+
+    from app.models import Message
+
+    rows = (await db_session.execute(select_(Message))).scalars().all()
+    assistant = [m for m in rows if m.role == "assistant"][-1]
+    assert assistant.refused is True
+    assert assistant.citations in (None, [])
