@@ -43,6 +43,7 @@ CLEANUP_ORDER = [
     "documents",
     "kb_permissions",
     "knowledge_bases",
+    "api_keys",
     "users",
 ]
 
