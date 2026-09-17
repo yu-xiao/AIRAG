@@ -6,6 +6,7 @@ import {
   Collection,
   Document,
   HomeFilled,
+  Key,
   Moon,
   Sunny,
   User,
@@ -55,6 +56,9 @@ function onLogout() {
         </el-menu-item>
         <el-menu-item index="/chat">
           <el-icon><ChatDotRound /></el-icon><span>对话</span>
+        </el-menu-item>
+        <el-menu-item index="/keys">
+          <el-icon><Key /></el-icon><span>API 密钥</span>
         </el-menu-item>
         <el-menu-item-group v-if="auth.user?.role === 'admin'" title="管理">
           <el-menu-item index="/admin/users">
