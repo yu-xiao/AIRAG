@@ -96,3 +96,26 @@ async def test_admin_sees_all_kbs(client, auth_headers, db_session):
     listed = await client.get("/api/kbs", headers=auth_headers)
     row = next(k for k in listed.json() if k["id"] == kb_id)
     assert row["my_perm"] == "owner"
+
+
+async def test_create_kb_duplicate_name_409(client, auth_headers):
+    first = await client.post("/api/kbs", json={"name": "重名库"}, headers=auth_headers)
+    dup = await client.post("/api/kbs", json={"name": "重名库"}, headers=auth_headers)
+    assert first.status_code == 201
+    assert dup.status_code == 409
+    assert dup.json()["detail"] == "knowledge base name already exists"
+
+
+async def test_create_kb_duplicate_after_strip_409(client, auth_headers):
+    await client.post("/api/kbs", json={"name": "归一库"}, headers=auth_headers)
+    dup = await client.post("/api/kbs", json={"name": "  归一库  "}, headers=auth_headers)
+    assert dup.status_code == 409
+    listed = await client.get("/api/kbs", headers=auth_headers)
+    names = [k["name"] for k in listed.json() if k["name"].strip() == "归一库"]
+    assert names == ["归一库"]  # 入库即 strip 后形态,仅一条
+
+
+async def test_create_kb_blank_after_strip_422(client, auth_headers):
+    resp = await client.post("/api/kbs", json={"name": "   "}, headers=auth_headers)
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == "knowledge base name cannot be blank"

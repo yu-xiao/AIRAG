@@ -20,12 +20,20 @@ async def create_kb(
 ):
     if current.role == "viewer":
         raise HTTPException(status_code=403, detail="viewers cannot create knowledge bases")
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="knowledge base name cannot be blank")
+    dup = (
+        await db.execute(select(KnowledgeBase).where(KnowledgeBase.name == name))
+    ).scalar_one_or_none()
+    if dup is not None:
+        raise HTTPException(status_code=409, detail="knowledge base name already exists")
     kb = KnowledgeBase(
-        name=payload.name, description=payload.description, owner_id=current.id
+        name=name, description=payload.description, owner_id=current.id
     )
     db.add(kb)
     await db.flush()
-    await audit(db, current.username, "kb_create", f"kb:{kb.id}", {"name": payload.name})
+    await audit(db, current.username, "kb_create", f"kb:{kb.id}", {"name": name})
     await db.commit()
     await db.refresh(kb)
     out = KBOut.model_validate(kb)
