@@ -113,3 +113,111 @@ async def test_audit_written(client, auth_headers, db_session):
         select(AuditLog).where(AuditLog.action == "agent.list_kbs")
     )).scalars().all()
     assert len(rows) == 1 and rows[0].username
+
+
+# ---- Task4:POST /api/agent/search ----
+from app.services.retrieval.searcher import SearchHit  # noqa: E402
+
+
+def _fake_hits(n=2):
+    return [
+        SearchHit(chunk_id=i, document_id=i * 10, kb_id=1, filename="a.pdf",
+                  page_no=i + 1, content=f"内容{i}", score=0.5 + i * 0.1,
+                  source="both")
+        for i in range(n)
+    ]
+
+
+async def test_search_ok(client, auth_headers, monkeypatch):
+    kb_id = await _create_kb(client, auth_headers, "检索库")
+    key = await _create_key(client, auth_headers)
+
+    async def fake_hybrid(db, kb_ids, query, top_k=20):
+        hits = _fake_hits()
+        for h in hits:
+            h.kb_id = kb_id
+        return hits
+
+    monkeypatch.setattr("app.services.agent_facade.hybrid_search", fake_hybrid)
+    resp = await client.post(
+        "/api/agent/search",
+        json={"kb_ids": [kb_id], "query": "测试问题", "top_k": 5},
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 2 and body["elapsed_ms"] >= 0
+    hit = body["hits"][0]
+    assert set(hit) == {"chunk_id", "document_id", "kb_id", "filename",
+                        "page_no", "content", "score", "source"}
+
+
+async def test_search_denied_includes_nonexistent(client, auth_headers):
+    kb_id = await _create_kb(client, auth_headers, "被拒库")
+    key = await _create_key(client, auth_headers)
+    resp = await client.post(
+        "/api/agent/search",
+        json={"kb_ids": [kb_id, 99999], "query": "x"},
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert resp.status_code == 403
+    detail = resp.json()["detail"]
+    assert detail["code"] == "kb_forbidden" and 99999 in detail["denied_kb_ids"]
+    assert kb_id not in detail["denied_kb_ids"]
+
+
+async def test_search_validation_422(client, auth_headers):
+    key = await _create_key(client, auth_headers)
+    resp = await client.post(
+        "/api/agent/search", json={"kb_ids": [], "query": ""},
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert resp.status_code == 422
+
+
+async def test_search_rerank_applied(client, auth_headers, monkeypatch):
+    kb_id = await _create_kb(client, auth_headers, "重排库")
+    key = await _create_key(client, auth_headers)
+
+    class FakeReranker:
+        def rerank(self, query, documents, top_n=8):
+            return [(1, 0.95), (0, 0.10)]  # 原顺序反转
+
+    monkeypatch.setattr("app.services.agent_facade.settings.RERANK_ENABLED", True)
+    monkeypatch.setattr("app.services.agent_facade.get_reranker", lambda: FakeReranker())
+
+    async def fake_hybrid(db, kb_ids, query, top_k=20):
+        return _fake_hits()
+
+    monkeypatch.setattr("app.services.agent_facade.hybrid_search", fake_hybrid)
+    resp = await client.post(
+        "/api/agent/search",
+        json={"kb_ids": [kb_id], "query": "q", "rerank": True},
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    body = resp.json()
+    assert body["hits"][0]["score"] == 0.95 and body["hits"][0]["chunk_id"] == 1
+
+
+async def test_search_rerank_min_score_gate(client, auth_headers, monkeypatch):
+    kb_id = await _create_kb(client, auth_headers, "阈值库")
+    key = await _create_key(client, auth_headers)
+
+    class FakeReranker:
+        def rerank(self, query, documents, top_n=8):
+            return [(0, 0.50)]
+
+    monkeypatch.setattr("app.services.agent_facade.settings.RERANK_ENABLED", True)
+    monkeypatch.setattr("app.services.agent_facade.settings.RETRIEVAL_MIN_SCORE", 0.9)
+    monkeypatch.setattr("app.services.agent_facade.get_reranker", lambda: FakeReranker())
+
+    async def fake_hybrid(db, kb_ids, query, top_k=20):
+        return _fake_hits(1)
+
+    monkeypatch.setattr("app.services.agent_facade.hybrid_search", fake_hybrid)
+    resp = await client.post(
+        "/api/agent/search",
+        json={"kb_ids": [kb_id], "query": "q", "rerank": True},
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert resp.json()["total"] == 0
