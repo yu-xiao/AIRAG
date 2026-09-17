@@ -94,6 +94,8 @@ async def export_conversation(
         speaker = "用户" if m.role == "user" else "助手"
         lines.append(f"**{speaker}**:{m.content}")
         lines.append("")
+        if m.role == "assistant" and m.refused:
+            continue  # M7:拒答消息的引用是噪声,与前端隐藏口径一致
         for c in m.citations or []:
             appendix.append(
                 (c.get("filename", "?"), c.get("page_no"), c.get("excerpt", ""))

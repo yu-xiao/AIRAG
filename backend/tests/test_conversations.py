@@ -127,6 +127,53 @@ async def test_export_conversation_markdown(client, auth_headers, db_session):
     assert denied.status_code == 404
 
 
+async def test_export_skips_refused_citations(client, auth_headers, db_session):
+    from app.models import Message
+
+    kb = await client.post("/api/kbs", json={"name": "拒答导出库"}, headers=auth_headers)
+    conv = await client.post(
+        "/api/chat/conversations",
+        json={"kb_ids": [kb.json()["id"]], "name": "拒答导出会话"},
+        headers=auth_headers,
+    )
+    conv_id = conv.json()["id"]
+    db_session.add(Message(conversation_id=conv_id, role="user", content="两个问题"))
+    db_session.add(
+        Message(
+            conversation_id=conv_id, role="assistant", content="正常答案[1]",
+            citations=[
+                {
+                    "number": 1, "chunk_id": 1, "document_id": 2,
+                    "filename": "good.pdf", "page_no": 3, "excerpt": "正常引用摘录",
+                }
+            ],
+        )
+    )
+    db_session.add(
+        Message(
+            conversation_id=conv_id, role="assistant",
+            content="知识库中未找到相关内容", refused=True,
+            citations=[
+                {
+                    "number": 1, "chunk_id": 9, "document_id": 9,
+                    "filename": "bad.pdf", "page_no": 9, "excerpt": "拒答引用摘录",
+                }
+            ],
+        )
+    )
+    await db_session.commit()
+
+    resp = await client.get(
+        f"/api/chat/conversations/{conv_id}/export", headers=auth_headers
+    )
+    assert resp.status_code == 200
+    body = resp.text
+    assert "正常答案[1]" in body
+    assert "知识库中未找到相关内容" in body  # 拒答消息内容仍导出
+    assert "good.pdf" in body and "正常引用摘录" in body  # 正常消息的引用附录保留
+    assert "bad.pdf" not in body and "拒答引用摘录" not in body  # 拒答消息的引用不进附录
+
+
 async def test_messages_include_refused_flag(client, auth_headers, db_session):
     from app.models import Message
 

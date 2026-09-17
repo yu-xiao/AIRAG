@@ -40,3 +40,39 @@ body {
   background: var(--el-border-color);
   border-radius: 3px;
 }
+
+/* 暗色下覆盖 github.css 的亮色硬编码(代码块在暗色气泡内)。
+   仅覆盖四种注册语言(python/typescript/json/bash)实际产出的 token 类 */
+html.dark .hljs,
+html.dark pre.hljs {
+  background: var(--app-bg-soft);
+  color: var(--el-text-color-regular);
+}
+html.dark .hljs-subst {
+  /* github.css 给 subst 显式设了亮色正文色,需一并复位 */
+  color: var(--el-text-color-regular);
+}
+html.dark .hljs-comment {
+  color: var(--el-text-color-secondary);
+}
+html.dark .hljs-keyword,
+html.dark .hljs-built_in,
+html.dark .hljs-meta,
+html.dark .hljs-type {
+  color: #c678dd;
+}
+html.dark .hljs-string,
+html.dark .hljs-attr {
+  color: #98c379;
+}
+html.dark .hljs-number,
+html.dark .hljs-literal,
+html.dark .hljs-variable {
+  color: #d19a66;
+}
+html.dark .hljs-title,
+html.dark .hljs-title.class_,
+html.dark .hljs-title.class_.inherited__,
+html.dark .hljs-title.function_ {
+  color: #61afef;
+}
