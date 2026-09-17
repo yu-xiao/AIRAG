@@ -570,3 +570,35 @@ async def test_rerank_node_filters_all_to_empty(monkeypatch):
     out = await nodes_mod.rerank_node(
         {"question": "q", "hits": [_hit(1, "甲"), _hit(2, "乙")], "rerank": True})
     assert out == {"hits": []}
+
+
+async def test_generate_marks_refusal():
+    from app.services.chat_graph.nodes import generate_node
+
+    out = await generate_node(
+        {"question": "q", "hits": []},
+        llm=_LLMScript(["知识库中未找到相关内容"]),
+    )
+    assert out["refused"] is True
+    assert out["citations"] == []
+
+
+async def test_generate_refusal_startswith_semantics():
+    from app.services.chat_graph.nodes import generate_node
+
+    out = await generate_node(
+        {"question": "q", "hits": [_hit(1, "不相关资料")]},
+        llm=_LLMScript(["知识库中未找到相关内容。"]),
+    )
+    assert out["refused"] is True  # 以话术开头即拒答(含尾标点变体)
+
+
+async def test_generate_normal_answer_not_refused():
+    from app.services.chat_graph.nodes import generate_node
+
+    out = await generate_node(
+        {"question": "q", "hits": [_hit(1, "答案内容")]},
+        llm=_LLMScript(["答案内容[1]"]),
+    )
+    assert out["refused"] is False
+    assert out["citations"][0]["number"] == 1

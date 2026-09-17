@@ -17,3 +17,5 @@ class ChatState(TypedDict, total=False):
     # M6 多跳兜底
     sub_queries: list[str]  # decompose 拆出的子问题(存在即多查询检索)
     hopped: bool  # 是否已走过 decompose(防环;rewrite 每轮重置)
+    # M7 零命中:generate 判定的拒答标记(随 done 帧与消息落库)
+    refused: bool

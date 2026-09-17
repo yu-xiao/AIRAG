@@ -7,10 +7,13 @@ from app.db.session import SessionLocal
 from app.services.retrieval.searcher import SearchHit, hybrid_search
 from app.services.rerank.base import get_reranker
 
+REFUSAL_PHRASE = "知识库中未找到相关内容"
+
 SYSTEM_PROMPT = (
     "你是企业知识库助手。只依据下面提供的参考资料回答;"
-    "引用资料时标注编号如 [1][2];若资料不足以回答,明确说"
-    "\"知识库中未找到相关内容\"。用中文,简洁分点。"
+    "引用资料时标注编号如 [1][2];若资料与问题不相关或不足以回答,"
+    f'只回复"{REFUSAL_PHRASE}",不得罗列、摘要或拼凑返回的资料;'
+    "用中文,简洁分点。"
 )
 
 
@@ -99,7 +102,12 @@ async def generate_node(state: dict, llm) -> dict:
         )
         for h in hits
     ]
-    return {"answer": resp.content, "citations": build_citations(shits)}
+    answer = resp.content
+    return {
+        "answer": answer,
+        "citations": build_citations(shits),
+        "refused": (answer or "").strip().startswith(REFUSAL_PHRASE),
+    }
 
 
 REWRITE_SYSTEM = (
