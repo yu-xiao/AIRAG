@@ -41,6 +41,7 @@ const dialogVisible = ref(false)
 const submitting = ref(false)
 const formRef = ref<FormInstance>()
 const form = reactive({ name: '', description: '' })
+const serverNameError = ref('')
 
 const rules: FormRules = {
   name: [
@@ -62,6 +63,7 @@ async function load() {
 }
 
 function openCreate() {
+  serverNameError.value = ''
   form.name = ''
   form.description = ''
   formRef.value?.resetFields()
@@ -81,8 +83,12 @@ async function submit() {
     dialogVisible.value = false
     await load()
   } catch (e) {
-    const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-    ElMessage.error(detail ?? '创建失败')
+    const resp = (e as { response?: { status?: number; data?: { detail?: string } } })?.response
+    if (resp?.status === 409) {
+      serverNameError.value = '该名称已存在,请换一个名称'
+    } else {
+      ElMessage.error(resp?.data?.detail ?? '创建失败')
+    }
   } finally {
     submitting.value = false
   }
@@ -217,8 +223,13 @@ onMounted(() => {
 
     <el-dialog v-model="dialogVisible" title="新建知识库" width="480px">
       <el-form ref="formRef" :model="form" :rules="rules" label-position="top">
-        <el-form-item label="名称" prop="name">
-          <el-input v-model="form.name" placeholder="请输入知识库名称" maxlength="128" />
+        <el-form-item label="名称" prop="name" :error="serverNameError || undefined">
+          <el-input
+            v-model="form.name"
+            placeholder="请输入知识库名称"
+            maxlength="128"
+            @input="serverNameError = ''"
+          />
         </el-form-item>
         <el-form-item label="描述" prop="description">
           <el-input
