@@ -2,9 +2,9 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ElementPlus from 'element-plus'
 import KbPage from '@/pages/KbPage.vue'
-import { kbApi } from '@/api/kb'
+import { kbApi, type KbIn, type KbItem } from '@/api/kb'
 
-const push = vi.fn()
+const push = vi.fn<(to: unknown) => Promise<void>>()
 
 vi.mock('vue-router', () => ({
   useRoute: () => ({ query: { create: '1' } }),  // 挂载即开创建对话框
@@ -14,7 +14,10 @@ vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({ user: { id: 1, username: 'ed', role: 'editor' } }),
 }))
 vi.mock('@/api/kb', () => ({
-  kbApi: { list: vi.fn(), create: vi.fn() },
+  kbApi: {
+    list: vi.fn<() => Promise<KbItem[]>>(),
+    create: vi.fn<(payload: KbIn) => Promise<KbItem>>(),
+  },
 }))
 
 const nameInput = 'input[placeholder="请输入知识库名称"]'
