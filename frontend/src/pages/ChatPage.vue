@@ -13,6 +13,7 @@ import typescript from 'highlight.js/lib/languages/typescript'
 import 'highlight.js/styles/github.css'
 import { conversationsApi, type Citation, type ConversationItem, type MessageItem } from '@/api/chat'
 import { kbApi, type KbItem } from '@/api/kb'
+import { disambiguateKbNames } from '@/utils/kbLabel'
 import { useChatStream } from '@/composables/useChatStream'
 import { useAuthStore } from '@/stores/auth'
 import { throttle } from '@/utils/throttle'
@@ -65,6 +66,7 @@ const conversations = ref<ConversationItem[]>([])
 const currentId = ref<number | null>(null)
 const messages = ref<ChatMessage[]>([])
 const kbs = ref<KbItem[]>([])
+const kbLabels = computed(() => disambiguateKbNames(kbs.value))
 const selectedKbIds = ref<number[]>([])
 const question = ref('')
 const streaming = ref(false)
@@ -360,7 +362,7 @@ onUnmounted(() => {
           class="kb-select"
           :disabled="streaming"
         >
-          <el-option v-for="k in kbs" :key="k.id" :label="k.name" :value="k.id" />
+          <el-option v-for="k in kbs" :key="k.id" :label="kbLabels.get(k.id) ?? k.name" :value="k.id" />
         </el-select>
         <el-tooltip content="重排序提升检索相关性,每次提问多一次轻量调用" placement="bottom">
           <div class="rerank-group">
