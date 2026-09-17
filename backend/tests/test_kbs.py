@@ -119,3 +119,19 @@ async def test_create_kb_blank_after_strip_422(client, auth_headers):
     resp = await client.post("/api/kbs", json={"name": "   "}, headers=auth_headers)
     assert resp.status_code == 422
     assert resp.json()["detail"] == "knowledge base name cannot be blank"
+
+
+async def test_create_kb_duplicate_name_409_when_db_already_has_two(client, auth_headers, db_session):
+    """终审加固:库中已存在两条同名记录时不得 500(MultipleResultsFound),仍应 409。"""
+    from app.models import KnowledgeBase
+
+    me = await client.get("/api/auth/me", headers=auth_headers)
+    owner_id = me.json()["id"]
+    db_session.add_all([
+        KnowledgeBase(name="双胞胎库", owner_id=owner_id),
+        KnowledgeBase(name="双胞胎库", owner_id=owner_id),
+    ])
+    await db_session.commit()
+    resp = await client.post("/api/kbs", json={"name": "双胞胎库"}, headers=auth_headers)
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "knowledge base name already exists"

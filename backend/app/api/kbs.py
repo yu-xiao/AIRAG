@@ -25,7 +25,7 @@ async def create_kb(
         raise HTTPException(status_code=422, detail="knowledge base name cannot be blank")
     dup = (
         await db.execute(select(KnowledgeBase).where(KnowledgeBase.name == name))
-    ).scalar_one_or_none()
+    ).scalars().first()
     if dup is not None:
         raise HTTPException(status_code=409, detail="knowledge base name already exists")
     kb = KnowledgeBase(
