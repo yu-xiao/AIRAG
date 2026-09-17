@@ -85,6 +85,15 @@ AIRag M1-M8 已具备完整的知识库、混合检索、RAG 问答、RBAC 与�
 - **权限实时继承**:`get_current_user` 与 `get_kb_perm` 零改动,key 身份即 User 行;吊销 key 或改用户授权立即生效,不做权限快照
 - Agent 端点同时接受 JWT 与 API Key(方便人工 curl 调试);限流仅对 API Key 生效
 
+### Key 与外部 Agent 的关系(澄清:无服务端 Agent 实体)
+
+- Key **不是独立主体**,必须挂在某个用户名下;Agent 客户端无需(也无法)在 AIRag 注册,服务端不存在"Agent 实体"或服务端绑定操作
+- "绑定"发生在两端:
+  - **服务端**(创建时确定):key 归属于创建它的账号,key 能查哪些库 = 该账号的 KB 权限,实时继承
+  - **客户端**(使用时由人工配置):把 key 填进 agent 客户端自己的配置——Claude Code 走 `claude mcp add` 的 Bearer header,Dify/Coze 填在工具鉴权字段;agent 每次调用携带 key,AIRag 反查归属用户后按 `get_kb_perm` 过滤
+- 服务端只感知"哪把 key 在调用"(审计记 key 名),不知道对面是什么 agent 软件
+- 实操建议:一个 agent 客户端一把 key(命名区分来源,便于审计);要精确圈定可见范围,建专用"agent 账号"并把指定库授权给它,在它名下建 key
+
 ### 管理端点(REST,JWT-only,不允许用 key 创建 key)
 
 | 端点 | 行为 |
