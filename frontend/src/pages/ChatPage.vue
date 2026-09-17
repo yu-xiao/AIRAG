@@ -310,6 +310,7 @@ onUnmounted(() => {
           multiple
           filterable
           collapse-tags
+          collapse-tags-tooltip
           placeholder="至少选择 1 个知识库"
           class="kb-select"
           :disabled="streaming"
