@@ -6,7 +6,9 @@ from app.core.config import settings
 from app.core.deps import require_admin
 from app.db.session import get_db
 from app.models import AuditLog, User
-from app.schemas.admin import AdminUserIn, AdminUserOut, AuditLogOut
+from app.schemas.admin import AdminKeyCreateIn, AdminUserIn, AdminUserOut, AuditLogOut
+from app.schemas.auth import ApiKeyCreatedOut
+from app.services.api_keys import KeyQuotaExceeded, issue_api_key
 from app.services.audit import audit, purge_expired
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -58,6 +60,41 @@ async def update_user(
     await db.commit()
     await db.refresh(user)
     return user
+
+
+# ---- M9.1:admin 为指定账号发 API 密钥(配额按目标用户;审计记 by/to) ----
+@router.post("/keys", response_model=ApiKeyCreatedOut, status_code=201)
+async def admin_create_api_key(
+    payload: AdminKeyCreateIn,
+    current: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    target = await db.get(User, payload.user_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail="user not found")
+    if not target.is_active:
+        raise HTTPException(status_code=400, detail="target user is disabled")
+    try:
+        key, raw = await issue_api_key(db, target, payload.name,
+                                       payload.expires_in_days)
+    except KeyQuotaExceeded:
+        raise HTTPException(status_code=409, detail="api key limit reached")
+    await audit(
+        db, current.username, "key_create", f"apikey:{key.id}",
+        {"by": current.username, "to": target.username, "name": payload.name},
+    )
+    await db.commit()
+    await db.refresh(key)
+    return ApiKeyCreatedOut(
+        id=key.id,
+        name=key.name,
+        key_prefix=key.key_prefix,
+        is_active=key.is_active,
+        expires_at=key.expires_at,
+        last_used_at=key.last_used_at,
+        created_at=key.created_at,
+        key=raw,
+    )
 
 
 @router.get("/audit-logs")

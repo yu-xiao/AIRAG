@@ -1,10 +1,7 @@
-from datetime import datetime, timedelta, timezone
-
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
 from app.core.deps import get_current_user
 from app.core.security import create_access_token, hash_password, verify_password
 from app.db.session import get_db
@@ -18,7 +15,7 @@ from app.schemas.auth import (
     TokenOut,
     UserOut,
 )
-from app.services.api_keys import generate_api_key
+from app.services.api_keys import KeyQuotaExceeded, issue_api_key
 from app.services.audit import audit
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -74,29 +71,11 @@ async def create_api_key(
     current: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    count = (
-        await db.execute(
-            select(func.count()).select_from(ApiKey).where(
-                ApiKey.user_id == current.id, ApiKey.is_active == True  # noqa: E712
-            )
-        )
-    ).scalar_one()
-    if count >= settings.AGENT_MAX_KEYS_PER_USER:
+    try:
+        key, raw = await issue_api_key(db, current, payload.name,
+                                       payload.expires_in_days)
+    except KeyQuotaExceeded:
         raise HTTPException(status_code=409, detail="api key limit reached")
-    raw, prefix, digest = generate_api_key()
-    key = ApiKey(
-        user_id=current.id,
-        name=payload.name,
-        key_prefix=prefix,
-        key_hash=digest,
-        expires_at=(
-            datetime.now(timezone.utc) + timedelta(days=payload.expires_in_days)
-            if payload.expires_in_days
-            else None
-        ),
-    )
-    db.add(key)
-    await db.flush()
     await audit(db, current.username, "key_create", f"apikey:{key.id}",
                 {"name": payload.name})
     await db.commit()
