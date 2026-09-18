@@ -47,6 +47,8 @@ class Settings(BaseSettings):
     AGENT_API_ENABLED: bool = True
     AGENT_MAX_KEYS_PER_USER: int = 10
     AGENT_RATE_LIMIT_PER_MIN: int = 60
+    # M10:每 key 每日 ask token 配额(Redis 按日计数,0=禁用)
+    AGENT_ASK_DAILY_TOKENS: int = 200_000
     MAX_UPLOAD_MB: int = 20
 
 
