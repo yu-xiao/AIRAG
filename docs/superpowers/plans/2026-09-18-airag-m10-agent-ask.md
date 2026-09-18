@@ -1575,4 +1575,31 @@ git commit -m "docs(agent): ask tool in agent guide, env example, walkthrough ex
 
 ## 执行记录(执行时回填)
 
-(此节由执行者按任务完成情况回填:偏差、裁决、验收结果。)
+**2026-09-18 SDD 执行完毕(8 任务+终审修复波,11 提交未推送,71c66dc..24c6505):**
+
+| 任务 | 提交 | 结果 |
+|---|---|---|
+| T1 配额核心 | 26a4b55 | review clean |
+| T2 facade agent_ask | 5b5ae86 | review clean |
+| T3 REST ask | 8ac8575 | review clean |
+| T4 MCP ask 工具 | 003064a | review clean |
+| T5 agent-off 冒烟 | 5c2632e | review clean |
+| T6 rl key 命名对齐 | 6a98505 | review clean |
+| T7 验收脚本 | f4b47e7 | review clean,真栈 7/7 PASS |
+| T8 走查+文档+回归 | e5a90ef | review clean,219P/0F+MCP 真客户端 7/7 |
+| 终审修复波 | 24c6505 | 复审 3/3 ADDRESSED |
+
+**终审(全分支)**:Ready to merge=Yes;真栈实测 TokenMeter 真模型计量 133 tokens(§B 风险消除)。修复波清偿:①usage 缺失 warn+exc_info(spec B 要求)②验收 tokens_used>0 断言 ③test_api_429 端到端断言 `agent_rl:{key_id}`。
+
+**计划缺陷与裁决(SDD 台账,原 .superpowers 工作区已按流程删除)**:
+1. T3 审计断言 `rows[0].detail` 有误(detail 为 Text 存 JSON)→ 实现者改 `json.loads`,循 test_admin_keys 既有模式,采信。
+2. T4 计划的 f-string docstring 是真缺陷(CPython 不把 f-string 设为 __doc__,fastmcp 拿到 None)→ 改模块级 `_SEARCH_DOC` + `@mcp.tool(description=...)`,文本逐字节同计划;额外测试 `test_mcp_tool_descriptions_present` 判范围内保留。
+3. T6 计划 RED 预测失误(int 9 与 "9" 经 f-string 同形)→ 代码正确,GREEN+调用点搜索实证,计计划缺陷。
+4. 主线执行直接在 main(仓库 M1~M9.1 惯例,真栈/.venv 绑定本目录);SDD bash 脚本无 WSL 不可用,包/简报以内置工具等价生成;harness 无模型分级参数。
+
+**顺延 M11(终审 triage,全部不阻塞)**:incrby/expire 非原子(pipeline 硬化)、`_api_key_id(principal)` 去重(守卫 5 处)、模块级 `api_router` 无消费方可删、ask 失败应用级 logger.exception(现靠 uvicorn/fastmcp 内部日志)、CitationOut 强类型、配额余量查询端点、走查横幅 M9.1 自述更新、验收审计行数限定本次运行。
+
+**环境教训**:①8001 曾被 pre-M10 旧实例静默占用(404),合并后必须重启 start_dev.bat;②uvicorn --reload 下在 backend\ 内写临时文件会打断在途长 MCP 调用;③走查 key `m10_walkthrough_task8`(前缀 airag_4DlAZk3i,2026-09-19T04:59:52Z 自灭)留作用户 MCP 复走。
+
+**测试基线**:后端 **219 passed / 0 failed**(M9.1 基线 196+净 23);前端零改动。
+
