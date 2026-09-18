@@ -1,8 +1,9 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import ElementPlus from 'element-plus'
+import ElementPlus, { ElSelect } from 'element-plus'
 import KbPage from '@/pages/KbPage.vue'
-import { kbApi, type KbIn, type KbItem } from '@/api/kb'
+import { kbApi, type KbIn, type KbItem, type KbMember } from '@/api/kb'
+import { usersApi } from '@/api/users'
 
 const push = vi.fn<(to: unknown) => Promise<void>>()
 
@@ -17,7 +18,12 @@ vi.mock('@/api/kb', () => ({
   kbApi: {
     list: vi.fn<() => Promise<KbItem[]>>(),
     create: vi.fn<(payload: KbIn) => Promise<KbItem>>(),
+    members: vi.fn(),
+    grant: vi.fn(),
   },
+}))
+vi.mock('@/api/users', () => ({
+  usersApi: { search: vi.fn() },
 }))
 
 const nameInput = 'input[placeholder="请输入知识库名称"]'
@@ -59,5 +65,38 @@ describe('KbPage create dialog', () => {
     await createBtn(w).trigger('click')
     await flushPromises()
     expect(w.find('.el-form-item__error').exists()).toBe(false)
+  })
+})
+
+describe('KbPage member grant remote dropdown', () => {
+  const owned: KbItem = {
+    id: 5, name: '成员库', description: null, owner_id: 1,
+    embed_provider: 'fake', embed_model: 'x', my_perm: 'owner',
+    doc_count: 0, created_at: '2026-09-18T10:00:00',
+  }
+  const mountPage2 = () => mount(KbPage, { global: { plugins: [ElementPlus] } })
+
+  it('searches users remotely and grants by username', async () => {
+    vi.mocked(kbApi.list).mockResolvedValue([owned])
+    vi.mocked(kbApi.members).mockResolvedValue([])
+    vi.mocked(kbApi.grant).mockResolvedValue({
+      user_id: 2, username: 'alice', perm: 'viewer',
+    } as KbMember)
+    vi.mocked(usersApi.search).mockResolvedValue([{ id: 2, username: 'alice' }])
+    const w = mountPage2()
+    await flushPromises()
+    await w.findAll('button').find((b) => b.text().trim() === '成员')!.trigger('click')
+    await flushPromises()
+    const userSel = w
+      .findAllComponents(ElSelect)
+      .find((s) => s.props('placeholder') === '输入用户名搜索')!
+    await (userSel.props('remoteMethod') as (q: string) => void)('ali')
+    await flushPromises()
+    expect(usersApi.search).toHaveBeenCalledWith('ali', 0, 20)
+    await userSel.vm.$emit('update:modelValue', 'alice')
+    await flushPromises()
+    await w.findAll('button').find((b) => b.text().trim() === '添加')!.trigger('click')
+    await flushPromises()
+    expect(kbApi.grant).toHaveBeenCalledWith(5, { username: 'alice', perm: 'viewer' })
   })
 })

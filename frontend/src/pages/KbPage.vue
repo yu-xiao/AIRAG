@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { Search } from '@element-plus/icons-vue'
 import { kbApi, type KbItem, type KbMember } from '@/api/kb'
+import { usersApi, type UserBrief } from '@/api/users'
 import { useAuthStore } from '@/stores/auth'
 import PageHeader from '@/components/PageHeader.vue'
 
@@ -106,6 +107,71 @@ const membersLoading = ref(false)
 const grantForm = reactive({ username: '', perm: 'viewer' as 'viewer' | 'editor' })
 const granting = ref(false)
 
+// ---- M9.1:授权对象改为远程搜索下拉(滚动分页) ----
+const USER_PAGE_SIZE = 20
+const grantUsers = ref<UserBrief[]>([])
+const grantSearching = ref(false)
+const grantQuery = ref('')
+const grantOffset = ref(0)
+const grantHasMore = ref(false)
+
+async function fetchGrantUsers(append: boolean) {
+  grantSearching.value = true
+  try {
+    const found = await usersApi.search(
+      grantQuery.value,
+      append ? grantOffset.value : 0,
+      USER_PAGE_SIZE,
+    )
+    grantOffset.value = append ? grantOffset.value + USER_PAGE_SIZE : USER_PAGE_SIZE
+    grantHasMore.value = found.length === USER_PAGE_SIZE
+    if (append) {
+      const seen = new Set(grantUsers.value.map((u) => u.id))
+      grantUsers.value = [...grantUsers.value, ...found.filter((u) => !seen.has(u.id))]
+    } else {
+      grantUsers.value = found
+    }
+  } catch {
+    ElMessage.error('用户搜索失败')
+  } finally {
+    grantSearching.value = false
+  }
+}
+
+function searchGrantUsers(q: string) {
+  grantQuery.value = q.trim()
+  grantOffset.value = 0
+  fetchGrantUsers(false)
+}
+
+function onGrantScroll(e: Event) {
+  const el = e.target as HTMLElement
+  if (
+    grantHasMore.value &&
+    !grantSearching.value &&
+    el.scrollTop + el.clientHeight >= el.scrollHeight - 40
+  ) {
+    fetchGrantUsers(true)
+  }
+}
+
+function onGrantDropdown(open: boolean) {
+  const wrap = () =>
+    document.querySelector('.grant-user-dd .el-scrollbar__wrap') as HTMLElement | null
+  if (open) {
+    grantQuery.value = ''
+    grantOffset.value = 0
+    fetchGrantUsers(false)
+    nextTick(() => {
+      const el = wrap()
+      el?.removeEventListener('scroll', onGrantScroll)
+      el?.addEventListener('scroll', onGrantScroll)
+    })
+  } else {
+    wrap()?.removeEventListener('scroll', onGrantScroll)
+  }
+}
+
 async function loadMembers() {
   if (!memberKb.value) return
   membersLoading.value = true
@@ -122,6 +188,9 @@ function openMembers(row: KbItem) {
   memberKb.value = row
   grantForm.username = ''
   grantForm.perm = 'viewer'
+  grantUsers.value = []
+  grantOffset.value = 0
+  grantHasMore.value = false
   memberVisible.value = true
   loadMembers()
 }
@@ -272,12 +341,21 @@ onMounted(() => {
         </el-table-column>
       </el-table>
       <div class="grant-row">
-        <el-input
+        <el-select
           v-model="grantForm.username"
-          placeholder="用户名"
           class="grant-input"
-          maxlength="32"
-        />
+          filterable
+          remote
+          clearable
+          :remote-method="searchGrantUsers"
+          :loading="grantSearching"
+          placeholder="输入用户名搜索"
+          no-data-text="未找到用户"
+          popper-class="grant-user-dd"
+          @visible-change="onGrantDropdown"
+        >
+          <el-option v-for="u in grantUsers" :key="u.id" :label="u.username" :value="u.username" />
+        </el-select>
         <el-select v-model="grantForm.perm" class="grant-perm">
           <el-option label="只读(viewer)" value="viewer" />
           <el-option label="可编辑(editor)" value="editor" />
