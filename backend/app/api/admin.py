@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,10 +14,19 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 
 @router.get("/users", response_model=list[AdminUserOut])
 async def list_users(
+    q: str | None = None,
+    limit: int | None = Query(None, ge=1, le=100),
+    offset: int = Query(0, ge=0),
     current: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    rows = await db.execute(select(User).order_by(User.id))
+    stmt = select(User).order_by(User.id)
+    if q and q.strip():
+        stmt = stmt.where(User.username.ilike(f"%{q.strip()}%"))
+    stmt = stmt.offset(offset)
+    if limit is not None:
+        stmt = stmt.limit(limit)
+    rows = await db.execute(stmt)
     return list(rows.scalars().all())
 
 

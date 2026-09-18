@@ -7,6 +7,7 @@ from app.api.auth import router as auth_router
 from app.api.conversations import router as conversations_router
 from app.api.documents import router as documents_router
 from app.api.kbs import router as kbs_router
+from app.api.users import router as users_router
 from app.core.config import settings
 
 api_router = APIRouter()
@@ -18,6 +19,7 @@ async def health() -> dict:
 
 api_router.include_router(auth_router)
 api_router.include_router(kbs_router)
+api_router.include_router(users_router)
 api_router.include_router(documents_router)
 api_router.include_router(conversations_router)
 api_router.include_router(ask_router)
