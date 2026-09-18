@@ -11,6 +11,7 @@ from fastmcp.exceptions import ToolError
 from app.core.config import settings
 from app.core.deps import (
     Principal,
+    _api_key_id,
     current_client_ip,
     current_principal,
     resolve_bearer_principal,
@@ -127,8 +128,8 @@ async def ask_knowledge_base(
         raise ToolError("kb_ids must contain 1~5 ids")
     if not 1 <= len(query) <= 500:
         raise ToolError("query must be 1~500 chars")
-    if p.kind == "api_key" and p.key_id is not None:
-        ok, retry_after = await quota_check(p.key_id)
+    if (key_id := _api_key_id(p)) is not None:
+        ok, retry_after = await quota_check(key_id)
         if not ok:
             raise ToolError(f"quota_exhausted, retry_after={retry_after}s")
     async with SessionLocal() as db:
@@ -138,8 +139,8 @@ async def ask_knowledge_base(
             )
         except agent_facade.AgentKbDenied as e:
             raise ToolError(f"kb_forbidden, denied_kb_ids={e.denied_kb_ids}")
-        if p.kind == "api_key" and p.key_id is not None:
-            await quota_consume(p.key_id, outcome.tokens_used)
+        if (key_id := _api_key_id(p)) is not None:
+            await quota_consume(key_id, outcome.tokens_used)
         await audit(db, p.user.username, "agent.ask", "agent",
                     {"client": "mcp", "key_name": p.key_name,
                      "kb_ids": kb_ids, "query": query[:200],

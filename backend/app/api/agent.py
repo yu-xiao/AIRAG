@@ -5,7 +5,7 @@ from dataclasses import asdict
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import Principal, get_agent_principal
+from app.core.deps import Principal, _api_key_id, get_agent_principal
 from app.db.session import get_db
 from app.schemas.agent import (
     AgentAskIn,
@@ -33,9 +33,10 @@ def _ip(request: Request) -> str | None:
 
 async def _check_rate(principal: Principal) -> None:
     """仅对 API Key 生效;JWT(人工调试)不限流。"""
-    if principal.kind != "api_key" or principal.key_id is None:
+    key_id = _api_key_id(principal)
+    if key_id is None:
         return
-    ok, retry_after = await rate_allow(principal.key_id)
+    ok, retry_after = await rate_allow(key_id)
     if not ok:
         raise HTTPException(
             status_code=429,
@@ -46,9 +47,10 @@ async def _check_rate(principal: Principal) -> None:
 
 async def _check_quota(principal: Principal) -> None:
     """ask 前置配额检查(仅 api_key);429 附 Retry-After 头。"""
-    if principal.kind != "api_key" or principal.key_id is None:
+    key_id = _api_key_id(principal)
+    if key_id is None:
         return
-    ok, retry_after = await quota_check(principal.key_id)
+    ok, retry_after = await quota_check(key_id)
     if not ok:
         raise HTTPException(
             status_code=429,
@@ -125,8 +127,8 @@ async def agent_ask(
             status_code=403,
             detail={"code": "kb_forbidden", "denied_kb_ids": e.denied_kb_ids},
         )
-    if principal.kind == "api_key" and principal.key_id is not None:
-        await quota_consume(principal.key_id, outcome.tokens_used)
+    if (key_id := _api_key_id(principal)) is not None:
+        await quota_consume(key_id, outcome.tokens_used)
     await audit(
         db, principal.user.username, "agent.ask", "agent",
         {"client": "rest", "key_name": principal.key_name,

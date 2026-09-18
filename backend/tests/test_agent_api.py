@@ -3,8 +3,15 @@
 import json
 from datetime import datetime, timedelta, timezone
 
+import pytest
+from fastapi import HTTPException
 from sqlalchemy import select, text
 
+from app.core.deps import (
+    _api_key_id,
+    require_editor_key,
+    resolve_bearer_principal,
+)
 from app.models import ApiKey, AuditLog
 from app.services.api_keys import generate_api_key
 
@@ -364,3 +371,34 @@ async def test_agent_api_disabled_smoke(monkeypatch):
         assert (await c.get("/api/agent/kbs")).status_code == 404
         assert (await c.post("/api/agent/ask", json={})).status_code == 404
         assert (await c.post("/mcp", json={})).status_code == 404
+
+
+# ---- M11:能力传播与守卫 ----
+async def _create_key_role(client, headers, name, role):
+    r = await client.post("/api/auth/keys",
+                          json={"name": name, "role": role}, headers=headers)
+    assert r.status_code == 201
+    return r.json()["key"]
+
+
+async def test_principal_key_role_and_guards(client, auth_headers, db_session):
+    editor_key = await _create_key_role(client, auth_headers, "编辑", "editor")
+    ro_key = await _create_key_role(client, auth_headers, "只读", "read_only")
+
+    p = await resolve_bearer_principal(db_session, editor_key)
+    assert p.kind == "api_key" and p.key_role == "editor"
+    assert _api_key_id(p) == p.key_id
+    require_editor_key(p)  # editor key 放行
+
+    p2 = await resolve_bearer_principal(db_session, ro_key)
+    assert p2.key_role == "read_only"
+    with pytest.raises(HTTPException) as ei:
+        require_editor_key(p2)
+    assert ei.value.status_code == 403
+    assert ei.value.detail == {"code": "editor_key_required"}
+
+    token = auth_headers["Authorization"].split(" ", 1)[1]
+    pj = await resolve_bearer_principal(db_session, token)
+    assert pj.kind == "jwt" and pj.key_role is None
+    assert _api_key_id(pj) is None
+    require_editor_key(pj)  # JWT 调试通道视为 editor 能力
