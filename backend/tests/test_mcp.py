@@ -1,5 +1,6 @@
 # backend/tests/test_mcp.py
 """M9 Task6:MCP 面(原始 JSON-RPC over httpx ASGI + lifespan)。"""
+import base64
 import json
 
 import pytest
@@ -8,6 +9,7 @@ from asgi_lifespan import LifespanManager
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
+from tests.test_agent_api import _create_key_role  # M11
 
 ACCEPT = "application/json, text/event-stream"
 INIT = {
@@ -324,3 +326,94 @@ async def test_mcp_tool_descriptions_present(mcp_client, auth_headers):
         assert tools[name].get("description"), name
     assert f"默认 {settings.RETRIEVAL_TOP_K}" in \
         tools["search_knowledge_base"]["description"]
+
+
+# ---- M11:文档工具 ----
+async def _keyed_session(c, auth_headers, role=None):
+    from tests.test_agent_api import _create_key, _create_kb
+    if role:
+        key = await _create_key_role(c, auth_headers, f"mcp-{role}", role)
+    else:
+        key = await _create_key(c, auth_headers)
+    hdr = {"Authorization": f"Bearer {key}"}
+    sid = await _init(c, hdr)
+    return hdr, sid
+
+
+async def test_mcp_doc_tools_in_list(mcp_client, auth_headers):
+    hdr, sid = await _keyed_session(mcp_client, auth_headers)
+    resp = await mcp_client.post(
+        "/mcp", json=_rpc("tools/list", {}, 2),
+        headers={"Accept": ACCEPT, **hdr, "mcp-session-id": sid},
+    )
+    names = [t["name"] for t in resp.json()["result"]["tools"]]
+    for n in ("list_documents", "get_document", "upload_document",
+              "delete_document", "reprocess_document"):
+        assert n in names
+
+
+async def _tool_call(c, hdr, sid, name, args, msg_id):
+    resp = await c.post(
+        "/mcp",
+        json=_rpc("tools/call", {"name": name, "arguments": args}, msg_id),
+        headers={"Accept": ACCEPT, **hdr, "mcp-session-id": sid},
+    )
+    return resp.json()
+
+
+def _is_error(rj) -> bool:
+    return rj.get("error") is not None or rj["result"].get("isError", False)
+
+
+def _err_text(rj) -> str:
+    if rj.get("error"):
+        return str(rj["error"].get("message", ""))
+    return rj["result"]["content"][0]["text"]
+
+
+async def test_mcp_upload_get_delete_cycle(mcp_client, auth_headers):
+    from tests.test_agent_api import _create_kb
+
+    kb_id = await _create_kb(mcp_client, auth_headers, "MCP写库")
+    hdr, sid = await _keyed_session(mcp_client, auth_headers, role="editor")
+    b64 = base64.b64encode(b"mcp-upload-dummy").decode()
+    rj = await _tool_call(mcp_client, hdr, sid, "upload_document",
+                          {"kb_id": kb_id, "filename": "m11.docx",
+                           "content_b64": b64}, 3)
+    body = _tool_result(rj)
+    doc_id = body["id"]
+    assert body["filename"] == "m11.docx"
+    rj2 = await _tool_call(mcp_client, hdr, sid, "get_document",
+                           {"doc_id": doc_id}, 4)
+    assert _tool_result(rj2)["status"] in ("pending", "parsing", "chunking",
+                                           "embedding", "done", "failed")
+    rj3 = await _tool_call(mcp_client, hdr, sid, "list_documents",
+                           {"kb_id": kb_id}, 5)
+    assert doc_id in [d["id"] for d in _tool_result(rj3)["items"]]
+    rj4 = await _tool_call(mcp_client, hdr, sid, "delete_document",
+                           {"doc_id": doc_id}, 6)
+    assert _tool_result(rj4)["deleted"] is True
+    rj5 = await _tool_call(mcp_client, hdr, sid, "get_document",
+                           {"doc_id": doc_id}, 7)
+    assert _is_error(rj5) and "not_found" in _err_text(rj5)
+
+
+async def test_mcp_write_guard_and_validation(mcp_client, auth_headers):
+    from tests.test_agent_api import _create_kb
+
+    kb_id = await _create_kb(mcp_client, auth_headers, "MCP守卫库")
+    hdr, sid = await _keyed_session(mcp_client, auth_headers)  # read_only
+    rj = await _tool_call(mcp_client, hdr, sid, "upload_document",
+                          {"kb_id": kb_id, "filename": "a.docx",
+                           "content_b64": base64.b64encode(b"x").decode()}, 3)
+    assert _is_error(rj) and "editor_key_required" in _err_text(rj)
+    # editor key 坏 base64 / 坏扩展名
+    hdr2, sid2 = await _keyed_session(mcp_client, auth_headers, role="editor")
+    rj2 = await _tool_call(mcp_client, hdr2, sid2, "upload_document",
+                           {"kb_id": kb_id, "filename": "a.docx",
+                            "content_b64": "!!!not-base64!!!"}, 4)
+    assert _is_error(rj2) and "bad_base64" in _err_text(rj2)
+    rj3 = await _tool_call(mcp_client, hdr2, sid2, "upload_document",
+                           {"kb_id": kb_id, "filename": "a.exe",
+                            "content_b64": base64.b64encode(b"x").decode()}, 5)
+    assert _is_error(rj3) and "unsupported_type" in _err_text(rj3)
