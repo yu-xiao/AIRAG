@@ -347,3 +347,20 @@ async def test_key_last_used_at_persisted(client, auth_headers):
                      headers={"Authorization": f"Bearer {key}"})
     rows = (await client.get("/api/auth/keys", headers=auth_headers)).json()
     assert rows[0]["last_used_at"] is not None
+
+
+async def test_agent_api_disabled_smoke(monkeypatch):
+    """小项②:总开关关闭后 agent REST 与 /mcp 全 404,常规路由不受影响。"""
+    from httpx import ASGITransport, AsyncClient
+
+    from app.core.config import settings
+    from app.main import create_app
+
+    monkeypatch.setattr(settings, "AGENT_API_ENABLED", False)
+    app2 = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app2),
+                           base_url="http://t") as c:
+        assert (await c.get("/api/health")).status_code == 200
+        assert (await c.get("/api/agent/kbs")).status_code == 404
+        assert (await c.post("/api/agent/ask", json={})).status_code == 404
+        assert (await c.post("/mcp", json={})).status_code == 404

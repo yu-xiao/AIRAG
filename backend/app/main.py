@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
-from app.api import api_router
+from app.api import build_api_router
 from app.core.config import settings
 
 
@@ -23,7 +23,7 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    app.include_router(api_router, prefix="/api")
+    app.include_router(build_api_router(), prefix="/api")
     if mcp_asgi is not None:
         # 挂载于根(fastmcp 官方集成法):/api 等已注册路由优先,兜底路径
         # 落到 MCP 鉴权中间件;完整 MCP 端点为 POST /mcp。
