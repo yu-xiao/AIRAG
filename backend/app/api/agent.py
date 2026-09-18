@@ -8,6 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import Principal, get_agent_principal
 from app.db.session import get_db
 from app.schemas.agent import (
+    AgentAskIn,
+    AgentAskOut,
     AgentHitOut,
     AgentKbListOut,
     AgentKbOut,
@@ -15,7 +17,11 @@ from app.schemas.agent import (
     AgentSearchOut,
 )
 from app.services import agent_facade
-from app.services.agent_ratelimit import allow as rate_allow
+from app.services.agent_ratelimit import (
+    allow as rate_allow,
+    quota_check,
+    quota_consume,
+)
 from app.services.audit import audit
 
 router = APIRouter(prefix="/agent", tags=["agent"])
@@ -34,6 +40,20 @@ async def _check_rate(principal: Principal) -> None:
         raise HTTPException(
             status_code=429,
             detail={"code": "rate_limited", "retry_after": retry_after},
+            headers={"Retry-After": str(retry_after)},
+        )
+
+
+async def _check_quota(principal: Principal) -> None:
+    """ask 前置配额检查(仅 api_key);429 附 Retry-After 头。"""
+    if principal.kind != "api_key" or principal.key_id is None:
+        return
+    ok, retry_after = await quota_check(principal.key_id)
+    if not ok:
+        raise HTTPException(
+            status_code=429,
+            detail={"code": "quota_exhausted", "retry_after": retry_after},
+            headers={"Retry-After": str(retry_after)},
         )
 
 
@@ -83,5 +103,41 @@ async def agent_search(
     return AgentSearchOut(
         hits=[AgentHitOut(**asdict(h)) for h in outcome.hits],
         total=len(outcome.hits),
+        elapsed_ms=outcome.elapsed_ms,
+    )
+
+
+@router.post("/ask", response_model=AgentAskOut)
+async def agent_ask(
+    payload: AgentAskIn,
+    request: Request,
+    principal: Principal = Depends(get_agent_principal),
+    db: AsyncSession = Depends(get_db),
+):
+    await _check_rate(principal)
+    await _check_quota(principal)
+    try:
+        outcome = await agent_facade.agent_ask(
+            db, principal.user, payload.kb_ids, payload.query, payload.rerank,
+        )
+    except agent_facade.AgentKbDenied as e:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "kb_forbidden", "denied_kb_ids": e.denied_kb_ids},
+        )
+    if principal.kind == "api_key" and principal.key_id is not None:
+        await quota_consume(principal.key_id, outcome.tokens_used)
+    await audit(
+        db, principal.user.username, "agent.ask", "agent",
+        {"client": "rest", "key_name": principal.key_name,
+         "kb_ids": payload.kb_ids, "query": payload.query[:200],
+         "refused": outcome.refused, "tokens": outcome.tokens_used,
+         "elapsed_ms": outcome.elapsed_ms},
+        ip=_ip(request),
+    )
+    await db.commit()
+    return AgentAskOut(
+        answer=outcome.answer, citations=outcome.citations,
+        refused=outcome.refused, tokens_used=outcome.tokens_used,
         elapsed_ms=outcome.elapsed_ms,
     )

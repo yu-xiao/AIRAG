@@ -38,3 +38,17 @@ class AgentSearchOut(BaseModel):
     hits: list[AgentHitOut]
     total: int
     elapsed_ms: int
+
+
+class AgentAskIn(BaseModel):
+    kb_ids: list[int] = Field(min_length=1, max_length=5)
+    query: str = Field(min_length=1, max_length=500)
+    rerank: bool = False
+
+
+class AgentAskOut(BaseModel):
+    answer: str
+    citations: list[dict]
+    refused: bool
+    tokens_used: int
+    elapsed_ms: int

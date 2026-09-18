@@ -1,5 +1,6 @@
 # backend/tests/test_agent_api.py
 """M9 Task3:agent principal 双路径鉴权 + GET /api/agent/kbs 可见性 + 审计。"""
+import json
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select, text
@@ -221,3 +222,128 @@ async def test_search_rerank_min_score_gate(client, auth_headers, monkeypatch):
         headers={"Authorization": f"Bearer {key}"},
     )
     assert resp.json()["total"] == 0
+
+
+# ---- M10:POST /api/agent/ask ----
+
+def _ask_graph_patch(monkeypatch, response_text: str):
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+
+    from app.services import agent_facade
+    from app.services.chat_graph import nodes
+    from app.services.chat_graph.graph import build_graph
+
+    async def fake_hybrid(db, kb_ids, query, top_k=20):
+        return _fake_hits()
+
+    monkeypatch.setattr(nodes, "hybrid_search", fake_hybrid)
+    monkeypatch.setattr(agent_facade, "_ask_graph",
+                        build_graph(llm=FakeListChatModel(responses=[response_text]),
+                                    checkpointer=None))
+
+
+async def test_ask_ok(client, auth_headers, monkeypatch):
+    kb_id = await _create_kb(client, auth_headers, "问答库")
+    key = await _create_key(client, auth_headers)
+    _ask_graph_patch(monkeypatch, "巡航升限为八千五百米。")
+    resp = await client.post(
+        "/api/agent/ask",
+        json={"kb_ids": [kb_id], "query": "升限?"},
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["answer"] == "巡航升限为八千五百米。"
+    assert body["refused"] is False and body["tokens_used"] == 0
+    assert body["citations"] and isinstance(body["elapsed_ms"], int)
+
+
+async def test_ask_refused_is_200(client, auth_headers, monkeypatch):
+    from app.services.chat_graph.nodes import REFUSAL_PHRASE
+
+    kb_id = await _create_kb(client, auth_headers, "拒答库")
+    key = await _create_key(client, auth_headers)
+    _ask_graph_patch(monkeypatch, REFUSAL_PHRASE)
+    resp = await client.post(
+        "/api/agent/ask",
+        json={"kb_ids": [kb_id], "query": "无关问题"},
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert resp.status_code == 200 and resp.json()["refused"] is True
+
+
+async def test_ask_denied_dedup(client, auth_headers):
+    kb_id = await _create_kb(client, auth_headers, "去重库")
+    key = await _create_key(client, auth_headers)
+    resp = await client.post(
+        "/api/agent/ask",
+        json={"kb_ids": [kb_id, kb_id, 99999, 99999], "query": "q"},
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert resp.status_code == 403
+    assert resp.json()["detail"]["denied_kb_ids"] == [99999]
+
+
+async def test_ask_validation_422(client, auth_headers):
+    key = await _create_key(client, auth_headers)
+    resp = await client.post(
+        "/api/agent/ask", json={"kb_ids": [], "query": ""},
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert resp.status_code == 422
+
+
+async def test_ask_quota_429_with_retry_after_header(
+    client, auth_headers, monkeypatch
+):
+    from app.core.config import settings
+    from app.services import agent_ratelimit
+    from tests.test_agent_ratelimit import FakeRedis
+
+    kb_id = await _create_kb(client, auth_headers, "配额库")
+    key = await _create_key(client, auth_headers)
+    key_id = (await client.get("/api/auth/keys", headers=auth_headers)
+              ).json()[0]["id"]
+    fake_redis = FakeRedis()
+    monkeypatch.setattr(agent_ratelimit, "get_redis", lambda: fake_redis)
+    monkeypatch.setattr(settings, "AGENT_ASK_DAILY_TOKENS", 100)
+    await agent_ratelimit.quota_consume(key_id, 100)  # 烧穿
+
+    resp = await client.post(
+        "/api/agent/ask",
+        json={"kb_ids": [kb_id], "query": "q"},
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert resp.status_code == 429
+    detail = resp.json()["detail"]
+    assert detail["code"] == "quota_exhausted" and detail["retry_after"] >= 1
+    assert int(resp.headers["Retry-After"]) >= 1
+
+
+async def test_ask_audit_written(client, auth_headers, db_session,
+                                 monkeypatch):
+    kb_id = await _create_kb(client, auth_headers, "审计ask库")
+    key = await _create_key(client, auth_headers)
+    _ask_graph_patch(monkeypatch, "正常答案")
+    await client.post(
+        "/api/agent/ask",
+        json={"kb_ids": [kb_id], "query": "q"},
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    db_session.expire_all()  # AsyncSession.expire_all 为同步方法,不可 await
+    rows = (await db_session.execute(
+        select(AuditLog).where(AuditLog.action == "agent.ask")
+    )).scalars().all()
+    assert len(rows) == 1
+    d = json.loads(rows[0].detail)
+    assert d["client"] == "rest" and d["refused"] is False \
+        and "tokens" in d and "elapsed_ms" in d
+
+
+async def test_key_last_used_at_persisted(client, auth_headers):
+    """小项⑤:key 调用后 last_used_at 落库(REST 面经端点 commit 持久化)。"""
+    key = await _create_key(client, auth_headers)
+    await client.get("/api/agent/kbs",
+                     headers={"Authorization": f"Bearer {key}"})
+    rows = (await client.get("/api/auth/keys", headers=auth_headers)).json()
+    assert rows[0]["last_used_at"] is not None

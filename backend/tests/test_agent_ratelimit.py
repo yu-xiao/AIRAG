@@ -156,3 +156,4 @@ async def test_api_429(client, auth_headers, monkeypatch):
     assert resp2.status_code == 429
     detail = resp2.json()["detail"]
     assert detail["code"] == "rate_limited" and detail["retry_after"] >= 1
+    assert int(resp2.headers["Retry-After"]) >= 1
