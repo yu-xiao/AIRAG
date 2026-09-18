@@ -7,7 +7,8 @@
 真调、ask_knowledge_base 真调(答案或拒答)、无权库 ToolError 文案。
 传入第三个参数 editor_key(编辑型密钥明文,Web「API 密钥」页铸造,类型选"编辑")时,
 追加 M11 文档工具走查:upload_document(base64 真文件)→ get_document →
-list_documents → delete_document。
+list_documents → delete_document;四步判定计入汇总与退出码,锚点/文件名带
+唯一 run 标记,可对同一 KB 重复运行。
 退出码 1 = 走查失败。
 """
 import asyncio
@@ -91,9 +92,14 @@ async def main():
 
 
 async def walk_m11_doc_tools(base: str, editor_key: str, kb_id: int) -> None:
-    """M11:文档工具走查(upload→get→list→delete,base64 真文件)。"""
+    """M11:文档工具走查(upload→get→list→delete,base64 真文件)。
+
+    四步判定经 check() 计入全局 RESULTS(汇总与退出码);任一步返回错误体
+    即记 FAIL 并提前返回,不崩溃、不让后续步骤静默跳过。
+    """
     import base64
     import io
+    import uuid
 
     import httpx
     from docx import Document as Dx
@@ -103,6 +109,7 @@ async def walk_m11_doc_tools(base: str, editor_key: str, kb_id: int) -> None:
                "Accept": ACCEPT}
     msg_id = 100
     sid = None
+    run_tag = uuid.uuid4().hex[:6]  # 锚点/文件名每次运行唯一,防 SHA256 去重 409
 
     async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as c:
         init = {"jsonrpc": "2.0", "id": msg_id, "method": "initialize",
@@ -125,37 +132,52 @@ async def walk_m11_doc_tools(base: str, editor_key: str, kb_id: int) -> None:
                       "params": {"name": name, "arguments": args}},
                 headers={**headers, "mcp-session-id": sid},
             )
-            rj = r.json()
-            if rj.get("error") or rj["result"].get("isError"):
+            try:
+                rj = r.json()
+            except ValueError:
+                return None, {"http_status": r.status_code,
+                              "text": r.text[:200]}
+            result = rj.get("result") if isinstance(rj, dict) else None
+            if (not isinstance(result, dict) or rj.get("error")
+                    or result.get("isError")):
+                return None, rj  # error-only 体无 "result" 键,不可直接下标
+            try:
+                return json.loads(result["content"][0]["text"]), rj
+            except (KeyError, IndexError, TypeError, ValueError):
                 return None, rj
-            return __import__("json").loads(
-                rj["result"]["content"][0]["text"]), rj
 
         dx = Dx()
-        dx.add_paragraph(f"m11-mcp-walkthrough-{kb_id} 锚点内容")
+        dx.add_paragraph(f"m11-mcp-walkthrough-{kb_id}-{run_tag} 锚点内容")
         buf = io.BytesIO()
         dx.save(buf)
         b64 = base64.b64encode(buf.getvalue()).decode()
 
-        body, _ = await call("upload_document",
-                             {"kb_id": kb_id,
-                              "filename": f"m11-mcp-{kb_id}.docx",
-                              "content_b64": b64})
-        print("PASS mcp upload" if body and body.get("id")
-              else f"FAIL mcp upload: {_}")
+        body, rj = await call("upload_document",
+                              {"kb_id": kb_id,
+                               "filename": f"m11-mcp-{kb_id}-{run_tag}.docx",
+                               "content_b64": b64})
+        check("mcp upload_document 返回 id", bool(body and body.get("id")),
+              str(rj)[:200])
+        if not (body and body.get("id")):
+            return  # 上传失败无 doc_id,提前返回,不孤儿化后续步骤
         doc_id = body["id"]
 
-        got, _ = await call("get_document", {"doc_id": doc_id})
-        print("PASS mcp get" if got and got.get("status") else
-              f"FAIL mcp get: {_}")
+        got, rj = await call("get_document", {"doc_id": doc_id})
+        check("mcp get_document 返回状态", bool(got and got.get("status")),
+              str(rj)[:200])
+        if got is None:
+            return
 
-        lst, _ = await call("list_documents", {"kb_id": kb_id})
+        lst, rj = await call("list_documents", {"kb_id": kb_id})
         hit = doc_id in [d["id"] for d in (lst or {}).get("items", [])]
-        print("PASS mcp list" if hit else f"FAIL mcp list: {lst}")
+        check("mcp list_documents 含新上传文档", hit,
+              str(rj)[:200] if lst is None else str(lst)[:200])
+        if lst is None:
+            return
 
-        dele, _ = await call("delete_document", {"doc_id": doc_id})
-        print("PASS mcp delete" if dele and dele.get("deleted") else
-              f"FAIL mcp delete: {dele}")
+        dele, rj = await call("delete_document", {"doc_id": doc_id})
+        check("mcp delete_document 确认删除",
+              bool(dele and dele.get("deleted")), str(rj)[:200])
 
 
 if __name__ == "__main__":

@@ -34,18 +34,18 @@ Redis:worker 需要 Redis(本机 6379 已有服务)。若该服务设置了 requ
 
 审计清理 beat(M6 起):Windows 不能用 worker -B 内嵌,另开窗口运行 backend\start_beat.bat(每日 03:00 清理,`AUDIT_RETENTION_DAYS` 默认 180 天,0=禁用;不开 beat 时可用 admin 手动 purge 端点)。
 
-## 外部 Agent 接入(M9/M10)
+## 外部 Agent 接入(M9~M11)
 
-知识库可通过 API Key 只读开放给外部 Agent(知识库发现 + 检索 + RAG 问答)。密钥在「API 密钥」页面创建,权限与创建者账号一致,可随时吊销。
+知识库内容可经 API Key 检索问答,编辑型密钥还可维护文档;密钥能力(read_only/editor)不会超出归属账号权限,可随时吊销。
 
 ### 1. 创建密钥
-登录 Web → 左侧「API 密钥」→ 创建(明文只显示一次)。管理员可在创建对话框的「绑定账号」下拉中把密钥发给任意账号(权限与配额按目标账号,审计记录 by/to)。
+登录 Web → 左侧「API 密钥」→ 创建(明文只显示一次;M11 起可选密钥类型:只读/编辑,默认只读)。管理员可在创建对话框的「绑定账号」下拉中把密钥发给任意账号(权限与配额按目标账号,审计记录 by/to)。
 
 ### 2. MCP 客户端(Claude Code / Cursor / ZCode 等)
 ```bash
 claude mcp add --transport http airag http://<host>:8001/mcp --header "Authorization: Bearer airag_xxxx"
 ```
-可用工具:`list_knowledge_bases` / `search_knowledge_base` / `ask_knowledge_base`(直接生成答案+引用,单轮无上下文,内部多步 LLM 耗时 40~90 秒,客户端超时请设充足,如 Claude Code 的 `MCP_TIMEOUT`);文档维护工具 `list_documents` / `get_document` / `upload_document`(base64 内容,解码后不超过 MAX_UPLOAD_MB;上传后轮询 `get_document` 至 done/failed)/ `delete_document`(不可逆)/ `reprocess_document`;配额查询 `get_quota`。后三者及 `upload_document` 需**编辑型密钥**(创建密钥时类型选"编辑";存量只读密钥如需写操作请重新铸造)。REST 面同构:`GET/POST /api/agent/kbs/{kb_id}/documents`、`GET/DELETE /api/agent/documents/{doc_id}`、`POST /api/agent/documents/{doc_id}/reprocess`、`GET /api/agent/quota`。
+可用工具:`list_knowledge_bases` / `search_knowledge_base` / `ask_knowledge_base`(直接生成答案+引用,单轮无上下文,内部多步 LLM 耗时 40~90 秒,客户端超时请设充足,如 Claude Code 的 `MCP_TIMEOUT`);文档维护工具 `list_documents` / `get_document` / `upload_document`(base64 内容,解码后不超过 MAX_UPLOAD_MB;上传后轮询 `get_document` 至 done/failed)/ `delete_document`(不可逆)/ `reprocess_document`;配额查询 `get_quota`。`delete_document`(不可逆)/`reprocess_document`/`upload_document` 需**编辑型密钥**(创建密钥时类型选"编辑";存量只读密钥如需写操作请重新铸造);`get_quota` 需密钥主体(JWT 调试不可用)。REST 面同构:`GET/POST /api/agent/kbs/{kb_id}/documents`、`GET/DELETE /api/agent/documents/{doc_id}`、`POST /api/agent/documents/{doc_id}/reprocess`、`GET /api/agent/quota`。
 
 ### 3. REST 客户端(Dify / Coze / 内部系统)
 OpenAPI 文档:`http://<host>:8001/openapi.json`(tag `agent`)。

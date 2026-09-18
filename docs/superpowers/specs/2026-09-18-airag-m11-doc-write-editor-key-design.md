@@ -76,6 +76,8 @@ JWT 调试通道:视为 editor 能力(key_role=None 不拦截),仍受用户 KB �
   沿用现逻辑:409 busy → 清 chunks → 重置 status=pending/error_msg/chunk_count/page_count → `process_document.delay`
 - Web `api/documents.py`:upload/reprocess 端点改薄壳调用,新增 `DELETE /api/documents/{doc_id}`(perm≥editor);行为不变,既有测试做回归
 
+> 勘误(实施期裁决):save_upload/delete_document/reprocess_document 的审计、commit 与 dispatch 内聚于 doc_ops(action/audit_extra 由调用面传入),非调用方负责;以实现与计划为准。
+
 ## D. REST 面:5 新端点(前缀 `/api/agent`,全过 `_check_rate`)
 
 | 端点 | 方法 | 能力 | 语义 |
