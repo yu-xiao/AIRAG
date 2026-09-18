@@ -2285,3 +2285,9 @@ T8 文档/验收(最后)
 - **`last_used_at` 持久化依赖路由 commit**;新增 agent 端点必须 `await db.commit()`(审计同理)。
 - **Windows**:一切后端命令走 `.venv\Scripts\python`;服务 8001;不要用裸 uvicorn 起服务(Proactor/checkpointer 问题,M9 不新增该风险)。
 - Task 2 的 `model_validate(..., update=)` 若报错,按任务内备注改为手工构造。
+
+## 执行记录(2026-09-18 收官)
+
+- 8 任务 + 终审修复波全部完成:后端 182P / 前端 19P / `scripts/m9_acceptance.py` 16/16(真栈);终审 Ready to merge,MCP 审计 ip 等 4 项已在修复波 6e324aa 解决并复审。
+- 用户走查(2026-09-18):密钥页创建/一次性明文/吊销、agent REST、既有功能回归——**通过**;**MCP 真客户端走查移交 M9.1**(连同 admin 指定绑定账号、成员授权用户下拉两个已拍板需求)。
+- 计划执行勘误 6 处已随任务同步进本文件(T3 await expire_all / T5 包导入与 retry 钳制 / T6 挂载模式三则 / T7 明文文本节点)。
