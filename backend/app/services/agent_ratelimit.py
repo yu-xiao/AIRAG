@@ -21,13 +21,13 @@ def get_redis() -> aioredis.Redis:
     return _redis
 
 
-async def allow(ident: str) -> tuple[bool, int]:
-    """返回 (是否放行, retry_after 秒)。"""
+async def allow(key_id: int) -> tuple[bool, int]:
+    """返回 (是否放行, retry_after 秒);redis key=agent_rl:{key_id}(M9 spec §E)。"""
     limit = settings.AGENT_RATE_LIMIT_PER_MIN
     if limit <= 0:
         return True, 0
     now = time.time()
-    rkey = f"agent_rl:{ident}"
+    rkey = f"agent_rl:{key_id}"
     try:
         r = get_redis()
         await r.zremrangebyscore(rkey, 0, now - WINDOW_SECONDS)

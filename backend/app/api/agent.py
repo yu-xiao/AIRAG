@@ -35,7 +35,7 @@ async def _check_rate(principal: Principal) -> None:
     """仅对 API Key 生效;JWT(人工调试)不限流。"""
     if principal.kind != "api_key" or principal.key_id is None:
         return
-    ok, retry_after = await rate_allow(f"key:{principal.key_id}")
+    ok, retry_after = await rate_allow(principal.key_id)
     if not ok:
         raise HTTPException(
             status_code=429,

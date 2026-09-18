@@ -193,7 +193,7 @@ class AgentAuthMiddleware:
                 await _send_json(send, e.status_code, {"detail": e.detail})
                 return
         if principal.kind == "api_key":
-            ok, retry_after = await rate_allow(f"key:{principal.key_id}")
+            ok, retry_after = await rate_allow(principal.key_id)
             if not ok:
                 await _send_json(
                     send, 429,

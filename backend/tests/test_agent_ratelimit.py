@@ -58,33 +58,40 @@ def fake_redis(monkeypatch):
 async def test_under_limit_passes(fake_redis, monkeypatch):
     monkeypatch.setattr(settings, "AGENT_RATE_LIMIT_PER_MIN", 3)
     for _ in range(3):
-        ok, _ = await allow("key:1")
+        ok, _ = await allow(1)
         assert ok
 
 
 async def test_over_limit_denies_with_retry(fake_redis, monkeypatch):
     monkeypatch.setattr(settings, "AGENT_RATE_LIMIT_PER_MIN", 1)
-    assert (await allow("key:2"))[0] is True
-    ok, retry = await allow("key:2")
+    assert (await allow(2))[0] is True
+    ok, retry = await allow(2)
     assert ok is False and 1 <= retry <= 60
 
 
 async def test_limit_disabled(fake_redis, monkeypatch):
     monkeypatch.setattr(settings, "AGENT_RATE_LIMIT_PER_MIN", 0)
     for _ in range(5):
-        assert (await allow("key:3"))[0] is True
+        assert (await allow(3))[0] is True
 
 
 async def test_redis_failure_degrades_open(monkeypatch):
     monkeypatch.setattr(settings, "AGENT_RATE_LIMIT_PER_MIN", 1)
     monkeypatch.setattr(agent_ratelimit, "get_redis", lambda: FakeRedis(fail=True))
-    assert (await allow("key:4"))[0] is True
+    assert (await allow(4))[0] is True
 
 
 async def test_ident_isolated(fake_redis, monkeypatch):
     monkeypatch.setattr(settings, "AGENT_RATE_LIMIT_PER_MIN", 1)
-    assert (await allow("key:a"))[0] is True
-    assert (await allow("key:b"))[0] is True
+    assert (await allow(101))[0] is True
+    assert (await allow(102))[0] is True
+
+
+async def test_rl_key_shape(fake_redis, monkeypatch):
+    """小项③:redis key 对齐 M9 spec §E 的 agent_rl:{key_id}。"""
+    monkeypatch.setattr(settings, "AGENT_RATE_LIMIT_PER_MIN", 5)
+    await allow(9)
+    assert "agent_rl:9" in fake_redis.z
 
 
 # ---- M10:每 key 每日 token 配额 ----
