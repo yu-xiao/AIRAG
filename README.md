@@ -45,7 +45,7 @@ Redis:worker 需要 Redis(本机 6379 已有服务)。若该服务设置了 requ
 ```bash
 claude mcp add --transport http airag http://<host>:8001/mcp --header "Authorization: Bearer airag_xxxx"
 ```
-可用工具:`list_knowledge_bases` / `search_knowledge_base` / `ask_knowledge_base`(直接生成答案+引用,单轮无上下文,内部多步 LLM 耗时 40~90 秒,客户端超时请设充足,如 Claude Code 的 `MCP_TIMEOUT`)。
+可用工具:`list_knowledge_bases` / `search_knowledge_base` / `ask_knowledge_base`(直接生成答案+引用,单轮无上下文,内部多步 LLM 耗时 40~90 秒,客户端超时请设充足,如 Claude Code 的 `MCP_TIMEOUT`);文档维护工具 `list_documents` / `get_document` / `upload_document`(base64 内容,解码后不超过 MAX_UPLOAD_MB;上传后轮询 `get_document` 至 done/failed)/ `delete_document`(不可逆)/ `reprocess_document`;配额查询 `get_quota`。后三者及 `upload_document` 需**编辑型密钥**(创建密钥时类型选"编辑";存量只读密钥如需写操作请重新铸造)。REST 面同构:`GET/POST /api/agent/kbs/{kb_id}/documents`、`GET/DELETE /api/agent/documents/{doc_id}`、`POST /api/agent/documents/{doc_id}/reprocess`、`GET /api/agent/quota`。
 
 ### 3. REST 客户端(Dify / Coze / 内部系统)
 OpenAPI 文档:`http://<host>:8001/openapi.json`(tag `agent`)。
