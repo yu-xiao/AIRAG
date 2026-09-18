@@ -16,6 +16,12 @@ export interface ApiKeyCreatePayload {
   expires_in_days?: number | null
 }
 
+export interface AdminKeyCreatePayload {
+  user_id: number
+  name: string
+  expires_in_days?: number | null
+}
+
 /** 创建响应:唯一一次携带明文 key */
 export interface ApiKeyCreated extends ApiKeyItem {
   key: string
@@ -28,6 +34,11 @@ export const keysApi = {
   },
   async create(payload: ApiKeyCreatePayload): Promise<ApiKeyCreated> {
     const { data } = await http.post<ApiKeyCreated>('/auth/keys', payload)
+    return data
+  },
+  /** M9.1:admin 为指定账号创建密钥(权限继承目标账号) */
+  async createAdmin(payload: AdminKeyCreatePayload): Promise<ApiKeyCreated> {
+    const { data } = await http.post<ApiKeyCreated>('/admin/keys', payload)
     return data
   },
   async revoke(id: number): Promise<void> {

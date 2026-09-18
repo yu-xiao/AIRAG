@@ -1,8 +1,13 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import PageHeader from '@/components/PageHeader.vue'
 import { keysApi, type ApiKeyCreated, type ApiKeyItem } from '@/api/keys'
+import { usersApi, type UserBrief } from '@/api/users'
+import { useAuthStore } from '@/stores/auth'
+
+const auth = useAuthStore()
+const isAdmin = computed(() => auth.user?.role === 'admin')
 
 const loading = ref(false)
 const items = ref<ApiKeyItem[]>([])
@@ -10,7 +15,11 @@ const items = ref<ApiKeyItem[]>([])
 const dialogVisible = ref(false)
 const submitting = ref(false)
 const formRef = ref<FormInstance>()
-const form = reactive({ name: '', expires: 'permanent' as 'permanent' | '7' | '30' | '90' })
+const form = reactive({
+  name: '',
+  expires: 'permanent' as 'permanent' | '7' | '30' | '90',
+  userId: null as number | null,
+})
 const rules: FormRules = {
   name: [
     { required: true, message: '请输入密钥名称', trigger: 'blur' },
@@ -19,6 +28,36 @@ const rules: FormRules = {
 }
 
 const created = ref<ApiKeyCreated | null>(null)
+
+// M9.1:admin 创建时可指定绑定账号(空 = 默认绑定自己)
+const userOptions = ref<UserBrief[]>([])
+const userSearching = ref(false)
+const boundUsername = ref<string | null>(null)
+
+async function searchBindUsers(q: string) {
+  userSearching.value = true
+  try {
+    const found = await usersApi.search(q.trim(), 0, 20)
+    // 保留已选项,避免远程搜索刷新后 el-select label 丢成裸 id
+    const sel = userOptions.value.find((u) => u.id === form.userId)
+    userOptions.value =
+      sel && !found.some((u) => u.id === sel.id) ? [sel, ...found] : found
+  } catch {
+    ElMessage.error('账号搜索失败')
+  } finally {
+    userSearching.value = false
+  }
+}
+
+function openCreate() {
+  form.name = ''
+  form.expires = 'permanent'
+  form.userId = null
+  userOptions.value = []
+  boundUsername.value = null
+  formRef.value?.resetFields()
+  dialogVisible.value = true
+}
 
 const errMsg = (e: unknown, fallback: string) =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? fallback
@@ -40,14 +79,23 @@ async function submit(formEl: FormInstance | undefined) {
   if (!valid) return
   submitting.value = true
   try {
-    created.value = await keysApi.create({
+    const payload = {
       name: form.name,
       expires_in_days:
         form.expires === 'permanent' ? null : Number(form.expires),
-    })
+    }
+    if (isAdmin.value && form.userId != null) {
+      created.value = await keysApi.createAdmin({ ...payload, user_id: form.userId })
+      boundUsername.value =
+        userOptions.value.find((u) => u.id === form.userId)?.username ?? null
+    } else {
+      created.value = await keysApi.create(payload)
+      boundUsername.value = null
+    }
     dialogVisible.value = false
     form.name = ''
     form.expires = 'permanent'
+    form.userId = null
     await load()
   } catch (e) {
     ElMessage.error(errMsg(e, '创建失败'))
@@ -90,7 +138,7 @@ onMounted(load)
   <div class="page">
     <PageHeader title="API 密钥" description="供外部 Agent(MCP / REST)访问知识库的凭证,权限与你当前账号一致。">
       <template #actions>
-        <el-button type="primary" @click="dialogVisible = true">创建密钥</el-button>
+        <el-button type="primary" @click="openCreate">创建密钥</el-button>
       </template>
     </PageHeader>
 
@@ -132,6 +180,20 @@ onMounted(load)
         <el-form-item label="名称" prop="name">
           <el-input v-model="form.name" maxlength="64" placeholder="请输入密钥名称" />
         </el-form-item>
+        <el-form-item v-if="isAdmin" label="绑定账号">
+          <el-select
+            v-model="form.userId"
+            filterable
+            remote
+            clearable
+            :remote-method="searchBindUsers"
+            :loading="userSearching"
+            placeholder="默认绑定当前账号"
+            no-data-text="输入用户名搜索"
+          >
+            <el-option v-for="u in userOptions" :key="u.id" :label="u.username" :value="u.id" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="有效期">
           <el-radio-group v-model="form.expires">
             <el-radio value="7">7 天</el-radio>
@@ -157,6 +219,9 @@ onMounted(load)
         <code class="key-value">{{ created?.key }}</code>
         <el-button @click="copyKey">复制</el-button>
       </div>
+      <p v-if="boundUsername" class="bound-note">
+        该密钥已绑定账号:{{ boundUsername }}(权限与该账号一致,不显示在你的密钥列表)
+      </p>
       <template #footer>
         <el-button type="primary" @click="created = null">我已保存</el-button>
       </template>
@@ -194,5 +259,10 @@ onMounted(load)
   font-size: 13px;
   word-break: break-all;
   user-select: all;
+}
+.bound-note {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
 }
 </style>
