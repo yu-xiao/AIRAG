@@ -2486,3 +2486,41 @@ git commit -m "docs(agent): m11 execution record"
 - Spec 覆盖:A(模型/迁移/铸造)=Task 1;B(传播/守卫/审计)=Task 2+4+5;C(doc_ops/worker 早退)=Task 3;D(REST 5 端点)=Task 4;E(MCP 5 工具/README)=Task 5+9;F(Web 删除+前端)=Task 3+6;G 小项①②③④⑤⑥=Task 7(①⑥)/2(②)/8(③④⑤);测试与验收=各任务+Task 9/10;风险项(pending 竞态=Task 3 worker 早退;base64 膨胀=Task 5 解码后校验+Task 9 真栈;eval_sets 陈旧引用=不改代码,spec 已明示)。无缺口。
 - 类型一致性:`issue_api_key(..., role)`、`Principal.key_role`、`_api_key_id`/`require_editor_key`、`doc_ops.save_upload/delete_document/reprocess_document/visible_*`、`quota_remaining`、`CitationOut/AgentQuotaOut` 各任务间签名一致;测试辅助 `_create_key_role` 在 Task 2 建、Task 4/7 复用(test_agent_docs_api.py 内自带独立定义,避免跨文件依赖漂移)。
 - 占位符:无 TBD/TODO;Task 9 走查扩展函数为自包含代码,注明与既有脚本命名的接线方式。
+
+---
+
+## 执行记录(M11)
+
+**2026-09-18 SDD 执行完毕(10 任务,12 提交未推送:012afcc spec + 2b02693 计划 + T1~T9 + 本记录提交):**
+
+| 任务 | 提交 | 结果 |
+|---|---|---|
+| T1 ApiKey.role 能力位 | 8138cf9 | review Approved |
+| T2 key_role 传播 + 守卫 helper(小项②) | 796795d | review Approved |
+| T3 doc_ops 服务 + Web 薄壳/删除 + worker 早退 | 0d9adb2 | review Approved |
+| T4 REST 文档五端点 | 7d97d6a | review Approved |
+| T5 MCP 五工具 + README | adace49 | review Approved |
+| T6 前端角色选择/徽标 + 删除 UI | dfffe30 | review Approved,前端零后端改动 |
+| T7 配额原子化 + 余量端点(小项①⑥) | 31e47bf | review Approved |
+| T8 杂项清偿(小项③④⑤) | 41f18b9 | review Approved |
+| T9 验收脚本 + 走查扩展 + README 增补 | 757445d | review Approved,真栈 10/10 PASS |
+| T10 全量回归 + 执行记录 | 本提交 | 247P/0F + build 零错误 + 验收复跑 10/10 |
+
+全部任务 review Approved 且零 Critical/Important 发现,**全程零修复波**(M10 终审曾有一波,M11 无)。
+
+**用例数推进**:219 → 222(T1)→ 223(T2)→ 231(T3)→ 236(T4)→ 239(T5)→ 239(T6 前端零后端改动)→ 245(T7)→ 247(T8)→ 247(T9 脚本)→ 247(T10 收口回归)。
+
+**实现者主动修正(均经 reviewer 复核采纳)**:
+1. T1 补 `ApiKeyCreatedOut` 手工构造 role(ORM 对象转 Pydantic 不自动带新字段)。
+2. T3 monkeypatch 重定向 doc_ops + Web 上传保留 ocr Literal。
+3. T5 `_e` 改 `"{code}: {detail}"` 映射(简报自相矛盾,spec E 权威)。
+4. T6 修复 KeysPage.spec.ts(前端其实有 vitest,计划"前端无单测"前提过时)。
+5. T9 验收 10/10(计划正文写 9/9 系笔误)。
+
+**控制者裁决**:
+1. T4 ocr Literal(与 T3 Web 上传同型处理)。
+2. T9 前 dev 栈重启:旧实例 reloader 已死、新路由 404,按 M10 教训先杀再起(controller 于 41f18b9 后重启 backend 8001 + celery worker;其后提交均为 docs/scripts,--reload 自热载,T10 验收复跑未再重启)。
+
+**顺延小项(终审 triage,全部不阻塞)**:README 周边文案仍写"只读开放";验收审计断言无 SUFFIX 过滤;走查 M11 段不进 RESULTS;DELETABLE==REPROCESSABLE;list_documents total 为截断计数;MCP ask except 分支无专项测试;`_e` 409 字符串耦合;其余见各任务 minor 行。
+
+**测试基线(T10 收口实测)**:后端 **247 passed / 0 failed**(M10 基线 219 + 净 28);前端 `npm run build`(vue-tsc + vite)零错误;真栈验收 `scripts\m11_acceptance.py` 复跑 **10/10 PASS**(live dev 栈 8001)。
