@@ -8,6 +8,7 @@ from app.services.api_keys import (
     KeyRejected,
     generate_api_key,
     hash_api_key,
+    issue_api_key,
     resolve_api_key,
 )
 
@@ -76,3 +77,13 @@ async def test_resolve_expired(db_session):
     with pytest.raises(KeyRejected) as e:
         await resolve_api_key(db_session, raw)
     assert e.value.code == "key_expired"
+
+
+async def test_issue_api_key_role_passthrough(client, auth_headers, db_session):
+    me = await client.get("/api/auth/me", headers=auth_headers)
+    user = await db_session.get(User, me.json()["id"])
+    key, _raw = await issue_api_key(db_session, user, "编辑key", 1, role="editor")
+    assert key.role == "editor"
+    key2, _raw2 = await issue_api_key(db_session, user, "默认key", 1)
+    assert key2.role == "read_only"
+    await db_session.commit()

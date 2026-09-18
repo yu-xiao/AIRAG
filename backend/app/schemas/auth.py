@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -30,12 +31,14 @@ class TokenOut(BaseModel):
 class ApiKeyCreateIn(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     expires_in_days: int | None = Field(default=None, ge=1, le=3650)  # None=永久
+    role: Literal["read_only", "editor"] = "read_only"
 
 
 class ApiKeyOut(BaseModel):
     id: int
     name: str
     key_prefix: str
+    role: str
     is_active: bool
     expires_at: datetime | None
     last_used_at: datetime | None

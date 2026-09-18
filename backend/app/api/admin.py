@@ -76,7 +76,7 @@ async def admin_create_api_key(
         raise HTTPException(status_code=400, detail="target user is disabled")
     try:
         key, raw = await issue_api_key(db, target, payload.name,
-                                       payload.expires_in_days)
+                                       payload.expires_in_days, payload.role)
     except KeyQuotaExceeded:
         raise HTTPException(status_code=409, detail="api key limit reached")
     await audit(
@@ -89,6 +89,7 @@ async def admin_create_api_key(
         id=key.id,
         name=key.name,
         key_prefix=key.key_prefix,
+        role=key.role,
         is_active=key.is_active,
         expires_at=key.expires_at,
         last_used_at=key.last_used_at,

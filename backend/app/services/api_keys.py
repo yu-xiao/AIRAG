@@ -37,7 +37,8 @@ class KeyQuotaExceeded(Exception):
 
 
 async def issue_api_key(
-    db: AsyncSession, user: User, name: str, expires_in_days: int | None
+    db: AsyncSession, user: User, name: str, expires_in_days: int | None,
+    role: str = "read_only",
 ) -> tuple[ApiKey, str]:
     """配额检查 + 生成落库(仅 flush,不 commit);返回 (ApiKey 行, 明文)。
 
@@ -58,6 +59,7 @@ async def issue_api_key(
         name=name,
         key_prefix=prefix,
         key_hash=digest,
+        role=role,
         expires_at=(
             datetime.now(timezone.utc) + timedelta(days=expires_in_days)
             if expires_in_days

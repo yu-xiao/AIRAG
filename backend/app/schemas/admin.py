@@ -10,6 +10,7 @@ class AdminKeyCreateIn(BaseModel):
     user_id: int
     name: str = Field(min_length=1, max_length=64)
     expires_in_days: int | None = Field(default=None, ge=1, le=3650)
+    role: Literal["read_only", "editor"] = "read_only"
 
 
 class AdminUserOut(BaseModel):

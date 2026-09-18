@@ -110,3 +110,19 @@ async def test_user_id_required_422(client, auth_headers, db_session):
         "/api/admin/keys", json={"name": "x"}, headers=auth_headers
     )
     assert resp.status_code == 422
+
+
+async def test_admin_issue_key_with_role(client, auth_headers, db_session):
+    me = await client.get("/api/auth/me", headers=auth_headers)
+    await db_session.execute(
+        text("UPDATE users SET role = 'admin' WHERE id = :i"),
+        {"i": me.json()["id"]},
+    )
+    await db_session.commit()
+    r = await client.post(
+        "/api/admin/keys",
+        json={"user_id": me.json()["id"], "name": "代发编辑", "role": "editor"},
+        headers=auth_headers,
+    )
+    assert r.status_code == 201
+    assert r.json()["role"] == "editor"

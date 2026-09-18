@@ -74,3 +74,20 @@ async def test_api_key_cannot_create_key(client, auth_headers):
         headers={"Authorization": f"Bearer {created['key']}"},
     )
     assert resp.status_code == 401  # get_current_user 只认 JWT
+
+
+async def test_create_key_with_role_and_default(client, auth_headers):
+    r = await client.post("/api/auth/keys",
+                          json={"name": "编辑", "role": "editor"},
+                          headers=auth_headers)
+    assert r.status_code == 201
+    assert r.json()["role"] == "editor"
+    r2 = await client.post("/api/auth/keys", json={"name": "默认"}, headers=auth_headers)
+    assert r2.status_code == 201
+    assert r2.json()["role"] == "read_only"
+    r3 = await client.post("/api/auth/keys",
+                           json={"name": "坏角色", "role": "admin"},
+                           headers=auth_headers)
+    assert r3.status_code == 422
+    lst = await client.get("/api/auth/keys", headers=auth_headers)
+    assert all("role" in k for k in lst.json())

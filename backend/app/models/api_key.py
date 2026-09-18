@@ -18,5 +18,8 @@ class ApiKey(Base, TimestampMixin):
     key_prefix: Mapped[str] = mapped_column(String(16), unique=True, index=True)
     key_hash: Mapped[str] = mapped_column(String(64))  # sha256 hex,不存明文
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # M11:能力位;read_only=只读检索/问答,editor=可写文档(仍受用户 KB 权限约束)
+    role: Mapped[str] = mapped_column(String(16), default="read_only",
+                                      server_default="read_only")
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

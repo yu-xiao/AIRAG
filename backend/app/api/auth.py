@@ -73,7 +73,7 @@ async def create_api_key(
 ):
     try:
         key, raw = await issue_api_key(db, current, payload.name,
-                                       payload.expires_in_days)
+                                       payload.expires_in_days, payload.role)
     except KeyQuotaExceeded:
         raise HTTPException(status_code=409, detail="api key limit reached")
     await audit(db, current.username, "key_create", f"apikey:{key.id}",
@@ -85,6 +85,7 @@ async def create_api_key(
         id=key.id,
         name=key.name,
         key_prefix=key.key_prefix,
+        role=key.role,
         is_active=key.is_active,
         expires_at=key.expires_at,
         last_used_at=key.last_used_at,
