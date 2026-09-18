@@ -164,3 +164,5 @@ async def test_api_429(client, auth_headers, monkeypatch):
     detail = resp2.json()["detail"]
     assert detail["code"] == "rate_limited" and detail["retry_after"] >= 1
     assert int(resp2.headers["Retry-After"]) >= 1
+    key_id = (await client.get("/api/auth/keys", headers=auth_headers)).json()[0]["id"]
+    assert f"agent_rl:{key_id}" in r.z

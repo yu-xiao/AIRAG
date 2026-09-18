@@ -133,8 +133,11 @@ class TokenMeter(BaseCallbackHandler):
                 if tu:
                     got = int(tu.get("total_tokens") or 0)
             self.total += got
+            if got == 0:
+                logger.warning("token meter: no usage on llm response, counted 0")
         except Exception:
-            logger.warning("token meter: usage unreadable, counted as 0")
+            logger.warning("token meter: usage unreadable, counted as 0",
+                           exc_info=True)
 
 
 _ask_graph = None

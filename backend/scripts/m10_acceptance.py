@@ -213,7 +213,7 @@ async def main():
                        or "8500" in body.get("answer", ""))
                   and body.get("refused") is False
                   and len(body.get("citations", [])) >= 1
-                  and isinstance(body.get("tokens_used"), int)
+                  and body.get("tokens_used", 0) > 0
                   and isinstance(body.get("elapsed_ms"), int),
                   r.text[:300])
 
