@@ -7,11 +7,41 @@ from app.services import agent_ratelimit
 from app.services.agent_ratelimit import allow
 
 
+class FakePipeline:
+    def __init__(self, r: "FakeRedis"):
+        self.r = r
+        self.ops: list[tuple] = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    def incrby(self, key, amount):
+        self.ops.append(("incrby", key, amount))
+        return self
+
+    def expire(self, key, ttl):
+        self.ops.append(("expire", key, ttl))
+        return self
+
+    async def execute(self):
+        for op in self.ops:
+            if op[0] == "incrby":
+                await self.r.incrby(op[1], op[2])
+            else:
+                await self.r.expire(op[1], op[2])
+        self.r.pipeline_calls += 1
+        return True
+
+
 class FakeRedis:
     def __init__(self, fail=False):
         self.z: dict[str, dict[str, float]] = {}
         self.kv: dict[str, int] = {}
         self.fail = fail
+        self.pipeline_calls = 0
 
     async def _check(self):
         if self.fail:
@@ -46,6 +76,9 @@ class FakeRedis:
         await self._check()
         self.kv[key] = int(self.kv.get(key, 0)) + amount
         return self.kv[key]
+
+    def pipeline(self, transaction: bool = True):
+        return FakePipeline(self)
 
 
 @pytest.fixture
@@ -136,6 +169,38 @@ async def test_quota_consume_failure_silent(monkeypatch):
     monkeypatch.setattr(agent_ratelimit, "get_redis",
                         lambda: FakeRedis(fail=True))
     await agent_ratelimit.quota_consume(5, 50)  # 不得抛
+
+
+# ---- M11:小项① pipeline 原子化 + 小项⑥ 余量查询 ----
+
+async def test_quota_consume_uses_pipeline(fake_redis, monkeypatch):
+    monkeypatch.setattr(settings, "AGENT_ASK_DAILY_TOKENS", 100)
+    await agent_ratelimit.quota_consume(31, 42)
+    assert fake_redis.pipeline_calls == 1
+    key = next(k for k in fake_redis.kv if k.startswith("agent_tq:31:"))
+    assert fake_redis.kv[key] == 42
+
+
+async def test_quota_remaining_values(fake_redis, monkeypatch):
+    monkeypatch.setattr(settings, "AGENT_ASK_DAILY_TOKENS", 100)
+    await agent_ratelimit.quota_consume(32, 30)
+    out = await agent_ratelimit.quota_remaining(32)
+    assert out["used"] == 30 and out["limit"] == 100
+    assert out["reset_at"]  # ISO 字符串
+
+
+async def test_quota_remaining_degrades_open(monkeypatch):
+    monkeypatch.setattr(settings, "AGENT_ASK_DAILY_TOKENS", 100)
+    monkeypatch.setattr(agent_ratelimit, "get_redis",
+                        lambda: FakeRedis(fail=True))
+    out = await agent_ratelimit.quota_remaining(33)
+    assert out["used"] is None and out["limit"] == 100
+
+
+async def test_quota_remaining_disabled(fake_redis, monkeypatch):
+    monkeypatch.setattr(settings, "AGENT_ASK_DAILY_TOKENS", 0)
+    out = await agent_ratelimit.quota_remaining(34)
+    assert out["limit"] == 0 and out["used"] is None
 
 
 async def test_api_429(client, auth_headers, monkeypatch):

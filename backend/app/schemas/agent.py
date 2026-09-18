@@ -52,3 +52,9 @@ class AgentAskOut(BaseModel):
     refused: bool
     tokens_used: int
     elapsed_ms: int
+
+
+class AgentQuotaOut(BaseModel):
+    used: int | None  # None=禁用或 Redis 降级
+    limit: int
+    reset_at: str

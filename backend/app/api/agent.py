@@ -22,6 +22,7 @@ from app.schemas.agent import (
     AgentHitOut,
     AgentKbListOut,
     AgentKbOut,
+    AgentQuotaOut,
     AgentSearchIn,
     AgentSearchOut,
 )
@@ -31,6 +32,7 @@ from app.services.agent_ratelimit import (
     allow as rate_allow,
     quota_check,
     quota_consume,
+    quota_remaining,
 )
 from app.services.audit import audit
 
@@ -153,6 +155,18 @@ async def agent_ask(
         refused=outcome.refused, tokens_used=outcome.tokens_used,
         elapsed_ms=outcome.elapsed_ms,
     )
+
+
+@router.get("/quota", response_model=AgentQuotaOut)
+async def agent_quota(
+    principal: Principal = Depends(get_agent_principal),
+):
+    """M11 小项⑥:今日 token 配额余量(仅 api_key;轮询不烧限流预算)。"""
+    key_id = _api_key_id(principal)
+    if key_id is None:
+        raise HTTPException(status_code=403,
+                            detail="api key principal required")
+    return await quota_remaining(key_id)
 
 
 # ---- M11:文档写操作五端点(读:可见即可;写:key=editor ∧ perm≥editor) ----

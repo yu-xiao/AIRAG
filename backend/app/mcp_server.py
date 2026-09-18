@@ -28,6 +28,7 @@ from app.services.agent_ratelimit import (
     allow as rate_allow,
     quota_check,
     quota_consume,
+    quota_remaining,
 )
 from app.services.audit import audit
 
@@ -378,6 +379,21 @@ async def reprocess_document(doc_id: int) -> dict:
             raise _e(e)
         return {"id": out.id, "filename": out.filename, "status": out.status,
                 "chunk_count": out.chunk_count}
+
+
+_QUOTA_DOC = """查询当前密钥今日 ask token 配额余量。
+
+Returns:
+    {"used", "limit", "reset_at"};used=null 表示禁用或 Redis 降级。
+"""
+
+
+@mcp.tool(description=_QUOTA_DOC)
+async def get_quota() -> dict:
+    key_id = _api_key_id(_principal())
+    if key_id is None:
+        raise ToolError("api key principal required")
+    return await quota_remaining(key_id)
 
 
 class AgentAuthMiddleware:

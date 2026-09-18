@@ -77,13 +77,35 @@ async def quota_check(key_id: int) -> tuple[bool, int]:
 
 
 async def quota_consume(key_id: int, tokens: int) -> None:
-    """ask 完成后累计;软上限(check 前置,单次可小幅越限,spec 明示)。"""
+    """ask 完成后累计;软上限(check 前置,单次可小幅越限,spec 明示)。
+    M11 小项①:INCRBY+EXPIRE 合入单条 pipeline(非事务,减往返;
+    原子性诉求有限——两命令间崩溃最多少设一次 TTL,次日 key 换日后自愈)。"""
     if settings.AGENT_ASK_DAILY_TOKENS <= 0:
         return
     rkey, ttl = _quota_key(key_id)
     try:
         r = get_redis()
-        await r.incrby(rkey, tokens)
-        await r.expire(rkey, ttl)
+        async with r.pipeline(transaction=False) as p:
+            p.incrby(rkey, tokens)
+            p.expire(rkey, ttl)
+            await p.execute()
     except Exception:
         pass
+
+
+async def quota_remaining(key_id: int) -> dict:
+    """M11 小项⑥:今日余量;Redis 异常或禁用时 used=None(降级语义)。
+    reset_at 为本地时区次日零点 ISO 串(与 _quota_key 日界同基准)。"""
+    limit = settings.AGENT_ASK_DAILY_TOKENS
+    now = _dt.datetime.now()
+    tomorrow = (now + _dt.timedelta(days=1)).replace(
+        hour=0, minute=0, second=0, microsecond=0)
+    reset_at = tomorrow.isoformat(timespec="seconds")
+    if limit <= 0:
+        return {"used": None, "limit": 0, "reset_at": reset_at}
+    rkey, _ = _quota_key(key_id)
+    try:
+        used = int(await get_redis().get(rkey) or 0)
+        return {"used": used, "limit": limit, "reset_at": reset_at}
+    except Exception:
+        return {"used": None, "limit": limit, "reset_at": reset_at}

@@ -140,3 +140,19 @@ async def test_delete_busy_409(client, auth_headers, db_session):
     db_session.expire_all()
     r = await client.delete(f"/api/agent/documents/{doc_id}", headers=ed)
     assert r.status_code == 409
+
+
+async def test_agent_quota_endpoint(client, auth_headers):
+    from app.core.config import settings
+
+    key = await _create_key_role(client, auth_headers, "配额查询")
+    r = await client.get("/api/agent/quota",
+                         headers={"Authorization": f"Bearer {key}"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["limit"] == settings.AGENT_ASK_DAILY_TOKENS
+    assert body["used"] is None or isinstance(body["used"], int)
+    assert body["reset_at"]
+    r2 = await client.get("/api/agent/quota", headers=auth_headers)
+    assert r2.status_code == 403
+    assert r2.json()["detail"] == "api key principal required"

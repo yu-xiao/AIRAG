@@ -417,3 +417,12 @@ async def test_mcp_write_guard_and_validation(mcp_client, auth_headers):
                            {"kb_id": kb_id, "filename": "a.exe",
                             "content_b64": base64.b64encode(b"x").decode()}, 5)
     assert _is_error(rj3) and "unsupported_type" in _err_text(rj3)
+
+
+# ---- M11 Task7:小项⑥ get_quota ----
+
+async def test_mcp_get_quota(mcp_client, auth_headers):
+    hdr, sid = await _keyed_session(mcp_client, auth_headers)
+    rj = await _tool_call(mcp_client, hdr, sid, "get_quota", {}, 9)
+    body = _tool_result(rj)
+    assert "limit" in body and "reset_at" in body
