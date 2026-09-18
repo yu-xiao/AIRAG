@@ -17,7 +17,11 @@ from app.core.deps import (
 )
 from app.db.session import SessionLocal
 from app.services import agent_facade
-from app.services.agent_ratelimit import allow as rate_allow
+from app.services.agent_ratelimit import (
+    allow as rate_allow,
+    quota_check,
+    quota_consume,
+)
 from app.services.audit import audit
 
 mcp = FastMCP(name="AIRag")
@@ -48,23 +52,30 @@ async def list_knowledge_bases() -> dict:
         return {"items": [asdict(i) for i in items]}
 
 
-@mcp.tool
+_TOP_K_DEFAULT = settings.RETRIEVAL_TOP_K
+
+# 小项④:docstring 默认值与配置同源。注:CPython 只把纯字符串字面量首语句
+# 设为 __doc__,f-string 表达式语句会被静默丢弃(工具描述变 None),
+# 故在模块级求值 f-string 后经 description= 传入,文本与 docstring 逐字一致。
+_SEARCH_DOC = f"""在指定知识库中混合检索(向量 + 关键词,RRF 融合)。
+
+Args:
+    kb_ids: 知识库 id 列表(1~5 个),须为当前密钥有权访问的库。
+    query: 检索问题,1~500 字。
+    top_k: 命中条数上限,1~20,默认 {_TOP_K_DEFAULT}。
+    rerank: 是否启用 rerank 重排(服务端未配置 rerank 时忽略)。
+
+Returns:
+    {{"hits": [{{chunk_id, document_id, kb_id, filename, page_no,
+    content, score, source}}], "total", "elapsed_ms"}}
+"""
+
+
+@mcp.tool(description=_SEARCH_DOC)
 async def search_knowledge_base(
     kb_ids: list[int], query: str,
     top_k: int = settings.RETRIEVAL_TOP_K, rerank: bool = False,
 ) -> dict:
-    """在指定知识库中混合检索(向量 + 关键词,RRF 融合)。
-
-    Args:
-        kb_ids: 知识库 id 列表(1~5 个),须为当前密钥有权访问的库。
-        query: 检索问题,1~500 字。
-        top_k: 命中条数上限,1~20,默认 8。
-        rerank: 是否启用 rerank 重排(服务端未配置 rerank 时忽略)。
-
-    Returns:
-        {"hits": [{chunk_id, document_id, kb_id, filename, page_no,
-        content, score, source}], "total", "elapsed_ms"}
-    """
     p = _principal()
     if not 1 <= len(kb_ids) <= 5:
         raise ToolError("kb_ids must contain 1~5 ids")
@@ -86,6 +97,60 @@ async def search_knowledge_base(
         await db.commit()
         return {"hits": [asdict(h) for h in outcome.hits],
                 "total": len(outcome.hits),
+                "elapsed_ms": outcome.elapsed_ms}
+
+
+@mcp.tool
+async def ask_knowledge_base(
+    kb_ids: list[int], query: str, rerank: bool = False,
+) -> dict:
+    """基于知识库内容直接生成回答(单轮、非流式、带引用)。
+
+    与 search_knowledge_base 的区别:本工具返回服务端生成的完整答案与
+    引用编号(质量与 AIRag Web 端一致,含查询改写/检索自评/多跳兜底),
+    而非检索片段。
+
+    Args:
+        kb_ids: 知识库 id 列表(1~5 个),须为当前密钥有权访问的库。
+        query: 问题,1~500 字。单轮无上下文,追问请携带完整问题。
+        rerank: 是否启用 rerank 重排(服务端未配置 rerank 时忽略)。
+
+    Returns:
+        {"answer", "citations": [{number, chunk_id, document_id,
+        filename, page_no, excerpt}], "refused", "tokens_used",
+        "elapsed_ms"}。refused=true 表示知识库中未找到相关内容。
+        内部多步 LLM 调用,耗时可达 40~90 秒,客户端超时请设充足
+        (如 Claude Code 的 MCP_TIMEOUT)。
+    """
+    p = _principal()
+    if not 1 <= len(kb_ids) <= 5:
+        raise ToolError("kb_ids must contain 1~5 ids")
+    if not 1 <= len(query) <= 500:
+        raise ToolError("query must be 1~500 chars")
+    if p.kind == "api_key" and p.key_id is not None:
+        ok, retry_after = await quota_check(p.key_id)
+        if not ok:
+            raise ToolError(f"quota_exhausted, retry_after={retry_after}s")
+    async with SessionLocal() as db:
+        try:
+            outcome = await agent_facade.agent_ask(
+                db, p.user, kb_ids, query, rerank,
+            )
+        except agent_facade.AgentKbDenied as e:
+            raise ToolError(f"kb_forbidden, denied_kb_ids={e.denied_kb_ids}")
+        if p.kind == "api_key" and p.key_id is not None:
+            await quota_consume(p.key_id, outcome.tokens_used)
+        await audit(db, p.user.username, "agent.ask", "agent",
+                    {"client": "mcp", "key_name": p.key_name,
+                     "kb_ids": kb_ids, "query": query[:200],
+                     "refused": outcome.refused,
+                     "tokens": outcome.tokens_used,
+                     "elapsed_ms": outcome.elapsed_ms},
+                    ip=current_client_ip.get())
+        await db.commit()
+        return {"answer": outcome.answer, "citations": outcome.citations,
+                "refused": outcome.refused,
+                "tokens_used": outcome.tokens_used,
                 "elapsed_ms": outcome.elapsed_ms}
 
 
@@ -130,8 +195,12 @@ class AgentAuthMiddleware:
         if principal.kind == "api_key":
             ok, retry_after = await rate_allow(f"key:{principal.key_id}")
             if not ok:
-                await _send_json(send, 429, {"detail": {
-                    "code": "rate_limited", "retry_after": retry_after}})
+                await _send_json(
+                    send, 429,
+                    {"detail": {"code": "rate_limited", "retry_after": retry_after}},
+                    extra_headers=((b"retry-after",
+                                    str(retry_after).encode()),),
+                )
                 return
         client = scope.get("client")  # (host, port);与 api/agent._ip 同语义
         ip = client[0] if client else None
@@ -144,10 +213,12 @@ class AgentAuthMiddleware:
             current_principal.reset(principal_token)
 
 
-async def _send_json(send, status: int, body: dict) -> None:
+async def _send_json(send, status: int, body: dict,
+                     extra_headers: tuple = ()) -> None:
     payload = json.dumps(body).encode()
     await send({"type": "http.response.start", "status": status,
-                "headers": [(b"content-type", b"application/json")]})
+                "headers": [(b"content-type", b"application/json"),
+                            *extra_headers]})
     await send({"type": "http.response.body", "body": payload})
 
 

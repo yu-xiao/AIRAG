@@ -83,7 +83,9 @@ async def test_mcp_initialize_and_tools_list(mcp_client, auth_headers):
                  "mcp-session-id": sid},
     )
     names = [t["name"] for t in resp.json()["result"]["tools"]]
-    assert "list_knowledge_bases" in names and "search_knowledge_base" in names
+    assert "list_knowledge_bases" in names
+    assert "search_knowledge_base" in names
+    assert "ask_knowledge_base" in names
 
 
 async def test_mcp_tool_list_kbs(mcp_client, auth_headers):
@@ -196,3 +198,129 @@ async def test_mcp_rate_limited_429(mcp_client, auth_headers, monkeypatch):
     resp = await mcp_client.post("/mcp", json=INIT, headers=hdr)
     assert resp.status_code == 429
     assert resp.json()["detail"]["code"] == "rate_limited"
+
+
+# ---- M10:ask_knowledge_base ----
+
+async def test_mcp_ask_tool(mcp_client, auth_headers, monkeypatch):
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+
+    from app.services import agent_facade
+    from app.services.chat_graph import nodes
+    from app.services.chat_graph.graph import build_graph
+    from tests.test_agent_api import _create_kb, _create_key
+
+    kb_id = await _create_kb(mcp_client, auth_headers, "MCP问答库")
+    key = await _create_key(mcp_client, auth_headers)
+
+    async def fake_hybrid(db, kb_ids, query, top_k=20):
+        from app.services.retrieval.searcher import SearchHit
+        return [SearchHit(chunk_id=1, document_id=10, kb_id=kb_id,
+                          filename="a.pdf", page_no=1, content="八千五百米",
+                          score=0.9, source="both")]
+
+    monkeypatch.setattr(nodes, "hybrid_search", fake_hybrid)
+    monkeypatch.setattr(agent_facade, "_ask_graph",
+                        build_graph(llm=FakeListChatModel(
+                            responses=["巡航升限为八千五百米。"]),
+                            checkpointer=None))
+    hdr = {"Authorization": f"Bearer {key}"}
+    sid = await _init(mcp_client, hdr)
+    resp = await mcp_client.post(
+        "/mcp",
+        json=_rpc("tools/call",
+                  {"name": "ask_knowledge_base",
+                   "arguments": {"kb_ids": [kb_id], "query": "升限?"}}, 10),
+        headers={"Accept": ACCEPT, **hdr, "mcp-session-id": sid},
+    )
+    body = _tool_result(resp.json())
+    assert body["answer"] == "巡航升限为八千五百米。"
+    assert body["refused"] is False and body["tokens_used"] == 0
+    assert {"citations", "elapsed_ms"} <= set(body)
+
+
+async def test_mcp_ask_quota_toolerror(mcp_client, auth_headers, monkeypatch):
+    from app.core.config import settings
+    from app.services import agent_ratelimit
+    from tests.test_agent_api import _create_kb, _create_key
+    from tests.test_agent_ratelimit import FakeRedis
+
+    kb_id = await _create_kb(mcp_client, auth_headers, "MCP配额库")
+    key = await _create_key(mcp_client, auth_headers)
+    key_id = (await mcp_client.get("/api/auth/keys",
+                                   headers=auth_headers)).json()[0]["id"]
+    fake_redis = FakeRedis()
+    monkeypatch.setattr(agent_ratelimit, "get_redis", lambda: fake_redis)
+    monkeypatch.setattr(settings, "AGENT_ASK_DAILY_TOKENS", 100)
+    await agent_ratelimit.quota_consume(key_id, 100)
+
+    hdr = {"Authorization": f"Bearer {key}"}
+    sid = await _init(mcp_client, hdr)
+    resp = await mcp_client.post(
+        "/mcp",
+        json=_rpc("tools/call",
+                  {"name": "ask_knowledge_base",
+                   "arguments": {"kb_ids": [kb_id], "query": "q"}}, 11),
+        headers={"Accept": ACCEPT, **hdr, "mcp-session-id": sid},
+    )
+    text = resp.json()["result"]["content"][0]["text"]
+    assert "quota_exhausted" in text and "retry_after" in text
+
+
+async def test_mcp_429_retry_after_header(mcp_client, auth_headers,
+                                          monkeypatch):
+    from app.core.config import settings
+    from app.services import agent_ratelimit
+    from tests.test_agent_api import _create_key
+    from tests.test_agent_ratelimit import FakeRedis
+
+    key = await _create_key(mcp_client, auth_headers)
+    monkeypatch.setattr(settings, "AGENT_RATE_LIMIT_PER_MIN", 1)
+    fake_redis = FakeRedis()
+    monkeypatch.setattr(agent_ratelimit, "get_redis", lambda: fake_redis)
+    hdr = {"Authorization": f"Bearer {key}", "Accept": ACCEPT}
+    assert (await mcp_client.post("/mcp", json=INIT, headers=hdr)).status_code == 200
+    resp = await mcp_client.post("/mcp", json=INIT, headers=hdr)
+    assert resp.status_code == 429
+    assert int(resp.headers["Retry-After"]) >= 1
+
+
+async def test_mcp_key_last_used_at_updated(mcp_client, auth_headers,
+                                            db_session):
+    """小项⑤:MCP 面经中间件显式 commit,last_used_at 须落库。"""
+    from sqlalchemy import select
+
+    from app.models import ApiKey
+    from tests.test_agent_api import _create_key
+
+    key = await _create_key(mcp_client, auth_headers)
+    hdr = {"Authorization": f"Bearer {key}"}
+    sid = await _init(mcp_client, hdr)
+    await mcp_client.post(
+        "/mcp", json=_rpc("tools/list", {}, 12),
+        headers={"Accept": ACCEPT, **hdr, "mcp-session-id": sid},
+    )
+    db_session.expire_all()  # AsyncSession.expire_all 为同步方法,不可 await
+    row = (await db_session.execute(select(ApiKey))).scalars().one()
+    assert row.last_used_at is not None
+
+
+async def test_mcp_tool_descriptions_present(mcp_client, auth_headers):
+    """小项④:描述须随 tools/list 下发,search 默认值与配置同源
+    (f-string 首语句不会成为 __doc__,曾致描述静默丢失)。"""
+    from app.core.config import settings
+    from tests.test_agent_api import _create_key
+
+    key = await _create_key(mcp_client, auth_headers)
+    hdr = {"Authorization": f"Bearer {key}"}
+    sid = await _init(mcp_client, hdr)
+    resp = await mcp_client.post(
+        "/mcp", json=_rpc("tools/list", {}, 13),
+        headers={"Accept": ACCEPT, **hdr, "mcp-session-id": sid},
+    )
+    tools = {t["name"]: t for t in resp.json()["result"]["tools"]}
+    for name in ("list_knowledge_bases", "search_knowledge_base",
+                 "ask_knowledge_base"):
+        assert tools[name].get("description"), name
+    assert f"默认 {settings.RETRIEVAL_TOP_K}" in \
+        tools["search_knowledge_base"]["description"]
