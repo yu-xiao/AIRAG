@@ -23,11 +23,11 @@ vi.mock('@/api/users', () => ({
 
 const items: ApiKeyItem[] = [
   {
-    id: 1, name: 'Cursor 工作机', key_prefix: 'airag_AbCdEf', is_active: true,
+    id: 1, name: 'Cursor 工作机', key_prefix: 'airag_AbCdEf', role: 'editor', is_active: true,
     expires_at: null, last_used_at: null, created_at: '2026-09-17T10:00:00',
   },
   {
-    id: 2, name: '旧密钥', key_prefix: 'airag_XyZwVu', is_active: false,
+    id: 2, name: '旧密钥', key_prefix: 'airag_XyZwVu', role: 'read_only', is_active: false,
     expires_at: null, last_used_at: null, created_at: '2026-09-16T10:00:00',
   },
 ]
@@ -68,6 +68,7 @@ describe('KeysPage', () => {
     await flushPromises()
     expect(keysApi.create).toHaveBeenCalledWith({
       name: '新密钥',
+      role: 'read_only',
       expires_in_days: null,
     })
     await vi.waitFor(() => {
@@ -109,7 +110,7 @@ describe('KeysPage', () => {
     await findBtn(w, '创建').trigger('click')
     await flushPromises()
     expect(keysApi.createAdmin).toHaveBeenCalledWith({
-      user_id: 7, name: '代管key', expires_in_days: null,
+      user_id: 7, name: '代管key', role: 'read_only', expires_in_days: null,
     })
     expect(keysApi.create).not.toHaveBeenCalled()
     await vi.waitFor(() => {

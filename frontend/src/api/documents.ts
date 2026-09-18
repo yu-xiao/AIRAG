@@ -73,4 +73,8 @@ export const documentsApi = {
     const { data } = await http.post<DocumentItem>(`/documents/${docId}/reprocess`)
     return data
   },
+
+  async remove(docId: number): Promise<void> {
+    await http.delete(`/documents/${docId}`)
+  },
 }

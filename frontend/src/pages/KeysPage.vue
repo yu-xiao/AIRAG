@@ -19,6 +19,7 @@ const form = reactive({
   name: '',
   expires: 'permanent' as 'permanent' | '7' | '30' | '90',
   userId: null as number | null,
+  role: 'read_only' as 'read_only' | 'editor',
 })
 const rules: FormRules = {
   name: [
@@ -53,6 +54,7 @@ function openCreate() {
   form.name = ''
   form.expires = 'permanent'
   form.userId = null
+  form.role = 'read_only'
   userOptions.value = []
   boundUsername.value = null
   formRef.value?.resetFields()
@@ -81,6 +83,7 @@ async function submit(formEl: FormInstance | undefined) {
   try {
     const payload = {
       name: form.name,
+      role: form.role,
       expires_in_days:
         form.expires === 'permanent' ? null : Number(form.expires),
     }
@@ -96,6 +99,7 @@ async function submit(formEl: FormInstance | undefined) {
     form.name = ''
     form.expires = 'permanent'
     form.userId = null
+    form.role = 'read_only'
     await load()
   } catch (e) {
     ElMessage.error(errMsg(e, '创建失败'))
@@ -136,7 +140,7 @@ onMounted(load)
 
 <template>
   <div class="page">
-    <PageHeader title="API 密钥" description="供外部 Agent(MCP / REST)访问知识库的凭证,权限与你当前账号一致。">
+    <PageHeader title="API 密钥" description="供外部 Agent(MCP / REST)访问知识库的凭证;编辑型密钥还可上传/删除/重解析文档。">
       <template #actions>
         <el-button type="primary" @click="openCreate">创建密钥</el-button>
       </template>
@@ -146,6 +150,13 @@ onMounted(load)
       <el-table v-loading="loading" :data="items">
         <el-table-column prop="name" label="名称" min-width="140" />
         <el-table-column prop="key_prefix" label="前缀" min-width="140" />
+        <el-table-column label="类型" width="90" align="center">
+          <template #default="{ row }">
+            <el-tag :type="row.role === 'editor' ? 'warning' : 'info'" size="small">
+              {{ row.role === 'editor' ? '编辑' : '只读' }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="状态" width="100">
           <template #default="{ row }">
             <el-tag :type="row.is_active ? 'success' : 'info'" size="small">
@@ -193,6 +204,12 @@ onMounted(load)
           >
             <el-option v-for="u in userOptions" :key="u.id" :label="u.username" :value="u.id" />
           </el-select>
+        </el-form-item>
+        <el-form-item label="密钥类型">
+          <el-radio-group v-model="form.role">
+            <el-radio value="read_only">只读(检索/问答)</el-radio>
+            <el-radio value="editor">编辑(可维护文档)</el-radio>
+          </el-radio-group>
         </el-form-item>
         <el-form-item label="有效期">
           <el-radio-group v-model="form.expires">

@@ -5,6 +5,7 @@ export interface ApiKeyItem {
   id: number
   name: string
   key_prefix: string
+  role: 'read_only' | 'editor'
   is_active: boolean
   expires_at: string | null
   last_used_at: string | null
@@ -14,12 +15,14 @@ export interface ApiKeyItem {
 export interface ApiKeyCreatePayload {
   name: string
   expires_in_days?: number | null
+  role?: 'read_only' | 'editor'
 }
 
 export interface AdminKeyCreatePayload {
   user_id: number
   name: string
   expires_in_days?: number | null
+  role?: 'read_only' | 'editor'
 }
 
 /** 创建响应:唯一一次携带明文 key */

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, type UploadRawFile, type UploadRequestOptions } from 'element-plus'
+import { ElMessage, ElMessageBox, type UploadRawFile, type UploadRequestOptions } from 'element-plus'
 import { ArrowLeft, Search } from '@element-plus/icons-vue'
 import { documentsApi, type ChunksResponse, type DocumentItem } from '@/api/documents'
 import { kbApi } from '@/api/kb'
@@ -173,6 +173,33 @@ async function reprocess(row: DocumentItem) {
   }
 }
 
+// ---- 删除(editor+;级联删全部分块与向量)----
+const DELETABLE = ['pending', 'done', 'failed']
+const deleting = ref<number | null>(null)
+
+async function delDoc(row: DocumentItem) {
+  try {
+    await ElMessageBox.confirm(
+      `确定删除「${row.filename}」?该操作不可恢复,将同时删除其全部分块与向量。`,
+      '删除文档',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  deleting.value = row.id
+  try {
+    await documentsApi.remove(row.id)
+    ElMessage.success(`「${row.filename}」已删除`)
+    await load()
+  } catch (e) {
+    const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+    ElMessage.error(detail ?? '删除失败')
+  } finally {
+    deleting.value = null
+  }
+}
+
 function fmtTime(iso: string) {
   return iso.replace('T', ' ').slice(0, 19)
 }
@@ -279,7 +306,7 @@ onUnmounted(() => {
       <el-table-column label="上传时间" width="180">
         <template #default="{ row }">{{ fmtTime(row.created_at) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="170" align="center">
+      <el-table-column label="操作" width="230" align="center">
         <template #default="{ row }">
           <el-button link type="primary" @click="openChunks(row)">查看分块</el-button>
           <el-button
@@ -290,6 +317,15 @@ onUnmounted(() => {
             @click="reprocess(row)"
           >
             重新解析
+          </el-button>
+          <el-button
+            v-if="canEdit && DELETABLE.includes(row.status)"
+            link
+            type="danger"
+            :loading="deleting === row.id"
+            @click="delDoc(row)"
+          >
+            删除
           </el-button>
         </template>
       </el-table-column>
