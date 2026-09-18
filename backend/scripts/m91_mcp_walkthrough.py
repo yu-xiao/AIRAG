@@ -4,7 +4,8 @@
     .venv\\Scripts\\python scripts\\m91_mcp_walkthrough.py <airag_key> [query]
 
 覆盖:initialize 握手、tools/list、list_knowledge_bases、search_knowledge_base
-真调、无权库 ToolError 文案。退出码 1 = 走查失败。
+真调、ask_knowledge_base 真调(答案或拒答)、无权库 ToolError 文案。
+退出码 1 = 走查失败。
 """
 import asyncio
 import json
@@ -43,6 +44,7 @@ async def main():
         names = [t.name for t in tool_list]
         check("tools/list 两工具", "list_knowledge_bases" in names
               and "search_knowledge_base" in names, str(names))
+        check("tools/list 含 ask 工具", "ask_knowledge_base" in names, str(names))
 
         r1 = await c.call_tool("list_knowledge_bases", {})
         kbs = json.loads(_text(r1))["items"]
@@ -55,6 +57,17 @@ async def main():
         body = json.loads(_text(r2))
         check("search_knowledge_base 返回结构",
               {"hits", "total", "elapsed_ms"} <= set(body), _text(r2)[:200])
+
+        r4 = await c.call_tool(
+            "ask_knowledge_base", {"kb_ids": [kb_id], "query": query}
+        )
+        body4 = json.loads(_text(r4))
+        check("ask_knowledge_base 返回结构",
+              {"answer", "citations", "refused", "tokens_used",
+               "elapsed_ms"} <= set(body4), _text(r4)[:200])
+        check("ask 答案非空或拒答",
+              bool(body4["answer"]) or body4["refused"] is True,
+              _text(r4)[:200])
 
         try:
             r3 = await c.call_tool(

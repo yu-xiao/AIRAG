@@ -34,9 +34,9 @@ Redis:worker 需要 Redis(本机 6379 已有服务)。若该服务设置了 requ
 
 审计清理 beat(M6 起):Windows 不能用 worker -B 内嵌,另开窗口运行 backend\start_beat.bat(每日 03:00 清理,`AUDIT_RETENTION_DAYS` 默认 180 天,0=禁用;不开 beat 时可用 admin 手动 purge 端点)。
 
-## 外部 Agent 接入(M9)
+## 外部 Agent 接入(M9/M10)
 
-知识库可通过 API Key 只读开放给外部 Agent(检索 + 知识库发现)。密钥在「API 密钥」页面创建,权限与创建者账号一致,可随时吊销。
+知识库可通过 API Key 只读开放给外部 Agent(知识库发现 + 检索 + RAG 问答)。密钥在「API 密钥」页面创建,权限与创建者账号一致,可随时吊销。
 
 ### 1. 创建密钥
 登录 Web → 左侧「API 密钥」→ 创建(明文只显示一次)。管理员可在创建对话框的「绑定账号」下拉中把密钥发给任意账号(权限与配额按目标账号,审计记录 by/to)。
@@ -45,7 +45,7 @@ Redis:worker 需要 Redis(本机 6379 已有服务)。若该服务设置了 requ
 ```bash
 claude mcp add --transport http airag http://<host>:8001/mcp --header "Authorization: Bearer airag_xxxx"
 ```
-可用工具:`list_knowledge_bases` / `search_knowledge_base`。
+可用工具:`list_knowledge_bases` / `search_knowledge_base` / `ask_knowledge_base`(直接生成答案+引用,单轮无上下文,内部多步 LLM 耗时 40~90 秒,客户端超时请设充足,如 Claude Code 的 `MCP_TIMEOUT`)。
 
 ### 3. REST 客户端(Dify / Coze / 内部系统)
 OpenAPI 文档:`http://<host>:8001/openapi.json`(tag `agent`)。
@@ -56,7 +56,12 @@ curl -H "Authorization: Bearer airag_xxxx" http://127.0.0.1:8001/api/agent/kbs
 curl -X POST -H "Authorization: Bearer airag_xxxx" -H "Content-Type: application/json" \
   -d '{"kb_ids":[1],"query":"退货流程","top_k":8}' \
   http://127.0.0.1:8001/api/agent/search
+# RAG 问答(非流式,返回 answer/citations/refused/tokens_used;40~90s)
+curl -X POST -H "Authorization: Bearer airag_xxxx" -H "Content-Type: application/json" \
+  -d '{"kb_ids":[1],"query":"退货流程"}' \
+  http://127.0.0.1:8001/api/agent/ask
 ```
 
 ### 限流与审计
 每密钥每分钟 `AGENT_RATE_LIMIT_PER_MIN`(默认 60)次;所有调用记入审计日志(action `agent.*`)。紧急关闭:`AGENT_API_ENABLED=false` 后重启。
+ask 按 key 每日 token 配额 `AGENT_ASK_DAILY_TOKENS`(默认 200000,0=禁用),超限 429 附 `Retry-After` 头(到次日零点)。
