@@ -62,7 +62,9 @@ async def _run(document_id: int, db_url: str) -> None:
         async with async_sessionmaker(engine, expire_on_commit=False)() as session:
             doc = await session.get(Document, document_id)
             if doc is None:
-                raise RuntimeError(f"document {document_id} not found")
+                # M11:pending→pick 前被删除的文档——静默退出不重试
+                logger.info(f"document {document_id} gone, skip")
+                return
             file_path = Path(doc.file_path)
             if not file_path.exists():
                 raise FileNotFoundError(f"missing file: {doc.file_path}")

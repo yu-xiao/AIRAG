@@ -61,3 +61,10 @@ async def test_mark_failed_sets_state(client, auth_headers, db_session):
     await db_session.refresh(doc)
     assert doc.status == "failed"
     assert "parser exploded" in doc.error_msg
+
+
+async def test_run_missing_doc_silent_exit():
+    """M11:pending→celery pick 前被删的文档,worker 静默退出不重试。"""
+    from app.core.config import settings
+    from app.workers.pipeline import _run
+    await _run(999999999, settings.DATABASE_URL)  # 不得抛

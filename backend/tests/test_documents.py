@@ -159,7 +159,7 @@ async def test_upload_permission_matrix(client, auth_headers, db_session):
 
 
 async def test_reprocess_resets_failed_document(client, auth_headers, db_session, monkeypatch):
-    import app.api.documents as docs_mod
+    import app.services.doc_ops as docs_mod
     from app.models import Chunk, Document, KnowledgeBase
 
     me = await client.get("/api/auth/me", headers=auth_headers)
@@ -230,3 +230,27 @@ async def test_reprocess_requires_editor(client, auth_headers, db_session):
     await db_session.commit()
     resp = await client.post(f"/api/documents/{doc.id}/reprocess", headers=viewer)
     assert resp.status_code == 403
+
+
+# ---- M11:DELETE /api/documents/{doc_id}(editor+,级联) ----
+async def test_web_delete_document(client, auth_headers, db_session):
+    kb = await client.post("/api/kbs", json={"name": "删除库"},
+                           headers=auth_headers)
+    kb_id = kb.json()["id"]
+    up = await client.post(
+        f"/api/kbs/{kb_id}/documents",
+        files={"file": ("a.docx", __import__("io").BytesIO(b"del-me"),
+                        "application/octet-stream")},
+        data={"ocr": "off"}, headers=auth_headers,
+    )
+    assert up.status_code == 201
+    doc_id = up.json()["id"]
+    r = await client.delete(f"/api/documents/{doc_id}", headers=auth_headers)
+    assert r.status_code == 204
+    assert (await client.get(f"/api/documents/{doc_id}",
+                             headers=auth_headers)).status_code == 404
+
+
+async def test_web_delete_visible_only_404(client, auth_headers):
+    r = await client.delete("/api/documents/999999", headers=auth_headers)
+    assert r.status_code == 404
