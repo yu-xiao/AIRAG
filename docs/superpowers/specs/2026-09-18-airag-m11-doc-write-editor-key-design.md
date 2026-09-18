@@ -109,7 +109,7 @@ JWT 调试通道:视为 editor 能力(key_role=None 不拦截),仍受用户 KB �
 
 - `DELETE /api/documents/{doc_id}`:editor+(C 节共享 service,audit `doc_delete`)
 - `DocsPage.vue`:删除按钮(仅 editor/owner 可见)+ 确认对话框(不可逆提示)+ 成功后刷新列表;处理中文档删除按钮禁用(409 对齐)
-- `KeysPage.vue`(自服务)/ `UsersPage.vue`(admin 代发):铸造表单增加"密钥类型"下拉(只读/编辑,默认只读);key 列表增加类型徽标
+- `KeysPage.vue`(自服务与 admin 代发同页,M9.1 起):铸造表单增加"密钥类型"单选(只读/编辑,默认只读);key 列表增加类型徽标(`UsersPage.vue` 无密钥逻辑,零改动)
 - 前端零新页面、零新路由
 
 ## G. M10 顺延小项清单(全部清偿)
