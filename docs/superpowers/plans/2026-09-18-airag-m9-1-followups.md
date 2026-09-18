@@ -1072,3 +1072,14 @@ T1+T2+T3+T4 ─► T5 走查 + 回归收口(依赖全部)
 - **admin 代发的 key 不在 admin 自己列表**:GET /api/auth/keys 仍只列本人;一次性明文对话框已提示绑定账号,勿擅自加"全量密钥列表"(未拍板,YAGNI)。
 - **test_users_api 的分页用例**:库内用户数会随同批用例注册变化,断言只用「页内 2 条」与「两页不相交」,不断言总数。
 - Windows:后端命令一律 `.venv\Scripts\python`;勿裸 uvicorn 起服务(沿用 start_dev.bat)。
+
+## 执行记录(2026-09-18)
+
+- T1~T4 全部完成:后端 `test_users_api.py` 8P + `test_admin_keys.py` 6P,全量 196P;前端 KeysPage 5P / KbPage 3P,全量 22P,type-check 干净。commit:6426d43 / 2125ce6 / 2a04b52 / b212a39。
+- **MCP 真客户端走查通过**(M9 唯一未做的验收步):本机无 claude CLI,按计划用官方参考客户端 + fastmcp.Client 双真客户端完成——
+  - MCP Inspector(`npx @modelcontextprotocol/inspector --cli`,TypeScript SDK):initialize 握手 + Bearer 鉴权通过,tools/list 列出两工具,`list_knowledge_bases` 返回 7 库,`search_knowledge_base`(kb_ids=[2],"年假有多少天")真混合检索 8 命中、top1 即年假制度条款;无权库返回 `isError: true` + `kb_forbidden, denied_kb_ids=[999999]`。勘误:v1 CLI 的 `--tool-arg` 要 key=value 形态(`"kb_ids=[2]" "query=..."`),不吃 JSON 串。
+  - `scripts/m91_mcp_walkthrough.py`(fastmcp.Client 真客户端):4/4 PASS。勘误:fastmcp 2.14.7 的 `list_tools()` 直接返回 list(无 `.tools`),脚本已做兼容。
+  - 走查密钥经新端点 `POST /api/admin/keys` 下发(dogfood);审计 `agent.search/agent.list_kbs` 落库 client=mcp,key_create 审计 `{"by","to","name"}` 与个人面 `{"name"}` 区分正确。
+- `scripts/m9_acceptance.py` 重构后复跑:**16/16 PASS**(issue_api_key 抽取无回归)。
+- 环境备注:走查时发现旧后端(系统 Python 起、reloader 已死、跑旧代码)占着 8001,已按 start_dev.bat 惯例用 venv 重启;.venv uvicorn 的 reloader 进程在 wmic 里显示为基座解释器路径(D:\Python\python.exe),以日志 `Started reloader process [pid]` 为准,勿误杀。
+- 剩余用户走查门:浏览器走 admin 代发密钥(绑定账号下拉)与成员授权远程下拉;可用走查密钥(2026-09-19 自动过期)接自己的 MCP 客户端复走。
