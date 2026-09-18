@@ -46,9 +46,19 @@ class AgentAskIn(BaseModel):
     rerank: bool = False
 
 
+class CitationOut(BaseModel):
+    """M11 小项⑤:引用强类型(与 Web 端 citations 结构一致,多余键丢弃)。"""
+    number: int
+    chunk_id: int
+    document_id: int
+    filename: str
+    page_no: int | None
+    excerpt: str
+
+
 class AgentAskOut(BaseModel):
     answer: str
-    citations: list[dict]
+    citations: list[CitationOut]
     refused: bool
     tokens_used: int
     elapsed_ms: int

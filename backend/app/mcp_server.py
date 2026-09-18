@@ -9,6 +9,7 @@ from pathlib import Path
 from fastapi import HTTPException
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
+from loguru import logger
 from sqlalchemy import select
 
 from app.core.config import settings
@@ -23,6 +24,7 @@ from app.core.deps import (
 from app.core.perms import get_kb_perm, has_perm
 from app.db.session import SessionLocal
 from app.models import Document, KnowledgeBase
+from app.schemas.agent import CitationOut
 from app.services import agent_facade, doc_ops
 from app.services.agent_ratelimit import (
     allow as rate_allow,
@@ -146,6 +148,9 @@ async def ask_knowledge_base(
             )
         except agent_facade.AgentKbDenied as e:
             raise ToolError(f"kb_forbidden, denied_kb_ids={e.denied_kb_ids}")
+        except Exception:
+            logger.exception("agent ask failed")
+            raise ToolError("internal error")
         if (key_id := _api_key_id(p)) is not None:
             await quota_consume(key_id, outcome.tokens_used)
         await audit(db, p.user.username, "agent.ask", "agent",
@@ -156,7 +161,9 @@ async def ask_knowledge_base(
                      "elapsed_ms": outcome.elapsed_ms},
                     ip=current_client_ip.get())
         await db.commit()
-        return {"answer": outcome.answer, "citations": outcome.citations,
+        return {"answer": outcome.answer,
+                "citations": [CitationOut(**c).model_dump()
+                              for c in outcome.citations],
                 "refused": outcome.refused,
                 "tokens_used": outcome.tokens_used,
                 "elapsed_ms": outcome.elapsed_ms}

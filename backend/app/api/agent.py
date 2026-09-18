@@ -4,6 +4,7 @@ from dataclasses import asdict
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response, UploadFile
+from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -139,6 +140,9 @@ async def agent_ask(
             status_code=403,
             detail={"code": "kb_forbidden", "denied_kb_ids": e.denied_kb_ids},
         )
+    except Exception:
+        logger.exception("agent ask failed")
+        raise HTTPException(status_code=500, detail="internal error")
     if (key_id := _api_key_id(principal)) is not None:
         await quota_consume(key_id, outcome.tokens_used)
     await audit(

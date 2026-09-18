@@ -86,3 +86,59 @@ async def test_agent_ask_denied_dedup(client, auth_headers, db_session):
         await agent_facade.agent_ask(db_session, user,
                                      [99999, kb_id, 99999], "q", False)
     assert ei.value.denied_kb_ids == [99999]  # 去重后唯一
+
+
+# ---- M11:小项④ ask 失败应用级日志 + 小项⑤ CitationOut 强类型 ----
+async def test_ask_500_logs_exception(client, auth_headers, monkeypatch):
+    from tests.test_agent_api import _create_kb, _create_key
+
+    kb_id = await _create_kb(client, auth_headers, "500库")
+    key = await _create_key(client, auth_headers)
+
+    async def boom(*a, **k):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("app.services.agent_facade.agent_ask", boom)
+    import app.api.agent as agent_mod
+
+    calls = []
+
+    class FakeLogger:
+        def exception(self, msg, *a, **k):
+            calls.append(msg)
+
+    monkeypatch.setattr(agent_mod, "logger", FakeLogger())
+    r = await client.post(
+        "/api/agent/ask", json={"kb_ids": [kb_id], "query": "q"},
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert r.status_code == 500
+    assert calls  # 应用级日志已记,不再只靠 uvicorn 兜底
+
+
+async def test_ask_citations_strongly_typed(client, auth_headers, monkeypatch):
+    from tests.test_agent_api import _create_kb, _create_key
+
+    kb_id = await _create_kb(client, auth_headers, "引用库")
+    key = await _create_key(client, auth_headers)
+
+    async def fake_ask(db, user, kb_ids, query, rerank):
+        from app.services.agent_facade import AskOutcome
+        return AskOutcome(
+            answer="a",
+            citations=[{"number": 1, "chunk_id": 2, "document_id": 3,
+                        "filename": "f.pdf", "page_no": 1, "excerpt": "e",
+                        "junk": "dropped"}],
+            refused=False, tokens_used=5, elapsed_ms=1,
+        )
+
+    monkeypatch.setattr("app.services.agent_facade.agent_ask", fake_ask)
+    r = await client.post(
+        "/api/agent/ask", json={"kb_ids": [kb_id], "query": "q"},
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert r.status_code == 200
+    assert r.json()["citations"] == [
+        {"number": 1, "chunk_id": 2, "document_id": 3, "filename": "f.pdf",
+         "page_no": 1, "excerpt": "e"}
+    ]  # 多余键被 CitationOut 丢弃

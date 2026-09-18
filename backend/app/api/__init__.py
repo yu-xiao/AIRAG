@@ -31,6 +31,3 @@ def build_api_router() -> APIRouter:
     if settings.AGENT_API_ENABLED:
         router.include_router(agent_router)
     return router
-
-
-api_router = build_api_router()
