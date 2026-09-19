@@ -158,3 +158,149 @@ async def test_create_kb_unique_fallback_409(client, auth_headers, db_session,
                              headers=auth_headers)
     assert resp.status_code == 409
     assert resp.json()["detail"] == "knowledge base name already exists"
+
+
+# ---- M12:KB 删除(级联 + 权限矩阵) ----
+async def _mk_full_kb(client, db_session, owner_id, name="删除库"):
+    """库 + 文档(done)+ chunk + 成员 + 会话引用 + 磁盘文件(每次调用传不同 name
+    防唯一约束冲突;成员用真实注册用户防 FK 违约)。"""
+    from pathlib import Path
+
+    from app.core.config import settings
+    from app.models import (Chunk, Conversation, Document, KbPermission,
+                            KnowledgeBase)
+
+    # RegisterIn.username 限 ^[A-Za-z0-9_]+$(name 是中文),用 uuid 保 ASCII 唯一
+    import uuid as _uuid
+
+    member = await client.post(
+        "/api/auth/register",
+        json={"username": f"del_m{_uuid.uuid4().hex[:8]}",
+              "password": "secret123"})
+    kb = KnowledgeBase(name=name, owner_id=owner_id)
+    db_session.add(kb)
+    await db_session.flush()
+    doc = Document(kb_id=kb.id, filename="a.docx", file_path="x", mime="m",
+                   size=1, sha256="del", status="done")
+    db_session.add(doc)
+    await db_session.flush()
+    db_session.add(Chunk(document_id=doc.id, kb_id=kb.id, chunk_index=0,
+                         content="c", char_len=1, content_hash="h"))
+    db_session.add(KbPermission(kb_id=kb.id,
+                                user_id=member.json()["id"], perm="viewer"))
+    other_kb = KnowledgeBase(name=name + "-邻", owner_id=owner_id)
+    db_session.add(other_kb)
+    await db_session.flush()
+    db_session.add(Conversation(user_id=owner_id,
+                                kb_ids=[kb.id, other_kb.id]))
+    await db_session.commit()
+    doc_dir = Path(settings.UPLOAD_DIR) / str(kb.id)
+    doc_dir.mkdir(parents=True, exist_ok=True)
+    (doc_dir / "f.docx").write_bytes(b"x")
+    return kb, doc, other_kb
+
+
+async def test_delete_kb_cascade(client, auth_headers, db_session, monkeypatch,
+                                 tmp_path):
+    import json as _json
+    from pathlib import Path
+
+    from sqlalchemy import select
+
+    from app.models import (AuditLog, Chunk, Conversation, Document,
+                            KbPermission)
+    from app.services import kb_ops
+
+    me = await client.get("/api/auth/me", headers=auth_headers)
+    uid = me.json()["id"]
+    kb, doc, other_kb = await _mk_full_kb(client, db_session, uid,
+                                          name="级联删除库")
+    monkeypatch.setattr(kb_ops, "EVAL_DIR", tmp_path)
+    eval_file = tmp_path / f"{kb.id}.json"
+    eval_file.write_text("{}")
+    from app.core.config import settings
+
+    # expire_all 后访问持久对象的过期属性会触发同步刷新(MissingGreenlet),先取
+    other_id = other_kb.id
+    resp = await client.delete(f"/api/kbs/{kb.id}", headers=auth_headers)
+    assert resp.status_code == 204
+    db_session.expire_all()
+    assert await db_session.get(type(kb), kb.id) is None
+    assert await db_session.get(Document, doc.id) is None
+    assert (await db_session.execute(
+        select(Chunk).where(Chunk.kb_id == kb.id))).scalars().first() is None
+    assert (await db_session.execute(
+        select(KbPermission).where(KbPermission.kb_id == kb.id))
+    ).scalars().first() is None
+    conv = (await db_session.execute(
+        select(Conversation).where(Conversation.user_id == uid))).scalars().one()
+    assert conv.kb_ids == [other_id]  # array_remove 只清本库
+    assert not (Path(settings.UPLOAD_DIR) / str(kb.id)).exists()
+    assert not eval_file.exists()
+    audit_row = (await db_session.execute(
+        select(AuditLog).where(AuditLog.action == "kb_delete",
+                               AuditLog.target == f"kb:{kb.id}")
+    )).scalars().one()
+    detail = _json.loads(audit_row.detail)
+    assert detail["doc_count"] == 1 and detail["member_count"] == 1
+
+
+async def test_delete_kb_busy_409(client, auth_headers, db_session):
+    from app.models import Document, KnowledgeBase
+
+    me = await client.get("/api/auth/me", headers=auth_headers)
+    kb = KnowledgeBase(name="忙库", owner_id=me.json()["id"])
+    db_session.add(kb)
+    await db_session.flush()
+    db_session.add(Document(kb_id=kb.id, filename="a.docx", file_path="x",
+                            mime="m", size=1, sha256="busy",
+                            status="parsing"))
+    await db_session.commit()
+    kb_id = kb.id  # expire_all 后属性访问会触发同步刷新,先取
+    resp = await client.delete(f"/api/kbs/{kb_id}", headers=auth_headers)
+    assert resp.status_code == 409
+    db_session.expire_all()
+    assert await db_session.get(KnowledgeBase, kb_id) is not None  # 行未动
+
+
+async def test_delete_kb_permissions(client, auth_headers, db_session):
+    from sqlalchemy import text
+
+    # 授权成员(editor)可见但非 owner → 403
+    kb, _, _ = await _mk_full_kb(
+        client, db_session,
+        (await client.get("/api/auth/me", headers=auth_headers)).json()["id"],
+        name="权限矩阵库")
+    await client.post("/api/auth/register",
+                      json={"username": "del_member1", "password": "secret123"})
+    member_login = await client.post(
+        "/api/auth/login",
+        json={"username": "del_member1", "password": "secret123"})
+    member_hdr = {"Authorization":
+                  f"Bearer {member_login.json()['access_token']}"}
+    from app.models import KbPermission
+
+    mid = (await client.get("/api/auth/me", headers=member_hdr)).json()["id"]
+    db_session.add(KbPermission(kb_id=kb.id, user_id=mid, perm="editor"))
+    await db_session.commit()
+    assert (await client.delete(f"/api/kbs/{kb.id}",
+                                headers=member_hdr)).status_code == 403
+    # 陌生人 → 404
+    await client.post(
+        "/api/auth/register",
+        json={"username": "del_str1", "password": "secret123"})
+    stranger_login = await client.post(
+        "/api/auth/login",
+        json={"username": "del_str1", "password": "secret123"})
+    str_hdr = {"Authorization":
+               f"Bearer {stranger_login.json()['access_token']}"}
+    assert (await client.delete(f"/api/kbs/{kb.id}",
+                                headers=str_hdr)).status_code == 404
+    # admin → 204
+    me = await client.get("/api/auth/me", headers=auth_headers)
+    await db_session.execute(
+        text("UPDATE users SET role = 'admin' WHERE id = :i"),
+        {"i": me.json()["id"]})
+    await db_session.commit()
+    assert (await client.delete(f"/api/kbs/{kb.id}",
+                                headers=auth_headers)).status_code == 204

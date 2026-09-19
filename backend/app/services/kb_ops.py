@@ -1,0 +1,65 @@
+# backend/app/services/kb_ops.py
+"""M12:KB 删除级联(Web 面唯一实现;spec C)。
+
+顺序:busy 409 → chunks → documents → kb_permissions → conversations
+array_remove 清悬空 id → KB 行 → 审计 → commit → 磁盘/评估集尽力清理。
+"""
+import shutil
+from pathlib import Path
+
+from fastapi import HTTPException
+from loguru import logger
+from sqlalchemy import delete, func, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import settings
+from app.models import (Chunk, Conversation, Document, KbPermission,
+                        KnowledgeBase)
+from app.services.audit import audit
+from app.services.doc_ops import BUSY_STATUSES
+
+# 与 scripts/purge_orphan_evalsets.py 同源(backend/eval_sets)
+EVAL_DIR = Path(__file__).resolve().parents[2] / "eval_sets"
+
+
+async def delete_knowledge_base(
+    db: AsyncSession, kb: KnowledgeBase, *, username: str,
+) -> None:
+    """级联删除知识库(不可逆;调用面前置 owner/admin 校验)。"""
+    kb_id = kb.id
+    busy = (await db.execute(
+        select(Document.id).where(
+            Document.kb_id == kb_id,
+            Document.status.in_(BUSY_STATUSES),
+        ).limit(1)
+    )).scalar_one_or_none()
+    if busy is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="knowledge base has documents being processed")
+    doc_count = (await db.execute(
+        select(func.count(Document.id)).where(Document.kb_id == kb_id)
+    )).scalar_one()
+    member_count = (await db.execute(
+        select(func.count(KbPermission.id)).where(KbPermission.kb_id == kb_id)
+    )).scalar_one()
+    await db.execute(delete(Chunk).where(Chunk.kb_id == kb_id))
+    await db.execute(delete(Document).where(Document.kb_id == kb_id))
+    await db.execute(delete(KbPermission).where(KbPermission.kb_id == kb_id))
+    # 清悬空 id:不清会让旧会话提问撞 kb_forbidden(spec C2 步5)
+    await db.execute(
+        update(Conversation)
+        .where(func.array_position(Conversation.kb_ids, kb_id).isnot(None))
+        .values(kb_ids=func.array_remove(Conversation.kb_ids, kb_id))
+    )
+    await audit(db, username, "kb_delete", f"kb:{kb_id}",
+                {"name": kb.name, "doc_count": doc_count,
+                 "member_count": member_count})
+    await db.delete(kb)
+    await db.commit()
+    # 尽力清理(行已删,失败仅日志;孤儿由 purge 哲学兜底)
+    shutil.rmtree(Path(settings.UPLOAD_DIR) / str(kb_id), ignore_errors=True)
+    try:
+        (EVAL_DIR / f"{kb_id}.json").unlink(missing_ok=True)
+    except OSError:
+        logger.warning(f"eval set removal failed: kb {kb_id}")
