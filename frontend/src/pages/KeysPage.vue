@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import PageHeader from '@/components/PageHeader.vue'
 import { keysApi, type ApiKeyCreated, type ApiKeyItem } from '@/api/keys'
 import { usersApi, type UserBrief } from '@/api/users'
+import { kbApi } from '@/api/kb'
 import { useAuthStore } from '@/stores/auth'
 
 const auth = useAuthStore()
@@ -20,6 +21,7 @@ const form = reactive({
   expires: 'permanent' as 'permanent' | '7' | '30' | '90',
   userId: null as number | null,
   role: 'read_only' as 'read_only' | 'editor',
+  kbScope: [] as number[],  // M12:空 = 不限
 })
 const rules: FormRules = {
   name: [
@@ -50,15 +52,49 @@ async function searchBindUsers(q: string) {
   }
 }
 
+// M12:可访问范围选项——admin 绑定账号后取目标用户可见库,否则取自己的库
+const kbOptions = ref<{ id: number; name: string }[]>([])
+const kbOptionsLoading = ref(false)
+
+async function loadKbOptions() {
+  kbOptionsLoading.value = true
+  try {
+    if (isAdmin.value && form.userId != null) {
+      kbOptions.value = await keysApi.adminUserKbs(form.userId)
+    } else {
+      kbOptions.value = (await kbApi.list()).map((k) => ({
+        id: k.id, name: k.name,
+      }))
+    }
+  } catch {
+    ElMessage.error('知识库列表加载失败')
+  } finally {
+    kbOptionsLoading.value = false
+  }
+}
+
+function onBindUserChange() {
+  form.kbScope = []
+  loadKbOptions()
+}
+
+// 绑定账号变化即刷新范围选项。用 watch 而非 el-select @change:
+// ElSelect 仅在用户点选时 emit change,外部更新 v-model(如测试合成事件)不触发,
+// watch 对两种路径都生效,避免真实交互下 change+watch 双重加载。
+watch(() => form.userId, onBindUserChange)
+
 function openCreate() {
   form.name = ''
   form.expires = 'permanent'
   form.userId = null
   form.role = 'read_only'
+  form.kbScope = []
   userOptions.value = []
+  kbOptions.value = []
   boundUsername.value = null
   formRef.value?.resetFields()
   dialogVisible.value = true
+  loadKbOptions()
 }
 
 const errMsg = (e: unknown, fallback: string) =>
@@ -86,6 +122,7 @@ async function submit(formEl: FormInstance | undefined) {
       role: form.role,
       expires_in_days:
         form.expires === 'permanent' ? null : Number(form.expires),
+      kb_scope: form.kbScope.length ? [...form.kbScope] : null,
     }
     if (isAdmin.value && form.userId != null) {
       created.value = await keysApi.createAdmin({ ...payload, user_id: form.userId })
@@ -100,6 +137,7 @@ async function submit(formEl: FormInstance | undefined) {
     form.expires = 'permanent'
     form.userId = null
     form.role = 'read_only'
+    form.kbScope = []
     await load()
   } catch (e) {
     ElMessage.error(errMsg(e, '创建失败'))
@@ -157,6 +195,17 @@ onMounted(load)
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="范围" width="100" align="center">
+          <template #default="{ row }">
+            <el-tooltip
+              :content="row.kb_scope ? `仅库 ${row.kb_scope.join(', ')}` : '全部授权库'"
+            >
+              <el-tag size="small" :type="row.kb_scope ? 'warning' : 'info'">
+                {{ row.kb_scope ? `${row.kb_scope.length} 库` : '全部' }}
+              </el-tag>
+            </el-tooltip>
+          </template>
+        </el-table-column>
         <el-table-column label="状态" width="100">
           <template #default="{ row }">
             <el-tag :type="row.is_active ? 'success' : 'info'" size="small">
@@ -210,6 +259,23 @@ onMounted(load)
             <el-radio value="read_only">只读(检索/问答)</el-radio>
             <el-radio value="editor">编辑(可维护文档)</el-radio>
           </el-radio-group>
+        </el-form-item>
+        <el-form-item label="可访问范围">
+          <el-select
+            v-model="form.kbScope"
+            multiple
+            collapse-tags
+            clearable
+            :loading="kbOptionsLoading"
+            placeholder="不限(全部授权库)"
+          >
+            <el-option
+              v-for="k in kbOptions"
+              :key="k.id"
+              :label="`${k.name}(#${k.id})`"
+              :value="k.id"
+            />
+          </el-select>
         </el-form-item>
         <el-form-item label="有效期">
           <el-radio-group v-model="form.expires">

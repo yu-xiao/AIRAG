@@ -15,8 +15,6 @@ const kbName = ref(`知识库 #${kbId}`)
 const myPerm = ref<string | null>(null)
 
 const canEdit = computed(() => myPerm.value === 'owner' || myPerm.value === 'editor')
-/** 允许触发重新解析的状态(处理中禁止重入,与后端 409 语义一致) */
-const REPROCESSABLE = ['pending', 'done', 'failed']
 
 const loading = ref(false)
 const docs = ref<DocumentItem[]>([])
@@ -174,7 +172,8 @@ async function reprocess(row: DocumentItem) {
 }
 
 // ---- 删除(editor+;级联删全部分块与向量)----
-const DELETABLE = ['pending', 'done', 'failed']
+// 处理中(parsing/chunking/embedding)不可删、不可重入——后端 BUSY_STATUSES 的反集
+const IDLE_STATUSES = ['pending', 'done', 'failed']
 const deleting = ref<number | null>(null)
 
 async function delDoc(row: DocumentItem) {
@@ -310,7 +309,7 @@ onUnmounted(() => {
         <template #default="{ row }">
           <el-button link type="primary" @click="openChunks(row)">查看分块</el-button>
           <el-button
-            v-if="canEdit && REPROCESSABLE.includes(row.status)"
+            v-if="canEdit && IDLE_STATUSES.includes(row.status)"
             link
             type="warning"
             :loading="reprocessing === row.id"
@@ -319,7 +318,7 @@ onUnmounted(() => {
             重新解析
           </el-button>
           <el-button
-            v-if="canEdit && DELETABLE.includes(row.status)"
+            v-if="canEdit && IDLE_STATUSES.includes(row.status)"
             link
             type="danger"
             :loading="deleting === row.id"
