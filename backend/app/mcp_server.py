@@ -227,18 +227,17 @@ Returns:
 """
 
 
-def _e(e: HTTPException) -> ToolError:
-    """doc_ops 的 HTTPException → ToolError(文本携带错误 code,spec E)。
+def _e(e: Exception) -> ToolError:
+    """doc_ops 异常 → ToolError(文本携带错误 code,spec E)。
 
-    404 detail 是 "document not found" 类自然语句,不含 not_found code,
-    故按 status_code 映射 code 前缀、detail 原样保留(409 按 detail 区分
-    busy/duplicate)。
+    M12 小项①:DocOpError 自带 code,不再按英文 detail 子串猜测;
+    HTTPException(非 doc_ops 来源)按 status 映射兜底。
     """
+    if isinstance(e, doc_ops.DocOpError):
+        return ToolError(f"{e.code}: {e.message}")
     detail = str(e.detail)
     code = {404: "not_found", 413: "too_large", 415: "unsupported_type"}.get(
         e.status_code)
-    if code is None and e.status_code == 409:
-        code = "busy" if "being processed" in detail else "duplicate"
     if code is None:
         return ToolError(detail)
     return ToolError(f"{code}: {detail}")
@@ -252,7 +251,7 @@ async def list_documents(kb_id: int, limit: int = 50) -> dict:
     async with SessionLocal() as db:
         try:
             await doc_ops.visible_kb_or_404(db, p.user, kb_id, p.key_scope)
-        except HTTPException as e:
+        except (doc_ops.DocOpError, HTTPException) as e:
             raise _e(e)
         rows = (await db.execute(
             select(Document)
@@ -279,7 +278,7 @@ async def get_document(doc_id: int) -> dict:
         try:
             d = await doc_ops.visible_doc_or_404(db, p.user, doc_id,
                                                  p.key_scope)
-        except HTTPException as e:
+        except (doc_ops.DocOpError, HTTPException) as e:
             raise _e(e)
         await audit(db, p.user.username, "agent.get_document", "agent",
                     {"client": "mcp", "key_name": p.key_name,
@@ -316,7 +315,7 @@ async def upload_document(kb_id: int, filename: str, content_b64: str,
         try:
             kb = await doc_ops.visible_kb_or_404(db, p.user, kb_id,
                                                  p.key_scope)
-        except HTTPException as e:
+        except (doc_ops.DocOpError, HTTPException) as e:
             raise _e(e)
         if not has_perm(await get_kb_perm(db, p.user, kb), "editor"):
             raise ToolError("editor permission required")
@@ -331,7 +330,7 @@ async def upload_document(kb_id: int, filename: str, content_b64: str,
                 action="agent.upload_document",
                 audit_extra={"client": "mcp", "key_name": p.key_name},
             )
-        except HTTPException as e:
+        except (doc_ops.DocOpError, HTTPException) as e:
             raise _e(e)
         return {"id": d.id, "filename": d.filename, "status": d.status,
                 "size": d.size, "chunk_count": d.chunk_count,
@@ -346,7 +345,7 @@ async def delete_document(doc_id: int) -> dict:
         try:
             d = await doc_ops.visible_doc_or_404(db, p.user, doc_id,
                                                  p.key_scope)
-        except HTTPException as e:
+        except (doc_ops.DocOpError, HTTPException) as e:
             raise _e(e)
         kb = await db.get(KnowledgeBase, d.kb_id)
         if not has_perm(await get_kb_perm(db, p.user, kb), "editor"):
@@ -361,7 +360,7 @@ async def delete_document(doc_id: int) -> dict:
                 action="agent.delete_document",
                 audit_extra={"client": "mcp", "key_name": p.key_name},
             )
-        except HTTPException as e:
+        except (doc_ops.DocOpError, HTTPException) as e:
             raise _e(e)
         return {"deleted": True}
 
@@ -374,7 +373,7 @@ async def reprocess_document(doc_id: int) -> dict:
         try:
             d = await doc_ops.visible_doc_or_404(db, p.user, doc_id,
                                                  p.key_scope)
-        except HTTPException as e:
+        except (doc_ops.DocOpError, HTTPException) as e:
             raise _e(e)
         kb = await db.get(KnowledgeBase, d.kb_id)
         if not has_perm(await get_kb_perm(db, p.user, kb), "editor"):
@@ -389,7 +388,7 @@ async def reprocess_document(doc_id: int) -> dict:
                 action="agent.reprocess_document",
                 audit_extra={"client": "mcp", "key_name": p.key_name},
             )
-        except HTTPException as e:
+        except (doc_ops.DocOpError, HTTPException) as e:
             raise _e(e)
         return {"id": out.id, "filename": out.filename, "status": out.status,
                 "chunk_count": out.chunk_count}

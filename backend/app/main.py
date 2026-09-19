@@ -1,9 +1,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from loguru import logger
 
 from app.api import build_api_router
 from app.core.config import settings
+from app.services.doc_ops import DocOpError
 
 
 def create_app() -> FastAPI:
@@ -23,6 +25,11 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    async def _docop_error_handler(request, exc: DocOpError):
+        return JSONResponse(status_code=exc.status,
+                            content={"detail": exc.message})
+
+    app.add_exception_handler(DocOpError, _docop_error_handler)
     app.include_router(build_api_router(), prefix="/api")
     if mcp_asgi is not None:
         # 挂载于根(fastmcp 官方集成法):/api 等已注册路由优先,兜底路径

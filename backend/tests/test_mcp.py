@@ -483,3 +483,18 @@ async def test_mcp_scoped_doc_not_found(mcp_client, auth_headers, db_session):
     rj = await _tool_call(mcp_client, hdr, sid, "list_documents",
                           {"kb_id": kb_out}, 22)
     assert _is_error(rj) and "not_found" in _err_text(rj)
+
+
+async def test_mcp_error_code_mapping():
+    """M12 小项①:DocOpError 按 code 前缀,不再英文子串匹配。"""
+    from app.mcp_server import _e
+    from app.services.doc_ops import DocOpError
+
+    t1 = _e(DocOpError("busy", 409, "document is being processed"))
+    assert str(t1) == "busy: document is being processed"
+    t2 = _e(DocOpError("duplicate", 409, "duplicate document in this kb"))
+    assert str(t2).startswith("duplicate:")
+    from fastapi import HTTPException
+
+    t3 = _e(HTTPException(status_code=404, detail="x not found"))
+    assert str(t3).startswith("not_found:")

@@ -3,7 +3,6 @@
 import json
 
 import pytest
-from fastapi import HTTPException
 from sqlalchemy import select
 
 from app.models import Chunk, Document, KnowledgeBase
@@ -32,18 +31,20 @@ async def _mk_doc(db, kb_id, content=b"dummy", name="a.docx",
 async def test_save_upload_rejects_ext_and_size(client, auth_headers, db_session):
     me = await client.get("/api/auth/me", headers=auth_headers)
     kb = await _mk_kb(db_session, me.json()["id"])
-    with pytest.raises(HTTPException) as e1:
+    with pytest.raises(doc_ops.DocOpError) as e1:
         await doc_ops.save_upload(db_session, kb, filename="a.exe",
                                   payload=b"x", mime=None, ocr_mode="auto",
                                   username="u", action="doc_upload")
-    assert e1.value.status_code == 415
+    assert e1.value.status == 415
+    assert e1.value.code == "unsupported_type"
     from app.core.config import settings
     big = b"z" * (settings.MAX_UPLOAD_MB * 1024 * 1024 + 1)
-    with pytest.raises(HTTPException) as e2:
+    with pytest.raises(doc_ops.DocOpError) as e2:
         await doc_ops.save_upload(db_session, kb, filename="a.pdf",
                                   payload=big, mime=None, ocr_mode="auto",
                                   username="u", action="doc_upload")
-    assert e2.value.status_code == 413
+    assert e2.value.status == 413
+    assert e2.value.code == "too_large"
 
 
 async def test_save_upload_dedup_and_dispatch(client, auth_headers, db_session,
@@ -59,12 +60,13 @@ async def test_save_upload_dedup_and_dispatch(client, auth_headers, db_session,
                                     ocr_mode="auto", username="u",
                                     action="doc_upload")
     assert doc.id and calls == [doc.id]
-    with pytest.raises(HTTPException) as e:
+    with pytest.raises(doc_ops.DocOpError) as e:
         await doc_ops.save_upload(db_session, kb, filename="again.docx",
                                   payload=b"unique-bytes", mime="m",
                                   ocr_mode="auto", username="u",
                                   action="doc_upload")
-    assert e.value.status_code == 409
+    assert e.value.status == 409
+    assert e.value.code == "duplicate"
 
 
 async def test_delete_cascades_chunks_and_file(client, auth_headers, db_session,
@@ -89,10 +91,11 @@ async def test_delete_busy_409(client, auth_headers, db_session):
     me = await client.get("/api/auth/me", headers=auth_headers)
     kb = await _mk_kb(db_session, me.json()["id"])
     doc = await _mk_doc(db_session, kb.id, status="parsing")
-    with pytest.raises(HTTPException) as e:
+    with pytest.raises(doc_ops.DocOpError) as e:
         await doc_ops.delete_document(db_session, doc, username="u",
                                       action="doc_delete")
-    assert e.value.status_code == 409
+    assert e.value.status == 409
+    assert e.value.code == "busy"
 
 
 async def test_reprocess_resets(client, auth_headers, db_session, monkeypatch):
