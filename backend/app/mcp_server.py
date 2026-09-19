@@ -10,7 +10,7 @@ from fastapi import HTTPException
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from loguru import logger
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.core.config import settings
 from app.core.deps import (
@@ -253,6 +253,10 @@ async def list_documents(kb_id: int, limit: int = 50) -> dict:
             await doc_ops.visible_kb_or_404(db, p.user, kb_id, p.key_scope)
         except (doc_ops.DocOpError, HTTPException) as e:
             raise _e(e)
+        total = (await db.execute(
+            select(func.count()).select_from(Document)
+            .where(Document.kb_id == kb_id)
+        )).scalar_one()
         rows = (await db.execute(
             select(Document)
             .where(Document.kb_id == kb_id)
@@ -265,10 +269,10 @@ async def list_documents(kb_id: int, limit: int = 50) -> dict:
                   "created_at": d.created_at.isoformat()} for d in rows]
         await audit(db, p.user.username, "agent.list_documents", "agent",
                     {"client": "mcp", "key_name": p.key_name, "kb_id": kb_id,
-                     "doc_count": len(items)},
+                     "doc_count": total},
                     ip=current_client_ip.get())
         await db.commit()
-        return {"items": items, "total": len(items)}
+        return {"items": items, "total": total}
 
 
 @mcp.tool(description=_GET_DOC)
@@ -297,6 +301,9 @@ async def get_document(doc_id: int) -> dict:
 async def upload_document(kb_id: int, filename: str, content_b64: str,
                           ocr: str = "auto") -> dict:
     p = _principal()
+    if len(content_b64) > (settings.MAX_UPLOAD_MB * 4 // 3 + 1) * 1024 * 1024:
+        # M12 小项②:解码前按 b64 长度粗判(4/3 膨胀 +1MB 松余量)
+        raise ToolError(f"too_large: exceeds {settings.MAX_UPLOAD_MB}MB")
     try:
         payload = base64.b64decode(content_b64, validate=True)
     except Exception:

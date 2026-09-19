@@ -8,6 +8,7 @@ from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.deps import (
     Principal,
     _api_key_id,
@@ -239,6 +240,11 @@ async def agent_upload_document(
     db: AsyncSession = Depends(get_db),
 ):
     await _check_rate(principal)
+    cl = request.headers.get("content-length")
+    if cl and int(cl) > (settings.MAX_UPLOAD_MB + 1) * 1024 * 1024:
+        # M12 小项②:multipart 开销 +1MB 松余量,宁可漏报不可误报;
+        # 权威校验仍在 save_upload(413)
+        raise HTTPException(status_code=413, detail="file too large")
     kb = await doc_ops.visible_kb_or_404(db, principal.user, kb_id,
                                          principal.key_scope)
     await _kb_editor_or_403(db, principal, kb)

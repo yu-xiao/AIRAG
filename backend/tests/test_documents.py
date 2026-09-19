@@ -254,3 +254,26 @@ async def test_web_delete_document(client, auth_headers, db_session):
 async def test_web_delete_visible_only_404(client, auth_headers):
     r = await client.delete("/api/documents/999999", headers=auth_headers)
     assert r.status_code == 404
+
+
+# ---- M12 Task8:小项② 上传 Content-Length 预检 ----
+async def test_upload_content_length_precheck_413(client, auth_headers,
+                                                   monkeypatch):
+    """M12 小项②:读 body 前按 Content-Length 预检(省内存缓冲)。"""
+    from app.core.config import settings
+
+    kb = await client.post("/api/kbs", json={"name": "预检库"},
+                           headers=auth_headers)
+
+    def _must_not_reach(*a, **k):
+        raise AssertionError("precheck must reject before save_upload")
+
+    monkeypatch.setattr("app.services.doc_ops.save_upload", _must_not_reach)
+    monkeypatch.setattr(settings, "MAX_UPLOAD_MB", 0)  # 阈值=(0+1)MB
+    resp = await client.post(
+        f"/api/kbs/{kb.json()['id']}/documents",
+        files={"file": ("big.docx", b"x" * (2 * 1024 * 1024),
+                        "application/octet-stream")},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 413

@@ -162,3 +162,20 @@ async def test_create_key_kb_scope_echo_and_audit(client, auth_headers,
                                AuditLog.detail.contains("范围key"))
     )).scalars().one()
     assert _json.loads(audit_row.detail)["kb_scope"] == [kb_id]
+
+
+# ---- M12 Task8:小项⑥ ApiKeyOut.role 强类型 ----
+async def test_api_key_out_role_literal():
+    """M12 小项⑥:ApiKeyOut.role 强类型(裸 str → Literal)。"""
+    import pytest as _pytest
+
+    from pydantic import ValidationError
+
+    from app.schemas.auth import ApiKeyOut
+
+    base = dict(id=1, name="n", key_prefix="airag_x", is_active=True,
+                expires_at=None, last_used_at=None,
+                created_at="2026-09-19T00:00:00", kb_scope=None)
+    assert ApiKeyOut.model_validate({**base, "role": "editor"}).role == "editor"
+    with _pytest.raises(ValidationError):
+        ApiKeyOut.model_validate({**base, "role": "bogus"})

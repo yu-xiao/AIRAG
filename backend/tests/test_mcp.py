@@ -498,3 +498,49 @@ async def test_mcp_error_code_mapping():
 
     t3 = _e(HTTPException(status_code=404, detail="x not found"))
     assert str(t3).startswith("not_found:")
+
+
+# ---- M12 Task8:小项②⑦ b64 预检 + total 全量 ----
+async def test_mcp_upload_b64_precheck_too_large(mcp_client, auth_headers,
+                                                 monkeypatch):
+    """M12 小项②:解码前按 b64 长度粗判(monkeypatch 证明未解码)。"""
+    import base64 as _b64
+
+    from app.core.config import settings
+    from tests.test_agent_api import _create_kb
+
+    kb_id = await _create_kb(mcp_client, auth_headers, "预检库3")
+    monkeypatch.setattr(settings, "MAX_UPLOAD_MB", 0)  # 阈值=(0*4//3+1)MB
+
+    def _must_not_decode(*a, **k):
+        raise AssertionError("precheck must reject before decode")
+
+    # 注:patch 须在 _keyed_session 之后——建 key 走 JWT 解码,内部也用
+    # base64.b64decode,先 patch 会在鉴权处误触发 _must_not_decode
+    hdr, sid = await _keyed_session(mcp_client, auth_headers, role="editor")
+    monkeypatch.setattr(_b64, "b64decode", _must_not_decode)
+    rj = await _tool_call(
+        mcp_client, hdr, sid, "upload_document",
+        {"kb_id": kb_id, "filename": "big.docx",
+         "content_b64": _b64.b64encode(b"x" * (2 * 1024 * 1024)).decode()},
+        23)
+    assert _is_error(rj) and "too_large" in _err_text(rj)
+
+
+async def test_mcp_list_documents_total_is_full_count(
+        mcp_client, auth_headers, db_session):
+    """M12 小项⑦:total 为库内总数,与 limit 截断解耦。"""
+    from app.models import Document
+    from tests.test_agent_api import _create_kb
+
+    kb_id = await _create_kb(mcp_client, auth_headers, "计数库")
+    for i in range(3):
+        db_session.add(Document(kb_id=kb_id, filename=f"c{i}.docx",
+                                file_path="x", mime="m", size=1,
+                                sha256=f"cnt{i}", status="done"))
+    await db_session.commit()
+    hdr, sid = await _keyed_session(mcp_client, auth_headers)
+    rj = await _tool_call(mcp_client, hdr, sid, "list_documents",
+                          {"kb_id": kb_id, "limit": 2}, 24)
+    body = _tool_result(rj)
+    assert body["total"] == 3 and len(body["items"]) == 2

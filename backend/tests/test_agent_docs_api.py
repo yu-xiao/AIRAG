@@ -224,3 +224,26 @@ async def test_scoped_doc_ops_in_scope_works(client, auth_headers, db_session):
                              headers=eh)).status_code == 200
     assert (await client.delete(f"/api/agent/documents/{doc_id}",
                                 headers=eh)).status_code == 204
+
+
+# ---- M12 Task8:小项② 上传 Content-Length 预检(agent REST 面) ----
+async def test_agent_upload_content_length_precheck_413(
+        client, auth_headers, db_session, monkeypatch):
+    from app.core.config import settings
+    from tests.test_agent_api import _create_kb, _create_key_role
+
+    kb_id = await _create_kb(client, auth_headers, "预检库2")
+    key = await _create_key_role(client, auth_headers, "预检编辑", "editor")
+
+    def _must_not_reach(*a, **k):
+        raise AssertionError("precheck must reject before save_upload")
+
+    monkeypatch.setattr("app.services.doc_ops.save_upload", _must_not_reach)
+    monkeypatch.setattr(settings, "MAX_UPLOAD_MB", 0)
+    resp = await client.post(
+        f"/api/agent/kbs/{kb_id}/documents",
+        files={"file": ("big.docx", b"x" * (2 * 1024 * 1024),
+                        "application/octet-stream")},
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert resp.status_code == 413
