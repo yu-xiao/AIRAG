@@ -25,22 +25,28 @@ BUSY_STATUSES = ("parsing", "chunking", "embedding")
 
 
 async def visible_kb_or_404(
-    db: AsyncSession, user: User, kb_id: int
+    db: AsyncSession, user: User, kb_id: int,
+    key_scope: frozenset[int] | None = None,
 ) -> KnowledgeBase:
     kb = await db.get(KnowledgeBase, kb_id)
     if kb is None or await get_kb_perm(db, user, kb) is None:
+        raise HTTPException(status_code=404, detail="knowledge base not found")
+    if key_scope is not None and kb.id not in key_scope:  # M12:scope 折入可见性
         raise HTTPException(status_code=404, detail="knowledge base not found")
     return kb
 
 
 async def visible_doc_or_404(
-    db: AsyncSession, user: User, doc_id: int
+    db: AsyncSession, user: User, doc_id: int,
+    key_scope: frozenset[int] | None = None,
 ) -> Document:
     doc = await db.get(Document, doc_id)
     if doc is None:
         raise HTTPException(status_code=404, detail="document not found")
     kb = await db.get(KnowledgeBase, doc.kb_id)
     if kb is None or await get_kb_perm(db, user, kb) is None:
+        raise HTTPException(status_code=404, detail="document not found")
+    if key_scope is not None and doc.kb_id not in key_scope:  # M12
         raise HTTPException(status_code=404, detail="document not found")
     return doc
 

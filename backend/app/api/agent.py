@@ -192,7 +192,8 @@ async def agent_list_documents(
     db: AsyncSession = Depends(get_db),
 ):
     await _check_rate(principal)
-    await doc_ops.visible_kb_or_404(db, principal.user, kb_id)
+    await doc_ops.visible_kb_or_404(db, principal.user, kb_id,
+                                    principal.key_scope)
     rows = (await db.execute(
         select(Document).where(Document.kb_id == kb_id)
         .order_by(Document.id.desc())
@@ -215,7 +216,8 @@ async def agent_get_document(
     db: AsyncSession = Depends(get_db),
 ):
     await _check_rate(principal)
-    doc = await doc_ops.visible_doc_or_404(db, principal.user, doc_id)
+    doc = await doc_ops.visible_doc_or_404(db, principal.user, doc_id,
+                                           principal.key_scope)
     await audit(
         db, principal.user.username, "agent.get_document", "agent",
         {"client": "rest", "key_name": principal.key_name,
@@ -237,7 +239,8 @@ async def agent_upload_document(
     db: AsyncSession = Depends(get_db),
 ):
     await _check_rate(principal)
-    kb = await doc_ops.visible_kb_or_404(db, principal.user, kb_id)
+    kb = await doc_ops.visible_kb_or_404(db, principal.user, kb_id,
+                                         principal.key_scope)
     await _kb_editor_or_403(db, principal, kb)
     payload = await file.read()
     return await doc_ops.save_upload(
@@ -256,7 +259,8 @@ async def agent_delete_document(
     db: AsyncSession = Depends(get_db),
 ):
     await _check_rate(principal)
-    doc = await doc_ops.visible_doc_or_404(db, principal.user, doc_id)
+    doc = await doc_ops.visible_doc_or_404(db, principal.user, doc_id,
+                                           principal.key_scope)
     kb = await db.get(KnowledgeBase, doc.kb_id)
     await _kb_editor_or_403(db, principal, kb)
     await doc_ops.delete_document(
@@ -275,7 +279,8 @@ async def agent_reprocess_document(
     db: AsyncSession = Depends(get_db),
 ):
     await _check_rate(principal)
-    doc = await doc_ops.visible_doc_or_404(db, principal.user, doc_id)
+    doc = await doc_ops.visible_doc_or_404(db, principal.user, doc_id,
+                                           principal.key_scope)
     kb = await db.get(KnowledgeBase, doc.kb_id)
     await _kb_editor_or_403(db, principal, kb)
     return await doc_ops.reprocess_document(

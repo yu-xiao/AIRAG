@@ -156,3 +156,71 @@ async def test_agent_quota_endpoint(client, auth_headers):
     r2 = await client.get("/api/agent/quota", headers=auth_headers)
     assert r2.status_code == 403
     assert r2.json()["detail"] == "api key principal required"
+
+
+# ---- M12:文档五操作的 scope 折入(404 不泄露) ----
+async def _scoped_key_db(client, auth_headers, db_session, kb_ids, role):
+    from app.models import ApiKey
+    from app.services.api_keys import generate_api_key
+
+    me = await client.get("/api/auth/me", headers=auth_headers)
+    raw, prefix, digest = generate_api_key()
+    db_session.add(ApiKey(user_id=me.json()["id"], name=f"sc-{role}",
+                          key_prefix=prefix, key_hash=digest, role=role,
+                          kb_scope=list(kb_ids)))
+    await db_session.commit()
+    return raw
+
+
+async def test_scoped_doc_ops_out_of_scope_404(client, auth_headers, db_session):
+    from tests.test_agent_api import _create_kb
+
+    kb_in = await _create_kb(client, auth_headers, "文档界内库")
+    kb_out = await _create_kb(client, auth_headers, "文档界外库")
+    # 界外库先放一篇文档(用 Web 面 JWT 上传,editor 用户)
+    up = await client.post(
+        f"/api/kbs/{kb_out}/documents",
+        files={"file": ("o.docx", b"out-of-scope", "application/octet-stream")},
+        headers=auth_headers,
+    )
+    doc_out = up.json()["id"]
+    ro = await _scoped_key_db(client, auth_headers, db_session, [kb_in],
+                              "read_only")
+    ed = await _scoped_key_db(client, auth_headers, db_session, [kb_in],
+                              "editor")
+    rh = {"Authorization": f"Bearer {ro}"}
+    eh = {"Authorization": f"Bearer {ed}"}
+    # 读:list/get 界外 → 404
+    assert (await client.get(f"/api/agent/kbs/{kb_out}/documents",
+                             headers=rh)).status_code == 404
+    assert (await client.get(f"/api/agent/documents/{doc_out}",
+                             headers=rh)).status_code == 404
+    # 写:upload/delete/reprocess 界外 → 404(可见性先于 perm/key 检查)
+    assert (await client.post(
+        f"/api/agent/kbs/{kb_out}/documents",
+        files={"file": ("a.docx", b"x", "application/octet-stream")},
+        headers=eh)).status_code == 404
+    assert (await client.delete(f"/api/agent/documents/{doc_out}",
+                                headers=eh)).status_code == 404
+    assert (await client.post(f"/api/agent/documents/{doc_out}/reprocess",
+                              headers=eh)).status_code == 404
+
+
+async def test_scoped_doc_ops_in_scope_works(client, auth_headers, db_session):
+    from tests.test_agent_api import _create_kb
+
+    kb_in = await _create_kb(client, auth_headers, "文档界内库2")
+    ed = await _scoped_key_db(client, auth_headers, db_session, [kb_in],
+                              "editor")
+    eh = {"Authorization": f"Bearer {ed}"}
+    up = await client.post(
+        f"/api/agent/kbs/{kb_in}/documents",
+        files={"file": ("i.docx", b"in-scope", "application/octet-stream")},
+        headers=eh,
+    )
+    assert up.status_code == 201
+    doc_id = up.json()["id"]
+    assert (await client.get(f"/api/agent/documents/{doc_id}",
+                             headers=eh)).status_code == 200
+    assert (await client.delete(f"/api/agent/documents/{doc_id}",
+                                headers=eh)).status_code == 204

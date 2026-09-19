@@ -463,3 +463,23 @@ async def test_mcp_scoped_key_list_and_denied(mcp_client, auth_headers,
     )
     text = resp2.json()["result"]["content"][0]["text"]
     assert "kb_forbidden" in text and str(kb_out) in text
+
+
+async def test_mcp_scoped_doc_not_found(mcp_client, auth_headers, db_session):
+    from app.models import ApiKey
+    from app.services.api_keys import generate_api_key
+    from tests.test_agent_api import _create_kb
+
+    kb_in = await _create_kb(mcp_client, auth_headers, "MCP界内库2")
+    kb_out = await _create_kb(mcp_client, auth_headers, "MCP界外库2")
+    me = await mcp_client.get("/api/auth/me", headers=auth_headers)
+    raw, prefix, digest = generate_api_key()
+    db_session.add(ApiKey(user_id=me.json()["id"], name="mcp-scoped2",
+                          key_prefix=prefix, key_hash=digest,
+                          kb_scope=[kb_in]))
+    await db_session.commit()
+    hdr, sid = {"Authorization": f"Bearer {raw}"}, None
+    sid = await _init(mcp_client, hdr)
+    rj = await _tool_call(mcp_client, hdr, sid, "list_documents",
+                          {"kb_id": kb_out}, 22)
+    assert _is_error(rj) and "not_found" in _err_text(rj)

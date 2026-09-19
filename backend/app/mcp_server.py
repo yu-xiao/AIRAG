@@ -70,7 +70,8 @@ _TOP_K_DEFAULT = settings.RETRIEVAL_TOP_K
 _SEARCH_DOC = f"""在指定知识库中混合检索(向量 + 关键词,RRF 融合)。
 
 Args:
-    kb_ids: 知识库 id 列表(1~5 个),须为当前密钥有权访问的库。
+    kb_ids: 知识库 id 列表(1~5 个),须为当前密钥有权访问的库
+    (若密钥设了范围,还须在范围内)。
     query: 检索问题,1~500 字。
     top_k: 命中条数上限,1~20,默认 {_TOP_K_DEFAULT}。
     rerank: 是否启用 rerank 重排(服务端未配置 rerank 时忽略)。
@@ -121,7 +122,8 @@ async def ask_knowledge_base(
     而非检索片段。
 
     Args:
-        kb_ids: 知识库 id 列表(1~5 个),须为当前密钥有权访问的库。
+        kb_ids: 知识库 id 列表(1~5 个),须为当前密钥有权访问的库
+        (若密钥设了范围,还须在范围内)。
         query: 问题,1~500 字。单轮无上下文,追问请携带完整问题。
         rerank: 是否启用 rerank 重排(服务端未配置 rerank 时忽略)。
 
@@ -177,7 +179,8 @@ _UPLOAD_DOC = """上传文档到指定知识库并触发解析流水线(异步)�
 status 直到 done/failed。
 
 Args:
-    kb_id: 目标知识库 id,须为当前密钥归属用户有 editor 权限的库。
+    kb_id: 目标知识库 id,须为当前密钥归属用户有 editor 权限的库
+    (若密钥设了范围,还须在范围内)。
     filename: 文件名(含扩展名;.pdf/.docx/.xlsx/.jpg/.jpeg/.png)。
     content_b64: 文件内容的 base64 编码(解码后不超过服务端 MAX_UPLOAD_MB)。
     ocr: OCR 模式 auto|force|off,默认 auto。
@@ -188,7 +191,7 @@ Returns:
 _LIST_DOC = """列出指定知识库的文档(id/文件名/状态/分块数等)。
 
 Args:
-    kb_id: 知识库 id,须为当前密钥有权访问的库。
+    kb_id: 知识库 id,须为当前密钥有权访问的库(若密钥设了范围,还须在范围内)。
     limit: 返回条数上限 1~200,默认 50。
 
 Returns:
@@ -248,7 +251,7 @@ async def list_documents(kb_id: int, limit: int = 50) -> dict:
         raise ToolError("limit must be 1~200")
     async with SessionLocal() as db:
         try:
-            await doc_ops.visible_kb_or_404(db, p.user, kb_id)
+            await doc_ops.visible_kb_or_404(db, p.user, kb_id, p.key_scope)
         except HTTPException as e:
             raise _e(e)
         rows = (await db.execute(
@@ -274,7 +277,8 @@ async def get_document(doc_id: int) -> dict:
     p = _principal()
     async with SessionLocal() as db:
         try:
-            d = await doc_ops.visible_doc_or_404(db, p.user, doc_id)
+            d = await doc_ops.visible_doc_or_404(db, p.user, doc_id,
+                                                 p.key_scope)
         except HTTPException as e:
             raise _e(e)
         await audit(db, p.user.username, "agent.get_document", "agent",
@@ -310,7 +314,8 @@ async def upload_document(kb_id: int, filename: str, content_b64: str,
     async with SessionLocal() as db:
         # 校验顺序与 REST 一致(spec B):可见性(404)→ perm → key 能力
         try:
-            kb = await doc_ops.visible_kb_or_404(db, p.user, kb_id)
+            kb = await doc_ops.visible_kb_or_404(db, p.user, kb_id,
+                                                 p.key_scope)
         except HTTPException as e:
             raise _e(e)
         if not has_perm(await get_kb_perm(db, p.user, kb), "editor"):
@@ -339,7 +344,8 @@ async def delete_document(doc_id: int) -> dict:
     async with SessionLocal() as db:
         # 校验顺序与 REST 一致(spec B):可见性(404)→ perm → key 能力
         try:
-            d = await doc_ops.visible_doc_or_404(db, p.user, doc_id)
+            d = await doc_ops.visible_doc_or_404(db, p.user, doc_id,
+                                                 p.key_scope)
         except HTTPException as e:
             raise _e(e)
         kb = await db.get(KnowledgeBase, d.kb_id)
@@ -366,7 +372,8 @@ async def reprocess_document(doc_id: int) -> dict:
     async with SessionLocal() as db:
         # 校验顺序与 REST 一致(spec B):可见性(404)→ perm → key 能力
         try:
-            d = await doc_ops.visible_doc_or_404(db, p.user, doc_id)
+            d = await doc_ops.visible_doc_or_404(db, p.user, doc_id,
+                                                 p.key_scope)
         except HTTPException as e:
             raise _e(e)
         kb = await db.get(KnowledgeBase, d.kb_id)
