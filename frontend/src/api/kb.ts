@@ -59,4 +59,9 @@ export const kbApi = {
   async revoke(kbId: number, username: string): Promise<void> {
     await http.delete(`/kbs/${kbId}/permissions`, { params: { username } })
   },
+
+  /** M12:删除知识库(admin/owner;级联删文档/分块/向量/成员授权) */
+  async remove(kbId: number): Promise<void> {
+    await http.delete(`/kbs/${kbId}`)
+  },
 }

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { Search } from '@element-plus/icons-vue'
 import { kbApi, type KbItem, type KbMember } from '@/api/kb'
 import { usersApi, type UserBrief } from '@/api/users'
@@ -239,6 +239,34 @@ async function removeMember(row: KbMember) {
   }
 }
 
+// ---- M12:删除知识库(仅 owner/admin) ----
+const deleting = ref<number | null>(null)
+
+async function remove(row: KbItem) {
+  try {
+    await ElMessageBox.confirm(
+      `确定删除「${row.name}」?将永久删除该知识库及其全部 ${row.doc_count} 篇文档、` +
+        '分块、向量与成员授权,不可恢复。',
+      '删除知识库',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  deleting.value = row.id
+  try {
+    await kbApi.remove(row.id)
+    ElMessage.success('知识库已删除')
+    await load()
+  } catch (e) {
+    const detail = (e as { response?: { data?: { detail?: string } } })
+      ?.response?.data?.detail
+    ElMessage.error(detail ?? '删除失败')
+  } finally {
+    deleting.value = null
+  }
+}
+
 function fmtTime(iso: string) {
   return iso.replace('T', ' ').slice(0, 19)
 }
@@ -285,6 +313,16 @@ onMounted(() => {
           <el-button size="small" type="primary" plain @click="openDocs(row)">进入</el-button>
           <el-button v-if="row.my_perm === 'owner'" size="small" plain @click="openMembers(row)">
             成员
+          </el-button>
+          <el-button
+            v-if="row.my_perm === 'owner'"
+            size="small"
+            type="danger"
+            plain
+            :loading="deleting === row.id"
+            @click="remove(row)"
+          >
+            删除
           </el-button>
         </div>
       </el-card>
