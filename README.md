@@ -34,12 +34,17 @@ Redis:worker 需要 Redis(本机 6379 已有服务)。若该服务设置了 requ
 
 审计清理 beat(M6 起):Windows 不能用 worker -B 内嵌,另开窗口运行 backend\start_beat.bat(每日 03:00 清理,`AUDIT_RETENTION_DAYS` 默认 180 天,0=禁用;不开 beat 时可用 admin 手动 purge 端点)。
 
-## 外部 Agent 接入(M9~M11)
+## 外部 Agent 接入(M9~M12)
 
 知识库内容可经 API Key 检索问答,编辑型密钥还可维护文档;密钥能力(read_only/editor)不会超出归属账号权限,可随时吊销。
 
 ### 1. 创建密钥
 登录 Web → 左侧「API 密钥」→ 创建(明文只显示一次;M11 起可选密钥类型:只读/编辑,默认只读)。管理员可在创建对话框的「绑定账号」下拉中把密钥发给任意账号(权限与配额按目标账号,审计记录 by/to)。
+
+密钥可选**可访问范围**(kb_scope):留空 = 继承账号全部可访问库;指定后仅能访问
+所选库(与账号权限实时取交集,授权被收回或库被删除时自动失效)。范围铸后不可改,
+需调整请吊销重铸。越界表现:`search`/`ask` 返回 403 `kb_forbidden`(denied_kb_ids);
+文档读写返回 404 `not_found`。admin 代发时范围按**目标账号**的可见库校验。
 
 ### 2. MCP 客户端(Claude Code / Cursor / ZCode 等)
 ```bash

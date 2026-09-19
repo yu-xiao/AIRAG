@@ -1,7 +1,7 @@
 """M9.1:MCP 真客户端走查(fastmcp.Client,真 streamable-http 客户端)。
 
 用法(start_dev.bat 起服务后,backend 目录):
-    .venv\\Scripts\\python scripts\\m91_mcp_walkthrough.py <airag_key> [query] [editor_key]
+    .venv\\Scripts\\python scripts\\m91_mcp_walkthrough.py <airag_key> [query] [editor_key] [scoped_key]
 
 覆盖:initialize 握手、tools/list、list_knowledge_bases、search_knowledge_base
 真调、ask_knowledge_base 真调(答案或拒答)、无权库 ToolError 文案。
@@ -9,6 +9,9 @@
 追加 M11 文档工具走查:upload_document(base64 真文件)→ get_document →
 list_documents → delete_document;四步判定计入汇总与退出码,锚点/文件名带
 唯一 run 标记,可对同一 KB 重复运行。
+传入第四个参数 scoped_key(范围受限密钥明文,范围须为非全集)时,追加 M12
+scope 走查:list_kbs 仅见范围内库(全集子集)、界外 search 返回 kb_forbidden;
+界外差集为空时打印 SKIP 不算 FAIL。
 退出码 1 = 走查失败。
 """
 import asyncio
@@ -36,10 +39,11 @@ def _text(result) -> str:
 
 async def main():
     if len(sys.argv) < 2:
-        print("usage: m91_mcp_walkthrough.py <airag_key> [query] [editor_key]")
+        print("usage: m91_mcp_walkthrough.py <airag_key> [query] [editor_key] [scoped_key]")
         raise SystemExit(2)
     key, query = sys.argv[1], (sys.argv[2] if len(sys.argv) > 2 else "知识库")
     editor_key = sys.argv[3] if len(sys.argv) > 3 else None
+    scoped_key = sys.argv[4] if len(sys.argv) > 4 else None
     transport = StreamableHttpTransport(
         url=BASE, headers={"Authorization": f"Bearer {key}"}
     )
@@ -81,6 +85,12 @@ async def main():
             check("无权库 ToolError 文案", "kb_forbidden" in _text(r3), _text(r3)[:200])
         except Exception as e:  # fastmcp 客户端把 tool 错误抛成异常
             check("无权库 ToolError 文案", "kb_forbidden" in str(e), str(e)[:200])
+
+    # M12:scoped key 走查(传入 scoped key 明文;界外库用全量列表差集)
+    if scoped_key:
+        await walk_m12_scope(scoped_key, [k["id"] for k in kbs])
+    else:
+        print("SKIP m12 scope walkthrough(未提供 scoped_key 参数)")
 
     # M11 文档工具走查(ask 段之后;需要显式传入 editor key 明文)
     if editor_key:
@@ -178,6 +188,30 @@ async def walk_m11_doc_tools(base: str, editor_key: str, kb_id: int) -> None:
         dele, rj = await call("delete_document", {"doc_id": doc_id})
         check("mcp delete_document 确认删除",
               bool(dele and dele.get("deleted")), str(rj)[:200])
+
+
+async def walk_m12_scope(scoped_key: str, full_ids: list[int]) -> None:
+    """M12:scoped key 的 list_kbs 过滤 + 界外 search 拒绝。"""
+    transport = StreamableHttpTransport(
+        url=BASE, headers={"Authorization": f"Bearer {scoped_key}"}
+    )
+    async with Client(transport) as c:
+        r = await c.call_tool("list_knowledge_bases", {})
+        scoped_ids = [i["id"] for i in json.loads(_text(r))["items"]]
+        check("scope list_kbs 是全集子集", set(scoped_ids) <= set(full_ids),
+              f"scoped={scoped_ids} full={full_ids}")
+        diff = [i for i in full_ids if i not in scoped_ids]
+        if not diff:
+            print("SKIP scope 界外拒绝(该 key 范围恰为全集,无界外库可测)")
+            return
+        try:
+            r2 = await c.call_tool("search_knowledge_base",
+                                   {"kb_ids": [diff[0]], "query": "x"})
+            check("scope 界外 search 拒绝", "kb_forbidden" in _text(r2),
+                  _text(r2)[:200])
+        except Exception as e:
+            check("scope 界外 search 拒绝", "kb_forbidden" in str(e),
+                  str(e)[:200])
 
 
 if __name__ == "__main__":
