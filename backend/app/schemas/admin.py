@@ -11,6 +11,7 @@ class AdminKeyCreateIn(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     expires_in_days: int | None = Field(default=None, ge=1, le=3650)
     role: Literal["read_only", "editor"] = "read_only"
+    kb_scope: list[int] | None = None  # M12:校验按目标用户(user_id)的可见性
 
 
 class AdminUserOut(BaseModel):

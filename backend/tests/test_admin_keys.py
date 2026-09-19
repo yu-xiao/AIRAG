@@ -126,3 +126,52 @@ async def test_admin_issue_key_with_role(client, auth_headers, db_session):
     )
     assert r.status_code == 201
     assert r.json()["role"] == "editor"
+
+
+# ---- M12:admin 代发 scoped key(校验按目标用户) ----
+async def test_admin_issue_scoped_key(client, auth_headers, db_session):
+    from sqlalchemy import text
+
+    # 提权 admin(仅请求者;校验须按目标用户而非请求者)
+    me = await client.get("/api/auth/me", headers=auth_headers)
+    await db_session.execute(
+        text("UPDATE users SET role = 'admin' WHERE id = :i"),
+        {"i": me.json()["id"]})
+    await db_session.commit()
+    # 目标用户(非 admin):自建库可访问;第三方库不可访问
+    tid = (await client.post(
+        "/api/auth/register",
+        json={"username": "scope_tgt1", "password": "secret123"},
+    )).json()["id"]
+    await client.post("/api/auth/register",
+                      json={"username": "scope_tg1", "password": "secret123"})
+    await db_session.execute(text(
+        "UPDATE users SET role = 'editor' "
+        "WHERE username IN ('scope_tgt1', 'scope_tg1')"))
+    await db_session.commit()
+    tgt = await client.post("/api/auth/login",
+                            json={"username": "scope_tgt1",
+                                  "password": "secret123"})
+    tg = await client.post("/api/auth/login",
+                           json={"username": "scope_tg1",
+                                 "password": "secret123"})
+    target_kb = (await client.post(
+        "/api/kbs", json={"name": "目标用户的库"},
+        headers={"Authorization": f"Bearer {tgt.json()['access_token']}"},
+    )).json()["id"]
+    tg_kb = await client.post(
+        "/api/kbs", json={"name": "第三方库"},
+        headers={"Authorization": f"Bearer {tg.json()['access_token']}"})
+    r = await client.post("/api/admin/keys",
+                          json={"user_id": tid,
+                                "name": "代发范围",
+                                "kb_scope": [target_kb]},
+                          headers=auth_headers)
+    assert r.status_code == 201 and r.json()["kb_scope"] == [target_kb]
+    # 若按 admin 请求者判,tg 库对其隐式可见;按目标用户判 → 422
+    r2 = await client.post("/api/admin/keys",
+                           json={"user_id": tid,
+                                 "name": "代发越界",
+                                 "kb_scope": [tg_kb.json()["id"]]},
+                           headers=auth_headers)
+    assert r2.status_code == 422

@@ -9,7 +9,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.models import ApiKey, User
+from app.core.perms import get_kb_perm
+from app.models import ApiKey, KnowledgeBase, User
 
 KEY_HEADER = "airag_"
 
@@ -36,11 +37,19 @@ class KeyQuotaExceeded(Exception):
     """目标用户活跃 key 数已达 AGENT_MAX_KEYS_PER_USER(调用方转 409)。"""
 
 
+class KbScopeInvalid(ValueError):
+    """kb_scope 校验失败(空列表/含归属用户不可访问的库);调用方转 422。"""
+
+    def __init__(self, message: str):
+        super().__init__(message)
+        self.message = message
+
+
 async def issue_api_key(
     db: AsyncSession, user: User, name: str, expires_in_days: int | None,
-    role: str = "read_only",
+    role: str = "read_only", kb_scope: list[int] | None = None,
 ) -> tuple[ApiKey, str]:
-    """配额检查 + 生成落库(仅 flush,不 commit);返回 (ApiKey 行, 明文)。
+    """配额检查 + scope 校验(M12) + 生成落库(仅 flush,不 commit)。
 
     审计与 commit 由调用方负责(个人面/admin 面 detail 不同)。
     """
@@ -53,6 +62,15 @@ async def issue_api_key(
     ).scalar_one()
     if count >= settings.AGENT_MAX_KEYS_PER_USER:
         raise KeyQuotaExceeded()
+    if kb_scope is not None:
+        if not kb_scope:
+            raise KbScopeInvalid("kb_scope must not be empty")
+        kb_scope = list(dict.fromkeys(kb_scope))
+        for kb_id in kb_scope:
+            kb = await db.get(KnowledgeBase, kb_id)
+            if kb is None or await get_kb_perm(db, user, kb) is None:
+                raise KbScopeInvalid(
+                    f"kb_scope contains inaccessible knowledge base: {kb_id}")
     raw, prefix, digest = generate_api_key()
     key = ApiKey(
         user_id=user.id,
@@ -60,6 +78,7 @@ async def issue_api_key(
         key_prefix=prefix,
         key_hash=digest,
         role=role,
+        kb_scope=kb_scope,
         expires_at=(
             datetime.now(timezone.utc) + timedelta(days=expires_in_days)
             if expires_in_days

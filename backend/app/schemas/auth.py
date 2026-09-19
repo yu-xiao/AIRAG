@@ -32,6 +32,7 @@ class ApiKeyCreateIn(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     expires_in_days: int | None = Field(default=None, ge=1, le=3650)  # None=永久
     role: Literal["read_only", "editor"] = "read_only"
+    kb_scope: list[int] | None = None  # M12:None=不限制;[]非法(422)
 
 
 class ApiKeyOut(BaseModel):
@@ -43,6 +44,7 @@ class ApiKeyOut(BaseModel):
     expires_at: datetime | None
     last_used_at: datetime | None
     created_at: datetime
+    kb_scope: list[int] | None
 
     model_config = {"from_attributes": True}
 

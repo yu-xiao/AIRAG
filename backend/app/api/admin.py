@@ -8,7 +8,11 @@ from app.db.session import get_db
 from app.models import AuditLog, User
 from app.schemas.admin import AdminKeyCreateIn, AdminUserIn, AdminUserOut, AuditLogOut
 from app.schemas.auth import ApiKeyCreatedOut
-from app.services.api_keys import KeyQuotaExceeded, issue_api_key
+from app.services.api_keys import (
+    KbScopeInvalid,
+    KeyQuotaExceeded,
+    issue_api_key,
+)
 from app.services.audit import audit, purge_expired
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -76,12 +80,16 @@ async def admin_create_api_key(
         raise HTTPException(status_code=400, detail="target user is disabled")
     try:
         key, raw = await issue_api_key(db, target, payload.name,
-                                       payload.expires_in_days, payload.role)
+                                       payload.expires_in_days, payload.role,
+                                       payload.kb_scope)
     except KeyQuotaExceeded:
         raise HTTPException(status_code=409, detail="api key limit reached")
+    except KbScopeInvalid as e:
+        raise HTTPException(status_code=422, detail=e.message)
     await audit(
         db, current.username, "key_create", f"apikey:{key.id}",
-        {"by": current.username, "to": target.username, "name": payload.name},
+        {"by": current.username, "to": target.username, "name": payload.name}
+        | ({"kb_scope": key.kb_scope} if key.kb_scope else {}),
     )
     await db.commit()
     await db.refresh(key)
@@ -94,6 +102,7 @@ async def admin_create_api_key(
         expires_at=key.expires_at,
         last_used_at=key.last_used_at,
         created_at=key.created_at,
+        kb_scope=key.kb_scope,
         key=raw,
     )
 
