@@ -544,3 +544,85 @@ async def test_mcp_list_documents_total_is_full_count(
                           {"kb_id": kb_id, "limit": 2}, 24)
     body = _tool_result(rj)
     assert body["total"] == 3 and len(body["items"]) == 2
+
+
+# ---- M12 小项③④:ask 失败分支 + busy 文本 ----
+def _make_fake_hybrid(kb_id: int):
+    from app.services.retrieval.searcher import SearchHit
+
+    async def fake_hybrid(db, kb_ids, query, top_k=20):
+        return [SearchHit(chunk_id=1, document_id=10, kb_id=kb_id,
+                          filename="a.pdf", page_no=1, content="锚点内容",
+                          score=0.9, source="both")]
+
+    return fake_hybrid
+
+
+async def test_mcp_ask_denied_kb(mcp_client, auth_headers):
+    from tests.test_agent_api import _create_key
+
+    key = await _create_key(mcp_client, auth_headers)
+    hdr = {"Authorization": f"Bearer {key}"}
+    sid = await _init(mcp_client, hdr)
+    rj = await _tool_call(mcp_client, hdr, sid, "ask_knowledge_base",
+                          {"kb_ids": [99999], "query": "q"}, 30)
+    assert _is_error(rj) and "kb_forbidden" in _err_text(rj)
+
+
+async def test_mcp_ask_internal_error(mcp_client, auth_headers, monkeypatch):
+    from tests.test_agent_api import _create_kb, _create_key
+
+    kb_id = await _create_kb(mcp_client, auth_headers, "内部错误库")
+    key = await _create_key(mcp_client, auth_headers)
+
+    async def boom(*a, **k):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("app.services.agent_facade.agent_ask", boom)
+    hdr = {"Authorization": f"Bearer {key}"}
+    sid = await _init(mcp_client, hdr)
+    rj = await _tool_call(mcp_client, hdr, sid, "ask_knowledge_base",
+                          {"kb_ids": [kb_id], "query": "q"}, 31)
+    assert _is_error(rj) and "internal error" in _err_text(rj)
+
+
+async def test_mcp_ask_with_jwt_principal(mcp_client, auth_headers,
+                                          monkeypatch):
+    """小项③:JWT(非 key)走 ask——放行且不烧配额。"""
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+
+    from app.services import agent_facade
+    from app.services.chat_graph import nodes
+    from app.services.chat_graph.graph import build_graph
+    from tests.test_agent_api import _create_kb
+
+    kb_id = await _create_kb(mcp_client, auth_headers, "JWT问答库")
+    monkeypatch.setattr(nodes, "hybrid_search", _make_fake_hybrid(kb_id))
+    monkeypatch.setattr(agent_facade, "_ask_graph",
+                        build_graph(llm=FakeListChatModel(
+                            responses=["jwt 通道答案。"]), checkpointer=None))
+    hdr = {"Authorization": auth_headers["Authorization"],
+           "Accept": ACCEPT}
+    sid = await _init(mcp_client, hdr)
+    rj = await _tool_call(mcp_client, hdr, sid, "ask_knowledge_base",
+                          {"kb_ids": [kb_id], "query": "q"}, 32)
+    body = _tool_result(rj)
+    assert body["answer"] == "jwt 通道答案。"
+
+
+async def test_mcp_busy_toolerror_text(mcp_client, auth_headers, db_session):
+    from app.models import Document
+    from tests.test_agent_api import _create_kb
+
+    kb_id = await _create_kb(mcp_client, auth_headers, "忙库MCP")
+    doc = Document(kb_id=kb_id, filename="b.docx", file_path="x", mime="m",
+                   size=1, sha256="mcpbusy", status="parsing")
+    db_session.add(doc)
+    await db_session.commit()
+    hdr, sid = await _keyed_session(mcp_client, auth_headers, role="editor")
+    rj = await _tool_call(mcp_client, hdr, sid, "delete_document",
+                          {"doc_id": doc.id}, 33)
+    assert _is_error(rj) and _err_text(rj).startswith("busy:")
+    rj2 = await _tool_call(mcp_client, hdr, sid, "reprocess_document",
+                           {"doc_id": doc.id}, 34)
+    assert _is_error(rj2) and _err_text(rj2).startswith("busy:")

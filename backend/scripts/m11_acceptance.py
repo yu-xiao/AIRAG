@@ -5,7 +5,7 @@
 
 覆盖:editor key 上传→轮询 done→search 命中→删除→search 不再命中 /
 read_only key 写 403 / 重复上传 409 / 非白名单扩展名 415 /
-busy 409(可选) / 配额端点 / 审计落库。
+busy 409(可选) / 配额端点 / 审计落库;审计断言按本次运行 doc target 绑定(M12 小项⑤)。
 """
 import asyncio
 import base64
@@ -233,7 +233,9 @@ async def main() -> None:
                             AuditLog.action.in_([
                                 "agent.upload_document",
                                 "agent.delete_document",
-                            ]))
+                            ]),
+                            AuditLog.target.in_([f"doc:{doc_id}"]),
+                        )
                     )).scalars().all()
             finally:
                 await engine.dispose()
