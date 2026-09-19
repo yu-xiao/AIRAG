@@ -28,6 +28,13 @@ class AdminUserIn(BaseModel):
     is_active: bool | None = None
 
 
+class AdminUserKbOut(BaseModel):
+    """M12:admin 代发 scoped key 的范围下拉条目(目标用户可见库)。"""
+
+    id: int
+    name: str
+
+
 class AuditLogOut(BaseModel):
     id: int
     username: str

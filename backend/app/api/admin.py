@@ -2,11 +2,18 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.kbs import visible_kbs_for
 from app.core.config import settings
 from app.core.deps import require_admin
 from app.db.session import get_db
 from app.models import AuditLog, User
-from app.schemas.admin import AdminKeyCreateIn, AdminUserIn, AdminUserOut, AuditLogOut
+from app.schemas.admin import (
+    AdminKeyCreateIn,
+    AdminUserIn,
+    AdminUserKbOut,
+    AdminUserOut,
+    AuditLogOut,
+)
 from app.schemas.auth import ApiKeyCreatedOut
 from app.services.api_keys import (
     KbScopeInvalid,
@@ -34,6 +41,20 @@ async def list_users(
         stmt = stmt.limit(limit)
     rows = await db.execute(stmt)
     return list(rows.scalars().all())
+
+
+@router.get("/users/{user_id}/kbs", response_model=list[AdminUserKbOut])
+async def admin_user_kbs(
+    user_id: int,
+    current: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """M12:目标用户可见库列表(admin 代发 scoped key 的范围数据源)。"""
+    target = await db.get(User, user_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail="user not found")
+    rows = await visible_kbs_for(db, target)
+    return [AdminUserKbOut(id=kb.id, name=kb.name) for kb in rows]
 
 
 @router.patch("/users/{user_id}", response_model=AdminUserOut)

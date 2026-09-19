@@ -56,40 +56,34 @@ async def _doc_counts(db: AsyncSession) -> dict[int, int]:
     return dict(rows)
 
 
+async def visible_kbs_for(db: AsyncSession, user: User) -> list[KnowledgeBase]:
+    """user 可见库(id 倒序;不含 doc_count/my_perm 装配):
+    admin 全库;否则 自有 ∪ 被授权。M12 抽出供 admin 目标用户查询复用。"""
+    if user.role == "admin":
+        stmt = select(KnowledgeBase)
+    else:
+        stmt = select(KnowledgeBase).where(
+            or_(
+                KnowledgeBase.owner_id == user.id,
+                KnowledgeBase.id.in_(
+                    select(KbPermission.kb_id).where(
+                        KbPermission.user_id == user.id
+                    )
+                ),
+            )
+        )
+    return (await db.execute(stmt.order_by(KnowledgeBase.id.desc()))
+            ).scalars().all()
+
+
 @router.get("", response_model=list[KBOut])
 async def list_kbs(
     current: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     doc_counts = await _doc_counts(db)
-    if current.role == "admin":
-        rows = (
-            await db.execute(select(KnowledgeBase).order_by(KnowledgeBase.id.desc()))
-        ).scalars().all()
-        out = []
-        for kb in rows:
-            item = KBOut.model_validate(kb)
-            item.my_perm = "owner"
-            item.doc_count = doc_counts.get(kb.id, 0)
-            out.append(item)
-        return out
-    rows = (
-        await db.execute(
-            select(KnowledgeBase)
-            .where(
-                or_(
-                    KnowledgeBase.owner_id == current.id,
-                    KnowledgeBase.id.in_(
-                        select(KbPermission.kb_id).where(
-                            KbPermission.user_id == current.id
-                        )
-                    ),
-                )
-            )
-            .order_by(KnowledgeBase.id.desc())
-        )
-    ).scalars().all()
-    grants = (
+    rows = await visible_kbs_for(db, current)
+    grants = () if current.role == "admin" else (
         await db.execute(
             select(KbPermission).where(KbPermission.user_id == current.id)
         )
@@ -98,7 +92,9 @@ async def list_kbs(
     out = []
     for kb in rows:
         item = KBOut.model_validate(kb)
-        item.my_perm = "owner" if kb.owner_id == current.id else perm_by_kb.get(kb.id)
+        item.my_perm = ("owner" if current.role == "admin"
+                        or kb.owner_id == current.id
+                        else perm_by_kb.get(kb.id))
         item.doc_count = doc_counts.get(kb.id, 0)
         out.append(item)
     return out
