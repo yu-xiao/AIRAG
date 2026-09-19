@@ -122,7 +122,7 @@ async def test_ask_citations_strongly_typed(client, auth_headers, monkeypatch):
     kb_id = await _create_kb(client, auth_headers, "引用库")
     key = await _create_key(client, auth_headers)
 
-    async def fake_ask(db, user, kb_ids, query, rerank):
+    async def fake_ask(db, user, kb_ids, query, rerank, key_scope=None):
         from app.services.agent_facade import AskOutcome
         return AskOutcome(
             answer="a",

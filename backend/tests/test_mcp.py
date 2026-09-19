@@ -426,3 +426,40 @@ async def test_mcp_get_quota(mcp_client, auth_headers):
     rj = await _tool_call(mcp_client, hdr, sid, "get_quota", {}, 9)
     body = _tool_result(rj)
     assert "limit" in body and "reset_at" in body
+
+
+# ---- M12:scope 过滤(MCP 面) ----
+async def test_mcp_scoped_key_list_and_denied(mcp_client, auth_headers,
+                                              db_session):
+    from app.models import ApiKey
+    from app.services.api_keys import generate_api_key
+    from tests.test_agent_api import _create_kb
+
+    kb_in = await _create_kb(mcp_client, auth_headers, "MCP界内库")
+    kb_out = await _create_kb(mcp_client, auth_headers, "MCP界外库")
+    me = await mcp_client.get("/api/auth/me", headers=auth_headers)
+    raw, prefix, digest = generate_api_key()
+    db_session.add(ApiKey(user_id=me.json()["id"], name="mcp-scoped",
+                          key_prefix=prefix, key_hash=digest,
+                          kb_scope=[kb_in]))
+    await db_session.commit()
+
+    hdr = {"Authorization": f"Bearer {raw}"}
+    sid = await _init(mcp_client, hdr)
+    resp = await mcp_client.post(
+        "/mcp",
+        json=_rpc("tools/call",
+                  {"name": "list_knowledge_bases", "arguments": {}}, 20),
+        headers={"Accept": ACCEPT, **hdr, "mcp-session-id": sid},
+    )
+    body = _tool_result(resp.json())
+    assert [i["id"] for i in body["items"]] == [kb_in]
+    resp2 = await mcp_client.post(
+        "/mcp",
+        json=_rpc("tools/call",
+                  {"name": "search_knowledge_base",
+                   "arguments": {"kb_ids": [kb_out], "query": "q"}}, 21),
+        headers={"Accept": ACCEPT, **hdr, "mcp-session-id": sid},
+    )
+    text = resp2.json()["result"]["content"][0]["text"]
+    assert "kb_forbidden" in text and str(kb_out) in text

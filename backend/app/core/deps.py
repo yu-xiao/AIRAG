@@ -43,6 +43,7 @@ class Principal:
     key_id: int | None = None
     key_name: str | None = None
     key_role: str | None = None  # M11:read_only|editor;JWT 恒 None
+    key_scope: frozenset[int] | None = None  # M12:per-KB 白名单;None=不限
 
 
 # MCP 侧由 ASGI 中间件写入(mcp_server.py),工具函数读取
@@ -69,7 +70,9 @@ async def resolve_bearer_principal(db: AsyncSession, raw: str) -> Principal:
             raise HTTPException(status_code=401, detail="invalid_key")
         key.last_used_at = datetime.now(timezone.utc)
         return Principal(user=user, kind="api_key", key_id=key.id,
-                         key_name=key.name, key_role=key.role)
+                         key_name=key.name, key_role=key.role,
+                         key_scope=(frozenset(key.kb_scope)
+                                    if key.kb_scope is not None else None))
     payload = decode_access_token(raw)
     if payload is None:
         raise HTTPException(status_code=401, detail="invalid or expired token")

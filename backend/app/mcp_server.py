@@ -53,7 +53,7 @@ async def list_knowledge_bases() -> dict:
     """
     p = _principal()
     async with SessionLocal() as db:
-        items = await agent_facade.list_kbs_for(db, p.user)
+        items = await agent_facade.list_kbs_for(db, p.user, p.key_scope)
         await audit(db, p.user.username, "agent.list_kbs", "agent",
                     {"client": "mcp", "key_name": p.key_name,
                      "kb_count": len(items)},
@@ -96,7 +96,7 @@ async def search_knowledge_base(
     async with SessionLocal() as db:
         try:
             outcome = await agent_facade.agent_search(
-                db, p.user, kb_ids, query, top_k, rerank,
+                db, p.user, kb_ids, query, top_k, rerank, p.key_scope,
             )
         except agent_facade.AgentKbDenied as e:
             raise ToolError(f"kb_forbidden, denied_kb_ids={e.denied_kb_ids}")
@@ -144,7 +144,7 @@ async def ask_knowledge_base(
     async with SessionLocal() as db:
         try:
             outcome = await agent_facade.agent_ask(
-                db, p.user, kb_ids, query, rerank,
+                db, p.user, kb_ids, query, rerank, p.key_scope,
             )
         except agent_facade.AgentKbDenied as e:
             raise ToolError(f"kb_forbidden, denied_kb_ids={e.denied_kb_ids}")

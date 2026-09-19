@@ -79,7 +79,8 @@ async def agent_kbs(
     db: AsyncSession = Depends(get_db),
 ):
     await _check_rate(principal)
-    items = await agent_facade.list_kbs_for(db, principal.user)
+    items = await agent_facade.list_kbs_for(db, principal.user,
+                                            principal.key_scope)
     await audit(
         db, principal.user.username, "agent.list_kbs", "agent",
         {"client": "rest", "key_name": principal.key_name, "kb_count": len(items)},
@@ -100,7 +101,7 @@ async def agent_search(
     try:
         outcome = await agent_facade.agent_search(
             db, principal.user, payload.kb_ids, payload.query,
-            payload.top_k, payload.rerank,
+            payload.top_k, payload.rerank, principal.key_scope,
         )
     except agent_facade.AgentKbDenied as e:
         raise HTTPException(
@@ -134,6 +135,7 @@ async def agent_ask(
     try:
         outcome = await agent_facade.agent_ask(
             db, principal.user, payload.kb_ids, payload.query, payload.rerank,
+            principal.key_scope,
         )
     except agent_facade.AgentKbDenied as e:
         raise HTTPException(

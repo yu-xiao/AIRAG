@@ -33,10 +33,11 @@ class AgentKbDenied(Exception):
 
 
 async def _permitted_kb_ids(
-    db: AsyncSession, user: User, kb_ids: list[int]
+    db: AsyncSession, user: User, kb_ids: list[int],
+    key_scope: frozenset[int] | None = None,
 ) -> list[int]:
-    """去重归一 + 逐库权限校验;无权限/不存在统一抛 AgentKbDenied
-    (denied_kb_ids 不区分两者,不泄露存在性;重复 id 去重后不再出现)。"""
+    """去重归一 + 逐库权限校验 + key scope 活交集(M12);无权限/不存在/
+    界外统一抛 AgentKbDenied(不区分三者,不泄露存在性)。"""
     kb_ids = list(dict.fromkeys(kb_ids))
     rows = (
         await db.execute(
@@ -48,17 +49,22 @@ async def _permitted_kb_ids(
         kb_id for kb_id in kb_ids
         if kb_id not in by_id
         or await get_kb_perm(db, user, by_id[kb_id]) is None
+        or (key_scope is not None and kb_id not in key_scope)
     ]
     if denied:
         raise AgentKbDenied(denied)
     return kb_ids
 
 
-async def list_kbs_for(db: AsyncSession, user: User) -> list[KbBrief]:
-    """与 GET /api/kbs 同语义:admin 全库 owner;否则 自有 ∪ 被授权。"""
+async def list_kbs_for(db: AsyncSession, user: User,
+                       key_scope: frozenset[int] | None = None) -> list[KbBrief]:
+    """与 GET /api/kbs 同语义:admin 全库 owner;否则 自有 ∪ 被授权;
+    key scope 非空时再取交集(M12)。"""
     rows = (await db.execute(select(KnowledgeBase))).scalars().all()
     out = []
     for kb in rows:
+        if key_scope is not None and kb.id not in key_scope:
+            continue
         perm = await get_kb_perm(db, user, kb)
         if perm is not None:
             out.append(KbBrief(id=kb.id, name=kb.name,
@@ -80,9 +86,10 @@ async def agent_search(
     query: str,
     top_k: int,
     rerank: bool,
+    key_scope: frozenset[int] | None = None,
 ) -> SearchOutcome:
     """权限过滤 → hybrid_search → 可选 rerank(与 rerank_node 同阈值语义)。"""
-    kb_ids = await _permitted_kb_ids(db, user, kb_ids)
+    kb_ids = await _permitted_kb_ids(db, user, kb_ids, key_scope)
 
     start = time.perf_counter()
     hits = await hybrid_search(db, kb_ids, query, top_k=top_k)
@@ -169,11 +176,12 @@ async def agent_ask(
     kb_ids: list[int],
     query: str,
     rerank: bool,
+    key_scope: frozenset[int] | None = None,
 ) -> AskOutcome:
     """权限过滤 → 完整问答图(非流式、单轮、无 checkpointer)→ 终态直出。
     图运行可达 90s:权限过滤后 commit 归还连接,避免长占 asyncpg 池
     (顺带持久化 principal 解析写入的 last_used_at,幂等无害)。"""
-    kb_ids = await _permitted_kb_ids(db, user, kb_ids)
+    kb_ids = await _permitted_kb_ids(db, user, kb_ids, key_scope)
     await db.commit()
     meter = TokenMeter()
     start = time.perf_counter()
