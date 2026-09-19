@@ -2457,3 +2457,27 @@ git commit -m "test(m12): acceptance script, readme scope guide, walkthrough sco
 - **Spec 覆盖**:spec A(Task1)、B1/B2(Task2/3/4)、B3(Task4/5 + README Task12)、C(Task6 + Task11)、D①-⑧(Task7/8/9 + Task10 的⑧,已落 Task 10 Step 5 正文)、E 测试与验收(各任务 + Task12)、配置零新增 ✓。
 - **占位符扫描**:Task 12 Step 2 的 `make_user` 签名差异已显式标注"按真实返回签名调整调用处"(m11 版本需复制时对齐),非 TBD;其余无占位符。
 - **类型一致性**:`key_scope: frozenset[int] | None` 全链一致(deps/facade/doc_ops);`DocOpError(code, status, message)` 属性同名;`adminUserKbs` 前后端路径 `/admin/users/{id}/kbs` 一致;`kb_scope: number[] | null`(TS)对 `list[int] | None`(Pydantic)一致。
+
+---
+
+## 执行记录(2026-09-19,SDD)
+
+**提交链**(spec 0ccbea8 → 计划 91fe775/ef93e85):T1 deed8f2 → T2 3fed04c → T3 3c0ab1b → T4 42fe34e → T5 7cfb17d → T6 71d53dc → T7 316079d → T8 93306ff → T9 4b8d6db → T10 2f6e524 → T11 677040b → T12 e481bed。
+
+**质量**:12 任务零修复轮(任务审查 12/12 一次 Approved);终审 whole-branch **CLEAN**——spec A/B/C/D/E 逐节覆盖、非目标清单核实无越界、跨任务接口五层一致、无 Critical/Important。
+
+**测试与验收**:后端 pytest 247P→**276P/0F**;前端 vitest 22→**28/28** + `npm run build` 零错;真栈 `m12_acceptance.py` **16/16**(首跑全过,含删除后检索 403 追加项)、m11 回归 **10/10**、MCP 真客户端走查 **13/13**(含 scope 新 2 项);dev 栈迁移 `c1d2e3f4a5b6→d4e5f6a7b8c9` 一次通过。
+
+**实施期裁决要点**(详见 `.superpowers/sdd/2026-09-19-airag-m12-perms-governance/progress.md`,已随收官清理则以本节为准):
+- T2:`_scoped_key` 的 `list(None)` TypeError 修正 + `test_agent_ask.py` fake_ask 替身补 `key_scope` 尾参(brief 两处笔误)。
+- T4:admin 代发用例目标改为新注册非 admin 用户——原设计目标=admin 隐式 owner 使"越界"断言必 201 自相矛盾;改后恰构成"按目标用户而非请求者判"的判别性验证。
+- T6:测试 3 处修正(成员用户名撞 `^[A-Za-z0-9_]+$` 改 uuid;register 响应无 token 补 login;expire_all 后属性访问 MissingGreenlet 预取 id)。
+- T7:raise 点替换实为 10 处(含 T3 新增的 2 处 scope 404 分支),brief 表格计数是 M11 时点。
+- T8:b64 patch 移到 `_keyed_session` 之后——PyJWT 内部走 urlsafe_b64decode→b64decode,原顺序建 key 阶段即炸。
+- T10:`@change`→`watch(form.userId)`——element-plus 2.14.5 合成 `update:modelValue` 不 emit change,审查者实读组件源码证实。
+- T11:新 describe 补 beforeEach 清 mock 计数(vitest 未开 clearMocks)+ `undefined as never`(既有 TS 惯例)。
+
+**环境备忘**:`--reload` 对 backend\ 内 .py 的编辑触发两波延迟重启,可打断在途 MCP 会话(走查前确认无待触发 reload);reload 子进程继承 8001 socket,杀 netstat PID 不净,需按命令行定位孤儿子进程补杀。
+
+**M13 候选**(终审 triage 全部 ride):kb_ops busy 409 顺手统一为 DocOpError;413 预检与 404 可见性的先后顺序;ApiKeyOut.kb_scope 补默认值;`_permitted_kb_ids` 界外库免跑 perm 查询;loadKbOptions 双触发收敛;验收审计配对断言((action,target) 逐组);测试加固(JWT ask 配额断言/未用变量 kb_id)。旧候选:质量包(包裹型拒答 LLM 二审/评估入库/ask 延迟优化/多跳并行)、KB 重命名端点、MinerU 本地化、出站集成、A2A、LDAP/SSO(仍等输入)。
+
