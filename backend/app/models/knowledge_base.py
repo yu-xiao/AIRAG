@@ -8,7 +8,7 @@ class KnowledgeBase(Base, TimestampMixin):
     __tablename__ = "knowledge_bases"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String(128), index=True)
+    name: Mapped[str] = mapped_column(String(128), unique=True)
     description: Mapped[str | None] = mapped_column(Text)
     owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     embed_provider: Mapped[str] = mapped_column(String(32), default="zhipu")

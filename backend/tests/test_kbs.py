@@ -1,3 +1,6 @@
+import pytest
+
+
 async def test_create_kb(client, auth_headers):
     resp = await client.post(
         "/api/kbs",
@@ -121,17 +124,37 @@ async def test_create_kb_blank_after_strip_422(client, auth_headers):
     assert resp.json()["detail"] == "knowledge base name cannot be blank"
 
 
-async def test_create_kb_duplicate_name_409_when_db_already_has_two(client, auth_headers, db_session):
-    """终审加固:库中已存在两条同名记录时不得 500(MultipleResultsFound),仍应 409。"""
+# ---- M12:KB name DB 唯一约束 + create_kb IntegrityError 兜底 ----
+async def test_db_rejects_duplicate_kb_names(client, auth_headers, db_session):
+    """M12:唯一约束落地,直插同名行在 commit 时抛 IntegrityError。"""
+    from sqlalchemy.exc import IntegrityError
+
     from app.models import KnowledgeBase
 
     me = await client.get("/api/auth/me", headers=auth_headers)
     owner_id = me.json()["id"]
-    db_session.add_all([
-        KnowledgeBase(name="双胞胎库", owner_id=owner_id),
-        KnowledgeBase(name="双胞胎库", owner_id=owner_id),
-    ])
+    db_session.add(KnowledgeBase(name="双胞胎库", owner_id=owner_id))
     await db_session.commit()
-    resp = await client.post("/api/kbs", json={"name": "双胞胎库"}, headers=auth_headers)
+    db_session.add(KnowledgeBase(name="双胞胎库", owner_id=owner_id))
+    with pytest.raises(IntegrityError):
+        await db_session.commit()
+    await db_session.rollback()
+
+
+async def test_create_kb_unique_fallback_409(client, auth_headers, db_session,
+                                             monkeypatch):
+    """M12:并发兜底——重名 SELECT 恒空(模拟竞态)时 flush 撞唯一约束仍 409。"""
+    import app.api.kbs as kbs_mod
+    from app.models import KnowledgeBase
+
+    await client.post("/api/kbs", json={"name": "竞态库"}, headers=auth_headers)
+    real_select = kbs_mod.select
+
+    def blind_select(*a, **k):
+        return real_select(KnowledgeBase).where(KnowledgeBase.id < 0)
+
+    monkeypatch.setattr(kbs_mod, "select", blind_select)
+    resp = await client.post("/api/kbs", json={"name": "竞态库"},
+                             headers=auth_headers)
     assert resp.status_code == 409
     assert resp.json()["detail"] == "knowledge base name already exists"

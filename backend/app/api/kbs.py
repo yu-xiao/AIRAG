@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user
@@ -32,7 +33,12 @@ async def create_kb(
         name=name, description=payload.description, owner_id=current.id
     )
     db.add(kb)
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError:  # M12:并发窗口兜底,DB 唯一约束兜住
+        await db.rollback()
+        raise HTTPException(status_code=409,
+                            detail="knowledge base name already exists")
     await audit(db, current.username, "kb_create", f"kb:{kb.id}", {"name": name})
     await db.commit()
     await db.refresh(kb)
