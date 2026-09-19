@@ -1057,37 +1057,9 @@ git commit -m "feat(admin): user-visible kbs endpoint for scoped key issuance"
 
 ```python
 # ---- M12:KB 删除(级联 + 权限矩阵) ----
-async def _mk_full_kb(db_session, owner_id, name="删除库"):
-    """库 + 文档(done)+ chunk + 成员 + 会话引用 + 磁盘文件 + eval 集文件。"""
-    from app.core.config import settings
-    from app.models import Chunk, Conversation, Document, KbPermission
-
-    kb = KnowledgeBase(name=name, owner_id=owner_id)
-    db_session.add(kb)
-    await db_session.flush()
-    doc = Document(kb_id=kb.id, filename="a.docx", file_path="x", mime="m",
-                   size=1, sha256="del", status="done")
-    db_session.add(doc)
-    await db_session.flush()
-    db_session.add(Chunk(document_id=doc.id, kb_id=kb.id, chunk_index=0,
-                         content="c", char_len=1, content_hash="h"))
-    db_session.add(KbPermission(kb_id=kb.id, user_id=owner_id + 10 ** 6,
-                                perm="viewer"))  # 假想成员(user 无 FK 校验由 DB 保证,先造不引用)
-    other_kb = KnowledgeBase(name=name + "-邻", owner_id=owner_id)
-    db_session.add(other_kb)
-    await db_session.flush()
-    db_session.add(Conversation(user_id=owner_id, kb_ids=[kb.id, other_kb.id]))
-    await db_session.commit()
-    doc_dir = Path(settings.UPLOAD_DIR) / str(kb.id)
-    doc_dir.mkdir(parents=True, exist_ok=True)
-    (doc_dir / "f.docx").write_bytes(b"x")
-    return kb, doc, other_kb
-```
-
-注意:`KbPermission.user_id` 指向不存在的用户会触发 FK 违约——改为先注册真实用户:
-
-```python
 async def _mk_full_kb(client, db_session, owner_id, name="删除库"):
+    """库 + 文档(done)+ chunk + 成员 + 会话引用 + 磁盘文件(每次调用传不同 name
+    防唯一约束冲突;成员用真实注册用户防 FK 违约)。"""
     from pathlib import Path
 
     from app.core.config import settings
@@ -1118,8 +1090,6 @@ async def _mk_full_kb(client, db_session, owner_id, name="删除库"):
     (doc_dir / "f.docx").write_bytes(b"x")
     return kb, doc, other_kb
 ```
-
-(以第二个版本为准;两个名字段不同的库避免唯一约束冲突,测试内每次调用传不同 name。)
 
 ```python
 async def test_delete_kb_cascade(client, auth_headers, db_session, monkeypatch,
