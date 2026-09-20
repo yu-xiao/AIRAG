@@ -70,12 +70,19 @@ def main():
     ap.add_argument("--save", action="store_true")
     args = ap.parse_args()
 
-    results = asyncio.run(run(args.kb, args.top_k, args.rerank))
-    if args.save:
-        from scripts.eval_store import save_run
+    # M13 T10 快修:run 与 save_run 必须同一次 asyncio.run——两次 run 会
+    # 复用 SessionLocal 引擎的池化连接(绑定已关闭的首个事件循环),
+    # 第二次 checkout pre-ping 即崩(Event loop is closed / proactor None)
+    async def _amain() -> list[dict]:
+        results = await run(args.kb, args.top_k, args.rerank)
+        if args.save:
+            from scripts.eval_store import save_run
 
-        run_id = asyncio.run(save_run(args.kb, "retrieval", results))
-        print(f"saved: run_id={run_id}")
+            run_id = await save_run(args.kb, "retrieval", results)
+            print(f"saved: run_id={run_id}")
+        return results
+
+    results = asyncio.run(_amain())
     if args.json:
         print(json.dumps(results, ensure_ascii=False, indent=2))
         return

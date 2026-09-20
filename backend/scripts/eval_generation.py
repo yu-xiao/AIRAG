@@ -85,12 +85,18 @@ def main():
     ap.add_argument("--save", action="store_true")
     args = ap.parse_args()
 
-    results = asyncio.run(run(args.kb, args.rerank))
-    if args.save:
-        from scripts.eval_store import save_run
+    # M13 T10 快修:与 eval_retrieval 同款——run 与 save_run 同一次
+    # asyncio.run,避免池化连接绑死首个(已关闭的)事件循环
+    async def _amain() -> list[dict]:
+        results = await run(args.kb, args.rerank)
+        if args.save:
+            from scripts.eval_store import save_run
 
-        run_id = asyncio.run(save_run(args.kb, "generation", results))
-        print(f"saved: run_id={run_id}")
+            run_id = await save_run(args.kb, "generation", results)
+            print(f"saved: run_id={run_id}")
+        return results
+
+    results = asyncio.run(_amain())
     if args.json:
         print(json.dumps(results, ensure_ascii=False, indent=2))
         return

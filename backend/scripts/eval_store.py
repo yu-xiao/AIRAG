@@ -16,16 +16,19 @@ def summarize(results: list[dict]) -> dict:
         s["mrr"] = _avg([r["mrr"] for r in results if "mrr" in r])
         s["keyword_recall"] = _avg(
             [r["keyword_recall"] for r in results if "keyword_recall" in r])
-    faith = [r["faithfulness"]["score"] for r in results
-             if r.get("faithfulness", {}).get("score") is not None]
+    # M13 T10 快修:eval_generation 对无 reference_answer 的题产出
+    # "reference": None(键在值 None),r.get(k, {}) 的默认值不生效——
+    # 先 `or {}` 再取 score(与 save_run 落 EvalItem 的既有防护同款)
+    faith = [v for v in ((r.get("faithfulness") or {}).get("score")
+                         for r in results) if v is not None]
     if faith or any("faithfulness" in r for r in results):
         s["faithfulness_avg"] = _avg(faith)
-        s["relevancy_avg"] = _avg(
-            [r["relevancy"]["score"] for r in results
-             if r.get("relevancy", {}).get("score") is not None])
+        rel = [v for v in ((r.get("relevancy") or {}).get("score")
+                           for r in results) if v is not None]
+        s["relevancy_avg"] = _avg(rel)
         s["refused_count"] = sum(1 for r in results if r.get("refused"))
-    refs = [r["reference"]["score"] for r in results
-            if r.get("reference", {}).get("score") is not None]
+    refs = [v for v in ((r.get("reference") or {}).get("score")
+                        for r in results) if v is not None]
     if refs or any("reference" in r for r in results):
         s["reference_avg"] = _avg(refs)
     return s
