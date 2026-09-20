@@ -28,6 +28,20 @@ def test_summarize_generation_skips_none_scores():
     assert s["refused_count"] == 1
 
 
+def test_summarize_reference_key_with_none_value():
+    """T10 修复回归:reference 键在值 None(评估集无 reference_answer 的题,
+    eval_generation 产出 "reference": None)不崩溃;键在故 reference_avg
+    出现为 None(无分可聚合),faithfulness/relevancy 不受影响。"""
+    results = [
+        {"question": "q", "faithfulness": {"score": 0.9},
+         "relevancy": {"score": 0.8}, "refused": False,
+         "reference": None},
+    ]
+    s = summarize(results)
+    assert s["faithfulness_avg"] == 0.9
+    assert s["reference_avg"] is None
+
+
 async def test_save_run_roundtrip(db_session):
     results = [
         {"question": "q1", "expect_doc_ids": [11], "expect_keywords": ["三千"],
