@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     # M6 多跳兜底:检索不足且重检仍不足(或零命中)时拆子问题再检索
     MULTI_HOP_ENABLED: bool = True
     MULTI_HOP_MAX_SUBQ: int = 3
+    # M13:拒答 LLM 二审(启发式触发;conftest 钉 False)
+    REFUSAL_RECHECK_ENABLED: bool = True
     RETRIEVAL_TOP_K: int = 8
     # M7:rerank 相关度阈值,默认禁用;智谱 rerank relevance_score 实测全量饱和
     # 0.92~1.0(零命中/正常分布重叠,无可行阈值);换用有真实分数分布的 rerank

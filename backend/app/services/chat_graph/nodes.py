@@ -17,6 +17,36 @@ SYSTEM_PROMPT = (
     "用中文,简洁分点。"
 )
 
+# M13:包裹型拒答二审——先廉价启发式,命中才发一次 LLM(fail-open)
+_REFUSAL_SIGNALS = ("未找到", "没有找到", "没找到", "无法回答", "无法提供",
+                    "暂无", "无相关", "知识库中没", "抱歉", "超出")
+
+RECHECK_SYSTEM = (
+    "你是拒答判定器。判断下面这个\"答案\"是否实质上在表示知识库无法回答该问题"
+    "(明确表示没有相关资料/无法回答/建议查阅其他渠道等),"
+    "而非给出了实质内容。答案确实给出与问题相关的事实内容时判 false。"
+    '只输出 JSON:{"refused": true|false, "reason": "<一句话>"}'
+)
+
+
+def _looks_like_refusal(answer: str, has_hits: bool) -> bool:
+    a = (answer or "").strip()
+    return (not has_hits) or len(a) <= 40 or any(s in a for s in _REFUSAL_SIGNALS)
+
+
+async def _recheck_refusal(llm, question: str, answer: str) -> bool | None:
+    """LLM 二审;任何失败返回 None(fail-open,保持子串结果)。"""
+    try:
+        resp = await llm.ainvoke([
+            ("system", RECHECK_SYSTEM),
+            ("user", f"问题:{question}\n答案:{answer.strip()[:500]}"),
+        ])
+        parsed = json.loads(_extract_json(resp.content))
+        return bool(parsed["refused"])
+    except Exception:
+        logger.warning("refusal recheck failed, keep substring verdict")
+        return None
+
 
 def build_citations(hits: list[SearchHit]) -> list[dict]:
     return [
@@ -104,10 +134,16 @@ async def generate_node(state: dict, llm) -> dict:
         for h in hits
     ]
     answer = resp.content
+    refused = REFUSAL_PHRASE in (answer or "").strip()
+    if (not refused and settings.REFUSAL_RECHECK_ENABLED
+            and _looks_like_refusal(answer or "", bool(hits))):
+        verdict = await _recheck_refusal(llm, state["question"], answer or "")
+        if verdict is True:
+            refused = True
     return {
         "answer": answer,
         "citations": build_citations(shits),
-        "refused": REFUSAL_PHRASE in (answer or "").strip(),
+        "refused": refused,
     }
 
 

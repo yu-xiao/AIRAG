@@ -640,3 +640,78 @@ async def test_generate_normal_answer_not_refused():
     )
     assert out["refused"] is False
     assert out["citations"][0]["number"] == 1
+
+
+# ---- M13:包裹型拒答 LLM 二审 ----
+async def test_recheck_catches_paraphrased_refusal(monkeypatch):
+    """包裹型/近似措辞拒答:子串未命中 → 启发式触发 → LLM 二审改判 True。"""
+    from app.core.config import settings
+    from app.services.chat_graph.nodes import generate_node
+
+    monkeypatch.setattr(settings, "REFUSAL_RECHECK_ENABLED", True)
+    out = await generate_node(
+        {"question": "预算多少", "hits": [_hit(1, "无关资料")]},
+        # 第 1 个响应=答案(近似措辞),第 2 个=二审 judge JSON
+        llm=_LLMScript(["很抱歉,知识库中暂无该资料,无法提供预算信息。",
+                        '{"refused": true, "reason": "表示无法回答"}']),
+    )
+    assert out["refused"] is True
+
+
+async def test_recheck_normal_answer_stays_false(monkeypatch):
+    from app.core.config import settings
+    from app.services.chat_graph.nodes import generate_node
+
+    monkeypatch.setattr(settings, "REFUSAL_RECHECK_ENABLED", True)
+    out = await generate_node(
+        {"question": "预算多少", "hits": [_hit(1, "预算为三千万元")]},
+        llm=_LLMScript(["预算为三千万元。",   # 短答案(≤40字)会触发启发式
+                        '{"refused": false, "reason": "给出了事实"}']),
+    )
+    assert out["refused"] is False
+
+
+async def test_recheck_disabled_keeps_substring_semantics():
+    """开关关(conftest 默认):近似措辞仍 False(M8 语义锁定,零额外调用)。"""
+    from app.services.chat_graph.nodes import generate_node
+
+    out = await generate_node(
+        {"question": "q", "hits": []},
+        llm=_LLMScript(["知识库中未找到相关文档"]),
+    )
+    assert out["refused"] is False
+
+
+async def test_recheck_failopen_on_bad_judge(monkeypatch):
+    """二审 LLM 坏输出:保持子串结果(False),不误杀。"""
+    from app.core.config import settings
+    from app.services.chat_graph.nodes import generate_node
+
+    monkeypatch.setattr(settings, "REFUSAL_RECHECK_ENABLED", True)
+    out = await generate_node(
+        {"question": "q", "hits": [_hit(1, "资料")]},
+        llm=_LLMScript(["这段资料说明了一切。", "not-json-at-all"]),
+    )
+    assert out["refused"] is False
+
+
+async def test_recheck_not_triggered_for_long_normal_answer(monkeypatch):
+    """正常长答案(>40 字、无信号词):启发式不触发,judge 零调用。"""
+    from app.core.config import settings
+    from app.services.chat_graph import nodes as nodes_mod
+
+    monkeypatch.setattr(settings, "REFUSAL_RECHECK_ENABLED", True)
+    called = []
+
+    async def _spy(*a, **k):
+        called.append(1)
+        return False
+
+    monkeypatch.setattr(nodes_mod, "_recheck_refusal", _spy)
+    long_answer = "该项目共分三期实施。" + "详细进度与里程碑安排如下。" * 6
+    out = await nodes_mod.generate_node(
+        {"question": "项目进展", "hits": [_hit(1, "项目资料")]},
+        llm=_LLMScript([long_answer]),
+    )
+    assert out["refused"] is False
+    assert called == []  # 启发式未触发 → 二审未调

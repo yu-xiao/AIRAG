@@ -17,6 +17,8 @@ os.environ["AGENTIC_CRAG_ENABLED"] = "false"
 os.environ["CHECKPOINTER_ENABLED"] = "false"
 # M6:多跳兜底默认关闭(存量用例的 FakeListChatModel 只为 generate 准备了响应)
 os.environ["MULTI_HOP_ENABLED"] = "false"
+# M13:拒答二审默认关闭(存量用例锁 M8 子串语义;二审用例内 monkeypatch 打开)
+os.environ["REFUSAL_RECHECK_ENABLED"] = "false"
 # M7:验收后 dev .env 常开 RERANK_ENABLED=true;测试进程钉死关闭,
 # test_rerank_disabled_returns_none 依赖此约定(同 M5 agentic 模式)。
 os.environ["RERANK_ENABLED"] = "false"
