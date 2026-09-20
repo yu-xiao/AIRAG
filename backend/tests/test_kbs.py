@@ -337,6 +337,10 @@ async def test_rename_kb_matrix(client, auth_headers, db_session):
     assert (await client.put(
         f"/api/kbs/{kb_id}", json={"name": "   "},
         headers=auth_headers)).status_code == 422
+    # 超长 name → 422(与 create 一致,终审 Important#1)
+    assert (await client.put(
+        f"/api/kbs/{kb_id}", json={"name": "超" * 200},
+        headers=auth_headers)).status_code == 422
     # 重名 409(文案与 create 一致)
     r = await client.put(f"/api/kbs/{kb_id}",
                          json={"name": "占位库"}, headers=auth_headers)

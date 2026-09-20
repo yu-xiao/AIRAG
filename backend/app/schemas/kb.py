@@ -37,5 +37,5 @@ class GrantIn(BaseModel):
 class RenameIn(BaseModel):
     """M13:KB 重命名(至少一项;name 入库前 strip)。"""
 
-    name: str | None = None
-    description: str | None = None
+    name: str | None = Field(default=None, max_length=128)
+    description: str | None = Field(default=None, max_length=512)
