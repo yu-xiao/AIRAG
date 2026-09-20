@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 from loguru import logger
@@ -62,15 +63,18 @@ def build_citations(hits: list[SearchHit]) -> list[dict]:
     ]
 
 
+async def _search_one(query: str, kb_ids: list[int]) -> list:
+    """单查询检索;session-per-query(M13 并行,并发不可共享会话)。"""
+    async with SessionLocal() as db:
+        return await hybrid_search(db, kb_ids, query)
+
+
 async def retrieve_node(state: dict) -> dict:
     queries = state.get("sub_queries") or [
         state.get("search_query") or state["question"]
     ]
-    per_query = []
-    async with SessionLocal() as db:
-        for q in queries:
-            hits = await hybrid_search(db, state["kb_ids"], q)
-            per_query.append(hits)
+    per_query = list(await asyncio.gather(
+        *(_search_one(q, state["kb_ids"]) for q in queries)))
     # 跨查询轮转交错(chunk_id 去重),合并上限 2*top_k,留给 rerank 全局重排
     merged, seen = [], set()
     cap = settings.RETRIEVAL_TOP_K * 2
@@ -92,8 +96,6 @@ async def rerank_node(state: dict) -> dict:
     reranker = get_reranker()
     if reranker is None or not state.get("hits") or not state.get("rerank"):
         return {}
-    import asyncio
-
     hits = state["hits"]
     scored = await asyncio.to_thread(
         reranker.rerank, state["question"],

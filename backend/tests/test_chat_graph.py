@@ -765,3 +765,30 @@ async def test_grade_confident_disabled_falls_back_to_llm(monkeypatch):
         llm=_LLMScript(['{"verdict": "insufficient"}']),
     )
     assert out["grade"] == "insufficient"
+
+
+# ---- M13:多跳子问题并行检索 ----
+async def test_retrieve_parallel_queries_merge(monkeypatch):
+    """多查询并行检索:三个子问题进入时刻重叠,合并按 chunk_id 去重。"""
+    import asyncio
+
+    from app.services.chat_graph import nodes as nodes_mod
+
+    enter_ts = {}
+
+    async def fake_search_one(query, kb_ids):
+        from app.services.retrieval.searcher import SearchHit
+
+        enter_ts[query] = asyncio.get_event_loop().time()
+        await asyncio.sleep(0.05)          # 并行时三个查询进入时间应重叠
+        # brief 片段的 dict 改为 SearchHit:合并段按属性取 chunk_id(生产契约)
+        return [SearchHit(abs(hash(query)) % 1000, 1, kb_ids[0], "f", 1,
+                          f"内容-{query}", 0.5, "vector")]
+
+    monkeypatch.setattr(nodes_mod, "_search_one", fake_search_one)
+    out = await nodes_mod.retrieve_node(
+        {"question": "q", "kb_ids": [3],
+         "sub_queries": ["子1", "子2", "子3"]})
+    starts = sorted(enter_ts.values())
+    assert starts[2] - starts[0] < 0.04    # 几乎同时进入(并行)
+    assert len(out["hits"]) == 3           # 去重后各保留一条
