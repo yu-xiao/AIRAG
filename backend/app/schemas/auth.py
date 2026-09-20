@@ -44,7 +44,7 @@ class ApiKeyOut(BaseModel):
     expires_at: datetime | None
     last_used_at: datetime | None
     created_at: datetime
-    kb_scope: list[int] | None
+    kb_scope: list[int] | None = None  # M13 快修③:缺省 None(第三方构造不必显式传)
 
     model_config = {"from_attributes": True}
 

@@ -226,6 +226,23 @@ async def test_scoped_doc_ops_in_scope_works(client, auth_headers, db_session):
                                 headers=eh)).status_code == 204
 
 
+# ---- M13 Task6:快修② 预检后移(可见性/权限 → 预检 → 权威校验) ----
+async def test_precheck_after_visibility_invisible_kb(client, auth_headers,
+                                                      monkeypatch):
+    """M13 快修②:不可见库+超限 body → 404(预检不得先于可见性)。"""
+    from app.core.config import settings
+
+    key = await _create_key_role(client, auth_headers, "预检序编辑", "editor")
+    monkeypatch.setattr(settings, "MAX_UPLOAD_MB", 0)
+    resp = await client.post(
+        "/api/agent/kbs/999999/documents",
+        files={"file": ("big.docx", b"x" * (2 * 1024 * 1024),
+                        "application/octet-stream")},
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert resp.status_code == 404  # 现状是 413(预检在前)→ 本用例先红
+
+
 # ---- M12 Task8:小项② 上传 Content-Length 预检(agent REST 面) ----
 async def test_agent_upload_content_length_precheck_413(
         client, auth_headers, db_session, monkeypatch):

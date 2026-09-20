@@ -291,19 +291,23 @@ async def main() -> None:
             engine, maker = _nullpool_sessionmaker()
             try:
                 async with maker() as s7:
-                    rows = (await s7.execute(
-                        select(AuditLog.action).where(
-                            AuditLog.action.in_(
-                                ["kb_delete", "agent.upload_document"]),
-                            AuditLog.target.in_(
-                                [f"kb:{kb_in}", f"doc:{doc_id}"]),
-                        )
-                    )).scalars().all()
+                    # M13 快修⑥:按 (action, target) 对断言(独立超集会误配)
+                    pairs = set(
+                        (await s7.execute(
+                            select(AuditLog.action, AuditLog.target).where(
+                                AuditLog.action.in_([
+                                    "kb_delete", "agent.upload_document"]),
+                                AuditLog.target.in_([f"kb:{kb_in}",
+                                                     f"doc:{doc_id}"]),
+                            )
+                        )).all()
+                    )
             finally:
                 await engine.dispose()
-            check("audit bound to targets",
-                  set(rows) >= {"kb_delete", "agent.upload_document"},
-                  f"actions={rows}")
+            check("audit pairs bound to run",
+                  {("kb_delete", f"kb:{kb_in}"),
+                   ("agent.upload_document", f"doc:{doc_id}")} <= pairs,
+                  f"pairs={sorted(pairs)}")
         finally:
             await cleanup(user_ids, kb_ids, usernames)
     summary_and_exit()

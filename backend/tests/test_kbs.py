@@ -263,6 +263,25 @@ async def test_delete_kb_busy_409(client, auth_headers, db_session):
     assert await db_session.get(KnowledgeBase, kb_id) is not None  # 行未动
 
 
+# ---- M13 Task6:快修① busy 统一 DocOpError(HTTP 报文零变化) ----
+async def test_delete_kb_busy_docoperror_response(client, auth_headers,
+                                                  db_session):
+    """M13 快修①:kb_ops busy 409 走 DocOpError,HTTP 报文不变。"""
+    from app.models import Document, KnowledgeBase
+
+    me = await client.get("/api/auth/me", headers=auth_headers)
+    kb = KnowledgeBase(name="快修忙库", owner_id=me.json()["id"])
+    db_session.add(kb)
+    await db_session.flush()
+    db_session.add(Document(kb_id=kb.id, filename="a.docx", file_path="x",
+                            mime="m", size=1, sha256="fixbusy",
+                            status="parsing"))
+    await db_session.commit()
+    r = await client.delete(f"/api/kbs/{kb.id}", headers=auth_headers)
+    assert r.status_code == 409
+    assert r.json()["detail"] == "knowledge base has documents being processed"
+
+
 async def test_delete_kb_permissions(client, auth_headers, db_session):
     from sqlalchemy import text
 

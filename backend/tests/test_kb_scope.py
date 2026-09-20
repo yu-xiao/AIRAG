@@ -116,3 +116,23 @@ async def test_scope_intersects_user_perm(client, auth_headers, db_session):
                           headers={"Authorization": f"Bearer {key}"})
     assert r.status_code == 403
     assert r.json()["detail"]["denied_kb_ids"] == [other_kb.json()["id"]]
+
+
+# ---- M13 Task6:快修④ 界外先判(免烧 perm 查询,行为不变) ----
+async def test_out_of_scope_skips_perm_query(client, auth_headers, db_session,
+                                             monkeypatch):
+    """M13 快修④:界外库不再烧 perm DB 查询(条件重排,行为不变)。"""
+    from unittest.mock import AsyncMock
+
+    import app.services.agent_facade as facade_mod
+
+    kb_in, kb_out = await _two_kbs(client, auth_headers)
+    key = await _scoped_key(client, auth_headers, db_session, [kb_in])
+    real_perm = facade_mod.get_kb_perm
+    perm = AsyncMock(side_effect=real_perm)
+    monkeypatch.setattr(facade_mod, "get_kb_perm", perm)
+    r = await client.post("/api/agent/search",
+                          json={"kb_ids": [kb_out], "query": "q"},
+                          headers={"Authorization": f"Bearer {key}"})
+    assert r.status_code == 403
+    assert perm.await_count == 0  # 界外判定不触达 perm(现状 ≥1 → 先红)

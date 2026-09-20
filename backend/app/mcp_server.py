@@ -70,8 +70,7 @@ _TOP_K_DEFAULT = settings.RETRIEVAL_TOP_K
 _SEARCH_DOC = f"""在指定知识库中混合检索(向量 + 关键词,RRF 融合)。
 
 Args:
-    kb_ids: 知识库 id 列表(1~5 个),须为当前密钥有权访问的库
-    (若密钥设了范围,还须在范围内)。
+    kb_ids: 知识库 id 列表(1~5 个),须为当前密钥有权访问的库(若密钥设了范围,还须在范围内)。
     query: 检索问题,1~500 字。
     top_k: 命中条数上限,1~20,默认 {_TOP_K_DEFAULT}。
     rerank: 是否启用 rerank 重排(服务端未配置 rerank 时忽略)。
@@ -122,8 +121,7 @@ async def ask_knowledge_base(
     而非检索片段。
 
     Args:
-        kb_ids: 知识库 id 列表(1~5 个),须为当前密钥有权访问的库
-        (若密钥设了范围,还须在范围内)。
+        kb_ids: 知识库 id 列表(1~5 个),须为当前密钥有权访问的库(若密钥设了范围,还须在范围内)。
         query: 问题,1~500 字。单轮无上下文,追问请携带完整问题。
         rerank: 是否启用 rerank 重排(服务端未配置 rerank 时忽略)。
 
@@ -179,8 +177,7 @@ _UPLOAD_DOC = """上传文档到指定知识库并触发解析流水线(异步)�
 status 直到 done/failed。
 
 Args:
-    kb_id: 目标知识库 id,须为当前密钥归属用户有 editor 权限的库
-    (若密钥设了范围,还须在范围内)。
+    kb_id: 目标知识库 id,须为当前密钥归属用户有 editor 权限的库(若密钥设了范围,还须在范围内)。
     filename: 文件名(含扩展名;.pdf/.docx/.xlsx/.jpg/.jpeg/.png)。
     content_b64: 文件内容的 base64 编码(解码后不超过服务端 MAX_UPLOAD_MB)。
     ocr: OCR 模式 auto|force|off,默认 auto。

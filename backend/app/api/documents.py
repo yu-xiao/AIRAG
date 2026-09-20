@@ -42,12 +42,12 @@ async def upload_document(
     current: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    await _require_kb_editor(db, current, kb_id)
+    # M13 快修②:可见性/权限 → 预检 → 权威校验(save_upload);
+    # multipart 开销 +1MB 松余量,宁可漏报不可误报
     cl = request.headers.get("content-length")
     if cl and int(cl) > (settings.MAX_UPLOAD_MB + 1) * 1024 * 1024:
-        # M12 小项②:multipart 开销 +1MB 松余量,宁可漏报不可误报;
-        # 权威校验仍在 save_upload(413)
         raise HTTPException(status_code=413, detail="file too large")
-    await _require_kb_editor(db, current, kb_id)
     kb = await db.get(KnowledgeBase, kb_id)
     payload = await file.read()
     return await doc_ops.save_upload(

@@ -240,14 +240,14 @@ async def agent_upload_document(
     db: AsyncSession = Depends(get_db),
 ):
     await _check_rate(principal)
-    cl = request.headers.get("content-length")
-    if cl and int(cl) > (settings.MAX_UPLOAD_MB + 1) * 1024 * 1024:
-        # M12 小项②:multipart 开销 +1MB 松余量,宁可漏报不可误报;
-        # 权威校验仍在 save_upload(413)
-        raise HTTPException(status_code=413, detail="file too large")
     kb = await doc_ops.visible_kb_or_404(db, principal.user, kb_id,
                                          principal.key_scope)
     await _kb_editor_or_403(db, principal, kb)
+    # M13 快修②:可见性/权限 → 预检 → 权威校验(save_upload);
+    # multipart 开销 +1MB 松余量,宁可漏报不可误报
+    cl = request.headers.get("content-length")
+    if cl and int(cl) > (settings.MAX_UPLOAD_MB + 1) * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="file too large")
     payload = await file.read()
     return await doc_ops.save_upload(
         db, kb, filename=file.filename, payload=payload,

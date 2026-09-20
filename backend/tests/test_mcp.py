@@ -604,10 +604,19 @@ async def test_mcp_ask_with_jwt_principal(mcp_client, auth_headers,
     hdr = {"Authorization": auth_headers["Authorization"],
            "Accept": ACCEPT}
     sid = await _init(mcp_client, hdr)
+    quota_calls = []  # M13⑦b:JWT 主体不烧配额检查
+    from app.mcp_server import quota_check as _orig_quota
+
+    async def spy_quota(key_id):
+        quota_calls.append(key_id)
+        return await _orig_quota(key_id)
+
+    monkeypatch.setattr("app.mcp_server.quota_check", spy_quota)
     rj = await _tool_call(mcp_client, hdr, sid, "ask_knowledge_base",
                           {"kb_ids": [kb_id], "query": "q"}, 32)
     body = _tool_result(rj)
     assert body["answer"] == "jwt 通道答案。"
+    assert quota_calls == []  # M13⑦b:JWT 主体不烧配额检查
 
 
 async def test_mcp_busy_toolerror_text(mcp_client, auth_headers, db_session):

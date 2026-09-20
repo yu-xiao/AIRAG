@@ -97,9 +97,6 @@ async def test_create_key_with_role_and_default(client, auth_headers):
 async def test_create_key_kb_scope_validation(client, auth_headers, db_session):
     from sqlalchemy import text
 
-    from tests.test_agent_api import _create_kb
-
-    kb_id = await _create_kb(client, auth_headers, "范围库")
     # 空列表 422
     r0 = await client.post("/api/auth/keys",
                            json={"name": "空范围", "kb_scope": []},
@@ -179,3 +176,14 @@ async def test_api_key_out_role_literal():
     assert ApiKeyOut.model_validate({**base, "role": "editor"}).role == "editor"
     with _pytest.raises(ValidationError):
         ApiKeyOut.model_validate({**base, "role": "bogus"})
+
+
+# ---- M13 Task6:快修③ kb_scope 缺省 ----
+async def test_api_key_out_kb_scope_default():
+    """M13 快修③:kb_scope 缺省 None(第三方构造不必显式传)。"""
+    from app.schemas.auth import ApiKeyOut
+
+    base = dict(id=1, name="n", key_prefix="airag_x", role="editor",
+                is_active=True, expires_at=None, last_used_at=None,
+                created_at="2026-09-20T00:00:00")
+    assert ApiKeyOut.model_validate(base).kb_scope is None

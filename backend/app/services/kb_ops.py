@@ -7,7 +7,6 @@ array_remove 清悬空 id → KB 行 → 审计 → commit → 磁盘/评估集�
 import shutil
 from pathlib import Path
 
-from fastapi import HTTPException
 from loguru import logger
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,7 +15,7 @@ from app.core.config import settings
 from app.models import (Chunk, Conversation, Document, KbPermission,
                         KnowledgeBase)
 from app.services.audit import audit
-from app.services.doc_ops import BUSY_STATUSES
+from app.services.doc_ops import BUSY_STATUSES, DocOpError
 
 # 与 scripts/purge_orphan_evalsets.py 同源(backend/eval_sets)
 EVAL_DIR = Path(__file__).resolve().parents[2] / "eval_sets"
@@ -34,9 +33,9 @@ async def delete_knowledge_base(
         ).limit(1)
     )).scalar_one_or_none()
     if busy is not None:
-        raise HTTPException(
-            status_code=409,
-            detail="knowledge base has documents being processed")
+        # M13 快修①:统一走 DocOpError(main.py 全局 handler,报文零变化)
+        raise DocOpError("busy", 409,
+                         "knowledge base has documents being processed")
     doc_count = (await db.execute(
         select(func.count(Document.id)).where(Document.kb_id == kb_id)
     )).scalar_one()

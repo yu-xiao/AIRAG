@@ -48,8 +48,8 @@ async def _permitted_kb_ids(
     denied = [
         kb_id for kb_id in kb_ids
         if kb_id not in by_id
+        or (key_scope is not None and kb_id not in key_scope)  # M13:界外先判
         or await get_kb_perm(db, user, by_id[kb_id]) is None
-        or (key_scope is not None and kb_id not in key_scope)
     ]
     if denied:
         raise AgentKbDenied(denied)
