@@ -7,7 +7,7 @@ from app.core.deps import get_current_user
 from app.core.perms import get_kb_perm, has_perm
 from app.db.session import get_db
 from app.models import Document, KnowledgeBase, KbPermission, User
-from app.schemas.kb import GrantIn, KBIn, KBOut, MemberOut
+from app.schemas.kb import GrantIn, KBIn, KBOut, MemberOut, RenameIn
 from app.services import kb_ops
 from app.services.audit import audit
 
@@ -141,6 +141,46 @@ async def delete_kb(
                             detail="owner or admin required")
     await kb_ops.delete_knowledge_base(db, kb, username=current.username)
     return Response(status_code=204)
+
+
+@router.put("/{kb_id}", response_model=KBOut)
+async def rename_kb(
+    kb_id: int,
+    payload: RenameIn,
+    current: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """M13:重命名/改描述(admin/owner;重名 409)。"""
+    kb = await db.get(KnowledgeBase, kb_id)
+    if kb is None:
+        raise HTTPException(status_code=404, detail="knowledge base not found")
+    perm = await get_kb_perm(db, current, kb)
+    if perm is None:
+        raise HTTPException(status_code=404, detail="knowledge base not found")
+    if not has_perm(perm, "owner"):
+        raise HTTPException(status_code=403,
+                            detail="owner or admin required")
+    name = payload.name.strip() if payload.name is not None else None
+    if name == "":
+        raise HTTPException(status_code=422,
+                            detail="knowledge base name cannot be blank")
+    if name is None and payload.description is None:
+        raise HTTPException(status_code=422, detail="nothing to update")
+    try:
+        kb = await kb_ops.rename_knowledge_base(
+            db, kb, name=name, description=payload.description,
+            username=current.username)
+    except (IntegrityError, kb_ops.DocOpError):
+        # 并发兜底 + 应用层重名(duplicate 是 rename 唯一 DocOpError 码)
+        await db.rollback()
+        raise HTTPException(status_code=409,
+                            detail="knowledge base name already exists")
+    out = KBOut.model_validate(kb)
+    out.my_perm = perm
+    out.doc_count = (await db.execute(
+        select(func.count(Document.id)).where(Document.kb_id == kb_id)
+    )).scalar_one()
+    return out
 
 
 @router.get("/{kb_id}/permissions", response_model=list[MemberOut])

@@ -62,3 +62,27 @@ async def delete_knowledge_base(
         (EVAL_DIR / f"{kb_id}.json").unlink(missing_ok=True)
     except OSError:
         logger.warning(f"eval set removal failed: kb {kb_id}")
+
+
+async def rename_knowledge_base(
+    db: AsyncSession, kb: KnowledgeBase, *, name: str | None,
+    description: str | None, username: str,
+) -> KnowledgeBase:
+    """重命名/改描述(owner/admin 由端点校验);重名 409,审计 kb_update。"""
+    old_name = kb.name
+    if name is not None and name != kb.name:
+        dup = (await db.execute(
+            select(KnowledgeBase).where(KnowledgeBase.name == name)
+        )).scalars().first()
+        if dup is not None:
+            raise DocOpError("duplicate", 409,
+                             "knowledge base name already exists")
+        kb.name = name
+    if description is not None:
+        kb.description = description
+    detail = ({"name": {"old": old_name, "new": kb.name}}
+              if kb.name != old_name else {"description": "updated"})
+    await audit(db, username, "kb_update", f"kb:{kb.id}", detail)
+    await db.commit()
+    await db.refresh(kb)
+    return kb

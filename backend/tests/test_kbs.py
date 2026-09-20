@@ -323,3 +323,79 @@ async def test_delete_kb_permissions(client, auth_headers, db_session):
     await db_session.commit()
     assert (await client.delete(f"/api/kbs/{kb.id}",
                                 headers=auth_headers)).status_code == 204
+
+
+# ---- M13:KB 重命名 ----
+async def test_rename_kb_matrix(client, auth_headers, db_session):
+    created = await client.post("/api/kbs", json={"name": "原名库"},
+                                headers=auth_headers)
+    kb_id = created.json()["id"]
+    await client.post("/api/kbs", json={"name": "占位库"}, headers=auth_headers)
+    # 皆空 422 / 空名 422
+    assert (await client.put(
+        f"/api/kbs/{kb_id}", json={}, headers=auth_headers)).status_code == 422
+    assert (await client.put(
+        f"/api/kbs/{kb_id}", json={"name": "   "},
+        headers=auth_headers)).status_code == 422
+    # 重名 409(文案与 create 一致)
+    r = await client.put(f"/api/kbs/{kb_id}",
+                         json={"name": "占位库"}, headers=auth_headers)
+    assert r.status_code == 409
+    assert r.json()["detail"] == "knowledge base name already exists"
+    # 正常改名 + 改描述 → 200,回显新名
+    r2 = await client.put(f"/api/kbs/{kb_id}",
+                          json={"name": "新名库", "description": "新描述"},
+                          headers=auth_headers)
+    assert r2.status_code == 200
+    assert r2.json()["name"] == "新名库"
+    assert r2.json()["description"] == "新描述"
+    assert r2.json()["my_perm"] == "owner"
+    # 陌生人 404 / 授权 editor 403
+    stranger = await _register_and_login(client, "ren_str1")
+    assert (await client.put(f"/api/kbs/{kb_id}", json={"name": "x"},
+                             headers=stranger)).status_code == 404
+    member = await _register_and_login(client, "ren_mem1")
+    mid = (await client.get("/api/auth/me", headers=member)).json()["id"]
+    from app.models import KbPermission
+
+    db_session.add(KbPermission(kb_id=kb_id, user_id=mid, perm="editor"))
+    await db_session.commit()
+    assert (await client.put(f"/api/kbs/{kb_id}", json={"name": "x"},
+                             headers=member)).status_code == 403
+    # 审计 kb_update(detail 含新旧名)
+    import json as _json
+
+    from sqlalchemy import select as _select
+
+    from app.models import AuditLog
+
+    db_session.expire_all()
+    audit_row = (await db_session.execute(
+        _select(AuditLog).where(AuditLog.action == "kb_update",
+                                AuditLog.target == f"kb:{kb_id}")
+    )).scalars().one()
+    detail = _json.loads(audit_row.detail)
+    assert detail["name"] == {"old": "原名库", "new": "新名库"}
+
+
+async def test_rename_kb_integrity_fallback_409(client, auth_headers,
+                                                db_session, monkeypatch):
+    """并发兜底:唯一性 SELECT 恒空时 flush 撞 DB 约束仍 409。"""
+    import app.services.kb_ops as kb_ops_mod
+    from app.models import KnowledgeBase
+
+    await client.post("/api/kbs", json={"name": "竞态改名库"},
+                      headers=auth_headers)
+    me = await client.get("/api/auth/me", headers=auth_headers)
+    kb = KnowledgeBase(name="竞态改名目标", owner_id=me.json()["id"])
+    db_session.add(kb)
+    await db_session.commit()
+    real_select = kb_ops_mod.select
+
+    def blind_select(*a, **k):
+        return real_select(KnowledgeBase).where(KnowledgeBase.id < 0)
+
+    monkeypatch.setattr(kb_ops_mod, "select", blind_select)
+    r = await client.put(f"/api/kbs/{kb.id}",
+                         json={"name": "竞态改名库"}, headers=auth_headers)
+    assert r.status_code == 409

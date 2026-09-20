@@ -32,3 +32,10 @@ class MemberOut(BaseModel):
 class GrantIn(BaseModel):
     username: str = Field(min_length=3, max_length=32)
     perm: Literal["viewer", "editor"]
+
+
+class RenameIn(BaseModel):
+    """M13:KB 重命名(至少一项;name 入库前 strip)。"""
+
+    name: str | None = None
+    description: str | None = None
