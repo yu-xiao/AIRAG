@@ -39,6 +39,8 @@ TestSession = async_sessionmaker(engine, expire_on_commit=False)
 
 CLEANUP_ORDER = [
     "audit_logs",
+    "eval_items",
+    "eval_runs",
     "messages",
     "conversations",
     "chunks",
