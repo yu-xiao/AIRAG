@@ -45,3 +45,17 @@ async def faithfulness_score(llm, question: str, answer: str, contexts: list[str
 async def relevancy_score(llm, question: str, answer: str) -> dict:
     user = f"问题:{question}\n答案:{answer}"
     return await _judge(llm, RELEVANCY_SYSTEM, user)
+
+
+REFERENCE_SYSTEM = (
+    "你是答案一致性评审。对照参考答案判断回答是否覆盖了参考答案的关键事实:"
+    "关键事实完整一致接近1.0,部分覆盖取中间值,存在明显冲突或遗漏接近0.0;"
+    '回答明确表示无法从资料回答时按0.0。'
+    '只输出 JSON:{"score": <0.0~1.0 的数值>, "reasons": "<一句话依据>"}'
+)
+
+
+async def reference_score(llm, question: str, answer: str,
+                          reference: str) -> dict:
+    user = f"问题:{question}\n参考答案:{reference}\n回答:{answer}"
+    return await _judge(llm, REFERENCE_SYSTEM, user)

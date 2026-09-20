@@ -26,7 +26,11 @@ async def run(kb_id: int, use_rerank: bool) -> list[dict]:
     from app.db.session import SessionLocal
     from app.models import KnowledgeBase
     from app.services.chat_graph.graph import build_graph, make_chat_llm
-    from app.services.eval_judge import faithfulness_score, relevancy_score
+    from app.services.eval_judge import (
+        faithfulness_score,
+        reference_score,
+        relevancy_score,
+    )
 
     if not settings.ZHIPU_API_KEY:
         sys.exit("ZHIPU_API_KEY 未配置:桩答案的 LLM-judge 评估无意义,拒绝运行")
@@ -57,6 +61,12 @@ async def run(kb_id: int, use_rerank: bool) -> list[dict]:
         results.append(
             {
                 "question": item["question"],
+                "answer": answer,
+                "reference": (
+                    await reference_score(llm, item["question"], answer,
+                                          item["reference_answer"])
+                    if item.get("reference_answer") else None
+                ),
                 "faithfulness": await faithfulness_score(
                     llm, item["question"], answer, contexts),
                 "relevancy": await relevancy_score(llm, item["question"], answer),
@@ -72,9 +82,15 @@ def main():
     ap.add_argument("--kb", type=int, required=True)
     ap.add_argument("--rerank", action="store_true")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--save", action="store_true")
     args = ap.parse_args()
 
     results = asyncio.run(run(args.kb, args.rerank))
+    if args.save:
+        from scripts.eval_store import save_run
+
+        run_id = asyncio.run(save_run(args.kb, "generation", results))
+        print(f"saved: run_id={run_id}")
     if args.json:
         print(json.dumps(results, ensure_ascii=False, indent=2))
         return

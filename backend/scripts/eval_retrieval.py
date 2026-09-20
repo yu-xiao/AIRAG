@@ -49,6 +49,8 @@ async def run(kb_id: int, top_k: int, use_rerank: bool) -> list[dict]:
             results.append(
                 {
                     "question": item["question"],
+                    "expect_doc_ids": item.get("expect_doc_ids"),
+                    "expect_keywords": item.get("expect_keywords"),
                     "hit_at_k": hit_at_k(doc_ids, item.get("expect_doc_ids", [])),
                     "mrr": mrr(doc_ids, item.get("expect_doc_ids", [])),
                     "keyword_recall": keyword_recall(
@@ -65,9 +67,15 @@ def main():
     ap.add_argument("--top-k", type=int, default=8)
     ap.add_argument("--rerank", action="store_true")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--save", action="store_true")
     args = ap.parse_args()
 
     results = asyncio.run(run(args.kb, args.top_k, args.rerank))
+    if args.save:
+        from scripts.eval_store import save_run
+
+        run_id = asyncio.run(save_run(args.kb, "retrieval", results))
+        print(f"saved: run_id={run_id}")
     if args.json:
         print(json.dumps(results, ensure_ascii=False, indent=2))
         return

@@ -41,6 +41,16 @@ async def test_judge_retries_once_then_none():
     assert bad["score"] is None
 
 
+async def test_reference_score_parses_and_clamps():
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+
+    from app.services.eval_judge import reference_score
+
+    llm = FakeListChatModel(responses=['{"score": 1.7, "reasons": "一致"}'])
+    out = await reference_score(llm, "预算?", "三千万元", "约三千万元")
+    assert out["score"] == 1.0 and out["reasons"] == "一致"
+
+
 async def test_judge_prompt_shape():
     from app.services.eval_judge import faithfulness_score, relevancy_score
 
