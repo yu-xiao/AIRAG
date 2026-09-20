@@ -95,6 +95,49 @@ async function submit() {
   }
 }
 
+// ---- M13:重命名知识库(owner 可见;重名 409 内联提示) ----
+const renameVisible = ref(false)
+const renameRef = ref<FormInstance>()
+const renameForm = reactive({ id: 0, name: '', description: '' })
+const renameSubmitting = ref(false)
+const renameServerError = ref('')
+
+function openRename(row: KbItem) {
+  // 先清旧校验态再预填:resetFields 会把字段回滚到表单首挂载时的值,
+  // 若放在赋值之后,第二次打开会把新行数据覆盖回上一次的旧值
+  renameRef.value?.resetFields()
+  renameForm.id = row.id
+  renameForm.name = row.name
+  renameForm.description = row.description ?? ''
+  renameServerError.value = ''
+  renameVisible.value = true
+}
+
+async function submitRename() {
+  const valid = await renameRef.value?.validate().catch(() => false)
+  if (!valid) return
+  renameSubmitting.value = true
+  try {
+    await kbApi.rename(renameForm.id, {
+      name: renameForm.name.trim(),
+      description: renameForm.description.trim() || null,
+    })
+    ElMessage.success('已更新')
+    renameVisible.value = false
+    await load()
+  } catch (e) {
+    const resp = (e as { response?: { status?: number; data?: { detail?: string } } })
+      ?.response
+    if (resp?.status === 409) {
+      renameServerError.value = '该名称已存在,请换一个名称'
+    } else {
+      ElMessage.error(resp?.data?.detail ?? '更新失败')
+    }
+  } finally {
+    renameSubmitting.value = false
+  }
+}
+
 function openDocs(row: KbItem) {
   router.push(`/kb/${row.id}/docs`)
 }
@@ -314,6 +357,10 @@ onMounted(() => {
           <el-button v-if="row.my_perm === 'owner'" size="small" plain @click="openMembers(row)">
             成员
           </el-button>
+          <el-button v-if="row.my_perm === 'owner'" size="small" plain
+                     @click="openRename(row)">
+            重命名
+          </el-button>
           <el-button
             v-if="row.my_perm === 'owner'"
             size="small"
@@ -351,6 +398,27 @@ onMounted(() => {
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="submitting" @click="submit">创建</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="renameVisible" title="重命名知识库" width="480px">
+      <el-form ref="renameRef" :model="renameForm" :rules="rules"
+               label-position="top">
+        <el-form-item label="名称" prop="name"
+                      :error="renameServerError || undefined">
+          <el-input v-model="renameForm.name" maxlength="128"
+                    placeholder="请输入知识库名称"
+                    @input="renameServerError = ''" />
+        </el-form-item>
+        <el-form-item label="描述" prop="description">
+          <el-input v-model="renameForm.description" type="textarea" :rows="3"
+                    placeholder="可选,不超过 512 字符" maxlength="512" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="renameVisible = false">取消</el-button>
+        <el-button type="primary" :loading="renameSubmitting"
+                   @click="submitRename">保存</el-button>
       </template>
     </el-dialog>
 

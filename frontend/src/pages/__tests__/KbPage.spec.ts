@@ -21,6 +21,7 @@ vi.mock('@/api/kb', () => ({
     members: vi.fn(),
     grant: vi.fn(),
     remove: vi.fn(),
+    rename: vi.fn(),
   },
 }))
 vi.mock('@/api/users', () => ({
@@ -148,5 +149,57 @@ describe('KbPage delete kb', () => {
     await flushPromises()
     expect(kbApi.remove).toHaveBeenCalledTimes(2)
     confirmSpy.mockRestore()
+  })
+})
+
+describe('KbPage rename dialog', () => {
+  const owned4: KbItem = {
+    id: 12, name: '旧名库', description: '旧描述', owner_id: 1,
+    embed_provider: 'fake', embed_model: 'x', my_perm: 'owner',
+    doc_count: 0, created_at: '2026-09-20T10:00:00',
+  }
+
+  it('owner card opens edit dialog prefilled; submit calls rename', async () => {
+    vi.mocked(kbApi.list).mockResolvedValue([owned4])
+    vi.mocked(kbApi.rename).mockResolvedValue({ ...owned4, name: '新名库' })
+    const w = mount(KbPage, { global: { plugins: [ElementPlus] } })
+    await flushPromises()
+    await w.findAll('button').find((b) =>
+      b.text().trim() === '重命名')!.trigger('click')
+    await flushPromises()
+    expect(w.text()).toContain('重命名知识库')
+    // tsconfig lib < es2022 无 Array.at,用 slice(-1)[0] 等价取最后一个
+    const nameInput = w.findAll('input[placeholder="请输入知识库名称"]')
+      .slice(-1)[0] as ReturnType<typeof w.find>
+    expect((nameInput.element as HTMLInputElement).value).toBe('旧名库')
+    await nameInput.setValue('新名库')
+    await w.findAll('button').find((b) =>
+      b.text() === '保存')!.trigger('click')
+    await flushPromises()
+    expect(kbApi.rename).toHaveBeenCalledWith(12, {
+      name: '新名库', description: '旧描述',
+    })
+  })
+
+  it('409 shows inline name error and keeps dialog open', async () => {
+    vi.mocked(kbApi.list).mockResolvedValue([owned4])
+    vi.mocked(kbApi.rename).mockRejectedValue({
+      response: { status: 409, data: { detail: 'knowledge base name already exists' } },
+    })
+    const w = mount(KbPage, { global: { plugins: [ElementPlus] } })
+    await flushPromises()
+    await w.findAll('button').find((b) =>
+      b.text().trim() === '重命名')!.trigger('click')
+    await flushPromises()
+    const nameInput = w.findAll('input[placeholder="请输入知识库名称"]')
+      .slice(-1)[0] as ReturnType<typeof w.find>
+    await nameInput.setValue('重名库')
+    await w.findAll('button').find((b) =>
+      b.text() === '保存')!.trigger('click')
+    await flushPromises()
+    await vi.waitFor(() => {
+      expect(w.find('.el-form-item__error').exists()).toBe(true)
+    })
+    expect(w.find('.el-form-item__error').text()).toContain('已存在')
   })
 })

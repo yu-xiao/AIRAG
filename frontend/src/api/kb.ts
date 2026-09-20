@@ -38,6 +38,12 @@ export const kbApi = {
     return data
   },
 
+  /** M13:重命名/改描述(owner/admin;重名 409) */
+  async rename(kbId: number, payload: KbIn): Promise<KbItem> {
+    const { data } = await http.put<KbItem>(`/kbs/${kbId}`, payload)
+    return data
+  },
+
   async detail(kbId: number): Promise<KbItem> {
     const { data } = await http.get<KbItem>(`/kbs/${kbId}`)
     return data
