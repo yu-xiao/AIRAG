@@ -73,15 +73,19 @@ async function loadKbOptions() {
   }
 }
 
-function onBindUserChange() {
-  form.kbScope = []
-  loadKbOptions()
-}
-
 // 绑定账号变化即刷新范围选项。用 watch 而非 el-select @change:
 // ElSelect 仅在用户点选时 emit change,外部更新 v-model(如测试合成事件)不触发,
 // watch 对两种路径都生效,避免真实交互下 change+watch 双重加载。
-watch(() => form.userId, onBindUserChange)
+// M13 收敛:仅在真正切换到不同账号(新值非空且≠旧值)时清空范围并重载;
+// 置空(用户清除绑定 / openCreate、submit 复位)只清选项,不发起请求。
+watch(() => form.userId, (nv, ov) => {
+  if (nv && nv !== ov) {
+    form.kbScope = []
+    loadKbOptions()
+  } else if (!nv) {
+    kbOptions.value = []
+  }
+})
 
 function openCreate() {
   form.name = ''

@@ -245,4 +245,38 @@ describe('KeysPage kb scope picker', () => {
       expires_in_days: null, kb_scope: [5],
     })
   })
+
+  it('clearing bound account does not reload kb options', async () => {
+    // 计数断言需清掉前面用例残留(adminUserKbs/kbApi.list 在上方用例已被调用)
+    vi.mocked(keysApi.adminUserKbs).mockReset()
+    vi.mocked(kbApi.list).mockReset()
+    vi.mocked(useAuthStore).mockReturnValueOnce({
+      user: { id: 1, username: 'boss', role: 'admin' },
+    } as never)
+    vi.mocked(keysApi.list).mockResolvedValue([])
+    vi.mocked(usersApi.search).mockResolvedValue([{ id: 7, username: 'alice' }])
+    vi.mocked(keysApi.adminUserKbs).mockResolvedValue([])
+    vi.mocked(kbApi.list).mockResolvedValue([])
+    const w = mountPage()
+    await flushPromises()
+    await findBtn(w, '创建密钥').trigger('click')
+    await flushPromises()
+    const sels = w.findAllComponents(ElSelect)
+    const bindSel = sels.find((s) =>
+      s.props('placeholder') === '默认绑定当前账号')!
+    await (bindSel.props('remoteMethod') as (q: string) => void)('ali')
+    await flushPromises()
+    await bindSel.vm.$emit('update:modelValue', 7)
+    await flushPromises()
+    expect(keysApi.adminUserKbs).toHaveBeenCalledTimes(1)
+    // 清空绑定 → 只清选项,不再发起请求(现状 watch 无条件重载会再拉一次 kbApi.list → 先红)
+    await bindSel.vm.$emit('update:modelValue', null)
+    await flushPromises()
+    expect(kbApi.list).toHaveBeenCalledTimes(1) // 仅 openCreate 初次加载
+    expect(keysApi.adminUserKbs).toHaveBeenCalledTimes(1)
+    // 清空后再选回账号(nv=7≠ov=null)属真正切换 → 恢复重载
+    await bindSel.vm.$emit('update:modelValue', 7)
+    await flushPromises()
+    expect(keysApi.adminUserKbs).toHaveBeenCalledTimes(2)
+  })
 })
