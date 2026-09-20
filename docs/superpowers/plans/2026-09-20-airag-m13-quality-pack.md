@@ -1571,3 +1571,28 @@ git commit -m "test(m13): acceptance script and env example"
 - **Spec 覆盖**:A→T1;B→T2/T3(模型+CLI+reference_score+README);C→T4(+T10 延迟记录);D→T5;E①→T6①、②→T6、③→T6、④→T6、⑤→T9、⑥→T6、⑦→T6(⑦c 排版)/T9 无关——⑦c 在 T6;F→T7/T8;配置→T1/T4/T10;验收→T10。无缺口。
 - **占位符扫描**:T6 ⑦b 与 T8 Step 1 的"以实际 DOM/现有结构融合"是对既有用例结构的显式适配指令,非 TBD(断言底线已写明);其余无。
 - **类型一致性**:`_recheck_refusal(llm, question, answer) -> bool | None`、`_search_one(query, kb_ids) -> list`、`save_run(kb_id, mode, results) -> int`、`reference_score(llm, question, answer, reference) -> dict`、`rename_knowledge_base(db, kb, *, name, description, username)`、`kbApi.rename(kbId, payload)` 前后端一致;EvalItem 字段名与 T3 落库键一致。
+
+---
+
+## 执行记录(2026-09-20,SDD)
+
+**提交链**(spec 525fa0e → 计划 7d04488):T1 a3c1215 → T2 f60bba3 → T3 dcde338 → T4 d4e3592 → T5 ceb5942 → T6 4ce92b7 → T7 9c4a475 → T8 129624a → T9 f49defc → T10 3c81cd6+1da9580(+修复轮 ff623f7)→ 终审修复波 982f3a9。
+
+**质量**:10 任务中 9 个零修复轮一次 Approved;T10 经 1 轮修复(补回归测试);终审 FINDINGS 2 Important——①RenameIn 长度校验缺失(超长名 500)已由修复波 982f3a9 修复(rename 面与 create 面一致 422);②见下"记载补正"。
+
+**测试与验收**:后端 pytest 276P→**298P/0F**;前端 vitest 28→**31/31** + build 零错;真栈 `m13_acceptance.py` **13/13**(真 LLM 拒答二审两题 refused、事实题不拒答、评估入库 4 项、重命名矩阵、m12 子验);m12 子验收 **16/16**(含 T6⑥ 配对断言真栈补验);m11 回归 10/10;dev 栈迁移 `d4e5f6a7b8c9→e5f6a7b8c9d0` 一次通过。**延迟 [info]:SSE first-token=4.1s / total=7.0s**(单轮事实题,快乐路径 LLM 3→2 次生效)。
+
+**验收首跑暴露并修复的两个 T3 真产品 bug**(3c81cd6):①eval CLI `--save` 双 `asyncio.run` 复用池化连接绑死已关闭事件循环(Windows 必崩)→ 单次 asyncio.run(`_amain`);②`summarize` 对 `"reference": None` 崩溃 → `or {}` 防护(修复轮 ff623f7 补回归用例锁定)。
+
+**⚠️ 记载补正(终审 Important#2,推翻本计划 T4 与台账的两处失实表述)**:零命中 grade 短路对**生产路径**(CRAG/MULTI_HOP 默认开)同样改变了图流——原 grade_node 空命中返回 `{}` 直达 decompose,**并非"零命中仍烧一次 grade LLM"**(计划该前提失实);M13 后空命中 → insufficient → 先 transform(以原始 question 重检索一轮,retries 0→1)→ 再 decompose。行为无害且可能捞回改写漏检(retries 护栏、终止性、LLM 次数、验收全过),但 spec C1"路由逐字不变"与 T4 任务审查的"仅影响测试配置"裁决均与事实不符,以本节为准。M14 可选微调:空命中且 retries==0 时保留旧 `{}` 语义。
+
+**实施期裁决要点**(全部经任务审查者独立核验;详见 SDD 台账,已随收官清理则以本节为准):
+- T2:`EvalRun.items` 加 `lazy="selectin"`(默认 lazy 在 async expire_all 后必 MissingGreenlet)。
+- T4:短路置于 CRAG 开关之前(测试需在 conftest 配置下生效);既有空命中用例断言适配 `{}`→insufficient。
+- T5:fake 改返 SearchHit(合并段属性访问,计划笔误);既有 patch hybrid_search 零适配(运行时模块全局解析)。
+- T8:`.at(-1)`→`.slice(-1)[0]`(tsconfig lib:[] 覆盖);`resetFields()` 提前修掉二次打开预填回滚真 bug。
+- T9:红态断言对象 adminUserKbs→kbApi.list(清空时实际走自服务分支)。
+- T10:SSE 实端点 `POST /api/chat/ask`(body `question`,data-JSON 帧——计划写 `/api/ask`/`query` 系笔误);cleanup 扩展 conversations/messages;`.env.example` 在仓库根非 backend/。
+
+**M14 候选**(终审 triage 全部 ride):二审 judge prompt 定界符(注入面);gather 孤儿任务日志噪音;前端 description 置空语义(产品决策);Web 面预检越界组合用例;并行测试 hash 碰撞加固;`.env.example` 注释措辞;CLI `_amain` 单测(装配路径零覆盖);saved: 行改 stderr;T7 同名无变更审计 detail;其余台账 minors。旧候选:评估 Web 管理界面、出站集成、A2A、MinerU 本地化、LDAP/SSO(仍等输入)。
+
