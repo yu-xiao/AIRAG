@@ -19,6 +19,8 @@ os.environ["CHECKPOINTER_ENABLED"] = "false"
 os.environ["MULTI_HOP_ENABLED"] = "false"
 # M13:拒答二审默认关闭(存量用例锁 M8 子串语义;二审用例内 monkeypatch 打开)
 os.environ["REFUSAL_RECHECK_ENABLED"] = "false"
+# M13:grade 强一致跳过默认关闭(既有 grade 行为用例不受影响)
+os.environ["GRADE_CONFIDENT_SKIP_N"] = "0"
 # M7:验收后 dev .env 常开 RERANK_ENABLED=true;测试进程钉死关闭,
 # test_rerank_disabled_returns_none 依赖此约定(同 M5 agentic 模式)。
 os.environ["RERANK_ENABLED"] = "false"

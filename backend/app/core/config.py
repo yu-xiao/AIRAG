@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     MULTI_HOP_MAX_SUBQ: int = 3
     # M13:拒答 LLM 二审(启发式触发;conftest 钉 False)
     REFUSAL_RECHECK_ENABLED: bool = True
+    # M13:≥N 条 source=both(向量+关键词双中)时跳过 grade LLM;0=关闭
+    GRADE_CONFIDENT_SKIP_N: int = 3
     RETRIEVAL_TOP_K: int = 8
     # M7:rerank 相关度阈值,默认禁用;智谱 rerank relevance_score 实测全量饱和
     # 0.92~1.0(零命中/正常分布重叠,无可行阈值);换用有真实分数分布的 rerank

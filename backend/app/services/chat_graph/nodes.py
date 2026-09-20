@@ -200,10 +200,14 @@ async def rewrite_node(state: dict, llm) -> dict:
 
 
 async def grade_node(state: dict, llm) -> dict:
-    if not settings.AGENTIC_CRAG_ENABLED:
-        return {}
     hits = state.get("hits") or []
-    if not hits:
+    if not hits:  # M13:零命中短路,不对空候选烧 LLM
+        return {"grade": "insufficient"}
+    n = settings.GRADE_CONFIDENT_SKIP_N
+    if n > 0 and sum(1 for h in hits if h.get("source") == "both") >= n:
+        # M13:双半场强一致 → 检索充分,跳过 LLM(路由值域不变)
+        return {"grade": "sufficient"}
+    if not settings.AGENTIC_CRAG_ENABLED:
         return {}
     context = "\n".join(
         f"[{i+1}] {h['filename']} 第{h['page_no'] or '?'}页:{h['content'][:120]}"

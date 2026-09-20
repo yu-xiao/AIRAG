@@ -200,7 +200,8 @@ async def test_grade_disabled_and_empty_hits():
     from app.services.chat_graph.nodes import grade_node
 
     llm = FakeListChatModel(responses=["{}"])
-    assert await grade_node({"question": "q"}, llm=llm) == {}
+    # M13:零命中短路位于 CRAG 开关之前——CRAG 关闭也直接判 insufficient
+    assert await grade_node({"question": "q"}, llm=llm) == {"grade": "insufficient"}
     hits = [{"filename": "a", "page_no": 1, "content": "c"}]
     assert await grade_node({"question": "q", "hits": hits}, llm=llm) == {}
 
@@ -715,3 +716,52 @@ async def test_recheck_not_triggered_for_long_normal_answer(monkeypatch):
     )
     assert out["refused"] is False
     assert called == []  # 启发式未触发 → 二审未调
+
+
+# ---- M13:ask 提速——grade 两级短路 ----
+async def test_grade_empty_hits_short_circuits():
+    """零命中:不再对空候选烧 LLM,直接 insufficient。"""
+    from app.services.chat_graph import nodes as nodes_mod
+
+    class _Boom:
+        async def ainvoke(self, *a, **k):
+            raise AssertionError("must not call llm on empty hits")
+
+    out = await nodes_mod.grade_node({"question": "q", "hits": []},
+                                     llm=_Boom())
+    assert out["grade"] == "insufficient"
+
+
+async def test_grade_confident_both_skips_llm(monkeypatch):
+    """≥GRADE_CONFIDENT_SKIP_N 条 source=both → sufficient 且 LLM 未调。"""
+    from app.core.config import settings
+    from app.services.chat_graph import nodes as nodes_mod
+
+    monkeypatch.setattr(settings, "GRADE_CONFIDENT_SKIP_N", 3)
+    both = [_hit(i, f"内容{i}") for i in range(1, 4)]
+    for h in both:
+        h["source"] = "both"
+
+    class _Boom:
+        async def ainvoke(self, *a, **k):
+            raise AssertionError("must not call llm when confident")
+
+    out = await nodes_mod.grade_node(
+        {"question": "q", "hits": both}, llm=_Boom())
+    assert out["grade"] == "sufficient"
+
+
+async def test_grade_confident_disabled_falls_back_to_llm(monkeypatch):
+    """GRADE_CONFIDENT_SKIP_N=0(conftest 默认):3 条 both 仍走 LLM。"""
+    from app.core.config import settings
+    from app.services.chat_graph.nodes import grade_node
+
+    monkeypatch.setattr(settings, "AGENTIC_CRAG_ENABLED", True)  # 进 LLM 分支
+    both = [_hit(i, f"内容{i}") for i in range(1, 4)]
+    for h in both:
+        h["source"] = "both"
+    out = await grade_node(
+        {"question": "q", "hits": both},
+        llm=_LLMScript(['{"verdict": "insufficient"}']),
+    )
+    assert out["grade"] == "insufficient"
