@@ -200,8 +200,8 @@ async def test_grade_disabled_and_empty_hits():
     from app.services.chat_graph.nodes import grade_node
 
     llm = FakeListChatModel(responses=["{}"])
-    # M13:零命中短路位于 CRAG 开关之前——CRAG 关闭也直接判 insufficient
-    assert await grade_node({"question": "q"}, llm=llm) == {"grade": "insufficient"}
+    # M14:首次零命中保留旧语义(空 grade);CRAG 关闭也一致
+    assert await grade_node({"question": "q"}, llm=llm) == {}
     hits = [{"filename": "a", "page_no": 1, "content": "c"}]
     assert await grade_node({"question": "q", "hits": hits}, llm=llm) == {}
 
@@ -720,15 +720,18 @@ async def test_recheck_not_triggered_for_long_normal_answer(monkeypatch):
 
 # ---- M13:ask 提速——grade 两级短路 ----
 async def test_grade_empty_hits_short_circuits():
-    """零命中:不再对空候选烧 LLM,直接 insufficient。"""
+    """M14:零命中不烧 LLM;首次(retries=0)返回 {} 直达 decompose(旧语义),
+    重试后(retries>0)才判 insufficient 进兜底。"""
     from app.services.chat_graph import nodes as nodes_mod
 
     class _Boom:
         async def ainvoke(self, *a, **k):
             raise AssertionError("must not call llm on empty hits")
 
-    out = await nodes_mod.grade_node({"question": "q", "hits": []},
-                                     llm=_Boom())
+    assert await nodes_mod.grade_node(
+        {"question": "q", "hits": []}, llm=_Boom()) == {}
+    out = await nodes_mod.grade_node(
+        {"question": "q", "hits": [], "retries": 1}, llm=_Boom())
     assert out["grade"] == "insufficient"
 
 
@@ -792,3 +795,35 @@ async def test_retrieve_parallel_queries_merge(monkeypatch):
     starts = sorted(enter_ts.values())
     assert starts[2] - starts[0] < 0.04    # 几乎同时进入(并行)
     assert len(out["hits"]) == 3           # 去重后各保留一条
+
+
+# ---- M14:零命中首次直达 decompose(勘误拍板恢复旧语义) ----
+async def test_zero_hit_first_round_goes_straight_to_decompose(monkeypatch):
+    """首次零命中不再先 transform 重检索原始问题(M13 行为会检索两次),
+    直达 decompose;多跳兜底仍在。"""
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+
+    from app.core.config import settings
+    from app.services.chat_graph.graph import build_graph
+    from app.services.retrieval.searcher import SearchHit
+
+    calls = []
+
+    async def fake_search(db, kb_ids, query, top_k=20):
+        calls.append(query)
+        if query == "无法命中问题":
+            return []
+        return [SearchHit(1, 1, 1, "a.pdf", 1, f"内容-{query}", 0.5, "vector")]
+
+    import app.services.chat_graph.nodes as nodes_mod
+
+    monkeypatch.setattr(nodes_mod, "hybrid_search", fake_search)
+    monkeypatch.setattr(settings, "AGENTIC_CRAG_ENABLED", True)
+    monkeypatch.setattr(settings, "MULTI_HOP_ENABLED", True)
+
+    llm = FakeListChatModel(responses=['["子问题"]', "最终答案[1]"])
+    g = build_graph(llm=llm)
+    final = await g.ainvoke({"question": "无法命中问题", "kb_ids": [1]})
+    assert calls.count("无法命中问题") == 1  # 未先 transform 重检索
+    assert "子问题" in calls
+    assert "最终答案" in final["answer"]

@@ -203,7 +203,10 @@ async def rewrite_node(state: dict, llm) -> dict:
 
 async def grade_node(state: dict, llm) -> dict:
     hits = state.get("hits") or []
-    if not hits:  # M13:零命中短路,不对空候选烧 LLM
+    if not hits:  # M13:零命中不烧 LLM;M14 勘误拍板:首次零命中保留旧
+        # 语义(空 grade → 直达 decompose),重试后仍空才 insufficient 进兜底
+        if state.get("retries", 0) == 0:
+            return {}
         return {"grade": "insufficient"}
     n = settings.GRADE_CONFIDENT_SKIP_N
     if n > 0 and sum(1 for h in hits if h.get("source") == "both") >= n:
