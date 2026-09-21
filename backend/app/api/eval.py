@@ -9,12 +9,20 @@ from app.core.perms import get_kb_perm, has_perm
 from app.db.session import get_db
 from app.models import (
     EvalItem,
+    EvalQuestion,
     EvalRun,
     KnowledgeBase,
     KbPermission,
     User,
 )
-from app.schemas.eval import EvalItemOut, EvalRunDetailOut, EvalRunOut
+from app.schemas.eval import (
+    EvalItemOut,
+    EvalQuestionIn,
+    EvalQuestionOut,
+    EvalQuestionUpdate,
+    EvalRunDetailOut,
+    EvalRunOut,
+)
 
 router = APIRouter(prefix="/eval", tags=["eval"])
 
@@ -123,3 +131,110 @@ async def get_run(
         items=[EvalItemOut.model_validate(i) for i in item_rows[:ITEMS_HARD_CAP]],
         items_truncated=len(item_rows) > ITEMS_HARD_CAP,
     )
+
+
+async def _require_kb_owner(db: AsyncSession, current: User,
+                            kb_id: int) -> None:
+    """题集/触发的统一权限门:M14 list_runs 的 kb 分支同款语义。"""
+    kb = await db.get(KnowledgeBase, kb_id)
+    perm = await get_kb_perm(db, current, kb) if kb is not None else None
+    if perm is None:
+        raise HTTPException(status_code=404,
+                            detail="knowledge base not found")
+    if not has_perm(perm, "owner"):
+        raise HTTPException(status_code=403, detail="owner or admin required")
+
+
+@router.get("/questions")
+async def list_questions(
+    kb_id: int,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    current: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await _require_kb_owner(db, current, kb_id)
+    where = EvalQuestion.kb_id == kb_id
+    total = (await db.execute(
+        select(func.count(EvalQuestion.id)).where(where))).scalar_one()
+    rows = (await db.execute(
+        select(EvalQuestion).where(where).order_by(EvalQuestion.id)
+        .offset((page - 1) * page_size).limit(page_size)
+    )).scalars().all()
+    return {"total": total,
+            "items": [EvalQuestionOut.model_validate(r) for r in rows]}
+
+
+@router.post("/questions", response_model=EvalQuestionOut, status_code=201)
+async def create_question(
+    payload: EvalQuestionIn,
+    current: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await _require_kb_owner(db, current, payload.kb_id)
+    q = EvalQuestion(
+        kb_id=payload.kb_id, question=payload.question,
+        expect_doc_ids=payload.expect_doc_ids,
+        expect_keywords=payload.expect_keywords,
+        reference_answer=payload.reference_answer or None)
+    db.add(q)
+    await db.commit()
+    await db.refresh(q)
+    return q
+
+
+@router.put("/questions/{question_id}", response_model=EvalQuestionOut)
+async def update_question(
+    question_id: int,
+    payload: EvalQuestionUpdate,
+    current: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    q = await db.get(EvalQuestion, question_id)
+    if q is None:
+        raise HTTPException(status_code=404, detail="eval question not found")
+    await _require_kb_owner(db, current, q.kb_id)
+    q.question = payload.question
+    q.expect_doc_ids = payload.expect_doc_ids
+    q.expect_keywords = payload.expect_keywords
+    q.reference_answer = payload.reference_answer or None
+    await db.commit()
+    await db.refresh(q)
+    return q
+
+
+@router.delete("/questions/{question_id}", status_code=204)
+async def delete_question(
+    question_id: int,
+    current: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    q = await db.get(EvalQuestion, question_id)
+    if q is None:
+        raise HTTPException(status_code=404, detail="eval question not found")
+    await _require_kb_owner(db, current, q.kb_id)
+    await db.delete(q)
+    await db.commit()
+
+
+@router.get("/my-kbs")
+async def my_kbs(
+    current: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """触发对话框与题集管理共用:admin 全部库,非 admin owner 库集。"""
+    ids = await _owner_kb_ids(db, current)
+    stmt = (
+        select(KnowledgeBase.id, KnowledgeBase.name,
+               func.count(EvalQuestion.id).label("qc"))
+        .outerjoin(EvalQuestion, EvalQuestion.kb_id == KnowledgeBase.id)
+        .group_by(KnowledgeBase.id, KnowledgeBase.name)
+        .order_by(KnowledgeBase.id)
+    )
+    if ids is not None:
+        if not ids:
+            return []
+        stmt = stmt.where(KnowledgeBase.id.in_(ids))
+    rows = (await db.execute(stmt)).all()
+    return [{"kb_id": r[0], "kb_name": r[1], "question_count": r[2]}
+            for r in rows]
