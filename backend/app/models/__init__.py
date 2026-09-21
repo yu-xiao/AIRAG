@@ -5,7 +5,7 @@ from app.models.document import Chunk, Document
 from app.models.chat import Conversation, Message
 from app.models.audit import AuditLog
 from app.models.api_key import ApiKey
-from app.models.eval import EvalItem, EvalRun
+from app.models.eval import EvalItem, EvalQuestion, EvalRun
 
 __all__ = [
     "Base",
@@ -20,4 +20,5 @@ __all__ = [
     "ApiKey",
     "EvalRun",
     "EvalItem",
+    "EvalQuestion",
 ]

@@ -43,6 +43,7 @@ CLEANUP_ORDER = [
     "audit_logs",
     "eval_items",
     "eval_runs",
+    "eval_questions",
     "messages",
     "conversations",
     "chunks",
