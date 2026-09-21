@@ -79,7 +79,7 @@ def main():
             from scripts.eval_store import save_run
 
             run_id = await save_run(args.kb, "retrieval", results)
-            print(f"saved: run_id={run_id}")
+            print(f"saved: run_id={run_id}", file=sys.stderr)
         return results
 
     results = asyncio.run(_amain())
