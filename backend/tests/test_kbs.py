@@ -446,3 +446,54 @@ async def test_create_empty_description_normalizes_null(
     db_session.expire_all()
     row = await db_session.get(KnowledgeBase, kb.json()["id"])
     assert row.description is None
+
+
+async def test_rename_audit_detail_reflects_actual_changes(
+        client, auth_headers, db_session):
+    """M14:审计 detail 如实反映变更;无变更记 no_change(旧实现误记
+    description updated)。"""
+    import json as _json
+
+    from sqlalchemy import select as _select
+
+    from app.models import AuditLog, KnowledgeBase
+
+    async def _last_detail(kb_id: int) -> dict:
+        row = (await db_session.execute(
+            _select(AuditLog).where(AuditLog.action == "kb_update",
+                                    AuditLog.target == f"kb:{kb_id}")
+            .order_by(AuditLog.id.desc())
+        )).scalars().first()
+        return _json.loads(row.detail)
+
+    kb = await client.post("/api/kbs", json={"name": "审计库", "description": "d"},
+                           headers=auth_headers)
+    kb_id = kb.json()["id"]
+
+    # ① 同名 + 未提供描述 → no_change
+    r = await client.put(f"/api/kbs/{kb_id}", json={"name": "审计库"},
+                         headers=auth_headers)
+    assert r.status_code == 200
+    assert await _last_detail(kb_id) == {"no_change": True}
+
+    # ② 仅描述变
+    await client.put(f"/api/kbs/{kb_id}", json={"description": "新d"},
+                     headers=auth_headers)
+    assert await _last_detail(kb_id) == {"description": "updated"}
+
+    # ③ 名称 + 描述双变 → 两键并存(旧实现只有 name)
+    await client.put(f"/api/kbs/{kb_id}",
+                     json={"name": "审计库改", "description": "再d"},
+                     headers=auth_headers)
+    detail = await _last_detail(kb_id)
+    assert detail == {"name": {"old": "审计库", "new": "审计库改"},
+                      "description": "updated"}
+
+    # ④ 清空已空的描述 → no_change(Task 3 规范化后 "" 与 NULL 等价)
+    await client.put(f"/api/kbs/{kb_id}", json={"description": ""},
+                     headers=auth_headers)  # 先清成 NULL
+    await client.put(f"/api/kbs/{kb_id}", json={"description": ""},
+                     headers=auth_headers)  # 再清一次:无实变
+    assert await _last_detail(kb_id) == {"no_change": True}
+    db_session.expire_all()
+    assert (await db_session.get(KnowledgeBase, kb_id)).description is None

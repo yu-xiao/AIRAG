@@ -69,7 +69,7 @@ async def rename_knowledge_base(
     description: str | None, username: str,
 ) -> KnowledgeBase:
     """重命名/改描述(owner/admin 由端点校验);重名 409,审计 kb_update。"""
-    old_name = kb.name
+    old_name, old_desc = kb.name, kb.description
     if name is not None and name != kb.name:
         dup = (await db.execute(
             select(KnowledgeBase).where(KnowledgeBase.name == name)
@@ -81,9 +81,14 @@ async def rename_knowledge_base(
     if description is not None:
         # M14:空串=显式清空,入库 NULL(空=无描述的单一表示)
         kb.description = description or None
-    detail = ({"name": {"old": old_name, "new": kb.name}}
-              if kb.name != old_name else {"description": "updated"})
-    await audit(db, username, "kb_update", f"kb:{kb.id}", detail)
+    # M14:detail 如实反映实际变更;比较基于规范化后的值
+    changes: dict = {}
+    if kb.name != old_name:
+        changes["name"] = {"old": old_name, "new": kb.name}
+    if kb.description != old_desc:
+        changes["description"] = "updated"
+    await audit(db, username, "kb_update", f"kb:{kb.id}",
+                changes or {"no_change": True})
     await db.commit()
     await db.refresh(kb)
     return kb
