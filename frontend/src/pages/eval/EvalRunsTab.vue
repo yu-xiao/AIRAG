@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { evalApi, type EvalItem, type EvalRun, type EvalRunDetail } from '@/api/eval'
+import { evalApi, type EvalItem, type EvalRun, type EvalRunDetail, type MyKb } from '@/api/eval'
 import { kbApi, type KbItem } from '@/api/kb'
 
 const loading = ref(false)
@@ -70,8 +70,9 @@ function fmtTime(iso: string) {
   return iso.replace('T', ' ').slice(0, 19)
 }
 
-async function load() {
-  loading.value = true
+// silent:轮询路径静默刷新,不闪 loading 遮罩、不弹错误(DocsPage 模式)
+async function load(silent = false) {
+  if (!silent) loading.value = true
   forbidden.value = false
   try {
     const resp = await evalApi.listRuns({
@@ -88,11 +89,12 @@ async function load() {
       forbidden.value = true
       runs.value = []
       total.value = 0
-    } else {
+    } else if (!silent) {
       ElMessage.error('加载评估记录失败')
     }
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
+    syncPolling()
   }
 }
 
@@ -116,6 +118,63 @@ async function loadKbOptions() {
   }
 }
 
+// ---- 运行评估 ----
+const myKbs = ref<MyKb[]>([])
+
+async function loadMyKbs() {
+  try { myKbs.value = await evalApi.myKbs() } catch { /* 不阻塞 */ }
+}
+
+const runDialogVisible = ref(false)
+const runForm = reactive<{
+  kb_id: number; mode: 'retrieval' | 'generation'; rerank: boolean; top_k: number
+}>({ kb_id: 0, mode: 'retrieval', rerank: false, top_k: 8 })
+
+function openRunDialog() {
+  const eligible = myKbs.value.filter((k) => k.question_count > 0)
+  runForm.kb_id = eligible[0]?.kb_id ?? 0
+  runDialogVisible.value = true
+}
+
+async function submitRun() {
+  if (!runForm.kb_id) return
+  try {
+    await evalApi.triggerRun({
+      kb_id: runForm.kb_id, mode: runForm.mode,
+      rerank: runForm.rerank,
+      ...(runForm.mode === 'retrieval' ? { top_k: runForm.top_k } : {}),
+    })
+    ElMessage.success('评估已发起')
+    runDialogVisible.value = false
+    query.page = 1
+    load()
+  } catch (e) {
+    const detail = (e as { response?: { data?: { detail?: string } } })
+      ?.response?.data?.detail
+    ElMessage.error(detail ?? '发起评估失败')
+  }
+}
+
+// ---- running 3s 轮询(DocsPage 模式):hasRunning 开,全终态/卸载即停 ----
+let timer: number | undefined
+
+function hasRunning() {
+  return runs.value.some((r) => r.status === 'running')
+}
+
+function syncPolling() {
+  if (hasRunning()) {
+    if (timer === undefined) timer = window.setInterval(() => load(true), 3000)
+  } else if (timer !== undefined) {
+    window.clearInterval(timer)
+    timer = undefined
+  }
+}
+
+onBeforeUnmount(() => {
+  if (timer !== undefined) window.clearInterval(timer)
+})
+
 // ---- 明细抽屉 ----
 const drawerVisible = ref(false)
 const detailLoading = ref(false)
@@ -138,6 +197,7 @@ async function openDetail(row: { id: number }) {
 onMounted(() => {
   load()
   loadKbOptions()
+  loadMyKbs()
 })
 </script>
 
@@ -163,6 +223,7 @@ onMounted(() => {
         <el-option label="生成评估" value="generation" />
       </el-select>
       <el-button type="primary" @click="search">查询</el-button>
+      <el-button type="primary" class="run-btn" @click="openRunDialog">运行评估</el-button>
     </div>
 
     <el-alert
@@ -195,6 +256,15 @@ onMounted(() => {
           </el-tag>
         </template>
       </el-table-column>
+      <el-table-column label="状态" width="110">
+        <template #default="{ row }">
+          <el-tag v-if="row.status === 'running'" type="warning" size="small">
+            运行中 {{ row.done_count }}/{{ row.item_count }}
+          </el-tag>
+          <el-tag v-else-if="row.status === 'failed'" type="danger" size="small">失败</el-tag>
+          <el-tag v-else type="success" size="small">完成</el-tag>
+        </template>
+      </el-table-column>
       <el-table-column prop="item_count" label="题数" width="70" />
       <el-table-column
         v-for="col in metricCols"
@@ -216,18 +286,27 @@ onMounted(() => {
       layout="total, prev, pager, next, sizes"
       :page-sizes="[20, 50, 100]"
       :total="total"
-      @current-change="load"
+      @current-change="() => load()"
       @size-change="search"
     />
 
     <el-drawer v-model="drawerVisible" :title="`评估明细 #${detail?.id ?? ''}`" size="62%">
       <div v-loading="detailLoading" class="detail-body">
         <template v-if="detail">
+          <el-alert
+            v-if="detail.status === 'failed'"
+            type="error"
+            :closable="false"
+            show-icon
+            :title="detail.error ?? '评估失败'"
+            class="error-alert"
+          />
           <div class="detail-summary">
             <el-tag :type="detail.mode === 'generation' ? 'success' : 'info'" size="small">
               {{ detail.mode === 'generation' ? '生成' : '检索' }}
             </el-tag>
             <span>{{ detail.kb_name ?? '(已删除)' }} · {{ detail.item_count }} 题</span>
+            <span v-if="detail.created_by">发起人 {{ detail.created_by }}</span>
             <span v-if="detail.items_truncated" class="truncated-note">
               (仅显示前 {{ detail.items.length }} 条)
             </span>
@@ -264,6 +343,33 @@ onMounted(() => {
         </template>
       </div>
     </el-drawer>
+
+    <el-dialog v-model="runDialogVisible" title="运行评估" width="420px">
+      <el-form label-width="90px">
+        <el-form-item label="知识库">
+          <el-select v-model="runForm.kb_id">
+            <el-option v-for="k in myKbs.filter((x) => x.question_count > 0)"
+              :key="k.kb_id" :label="`${k.kb_name}(${k.question_count}题)`" :value="k.kb_id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="模式">
+          <el-radio-group v-model="runForm.mode">
+            <el-radio value="retrieval">检索评估</el-radio>
+            <el-radio value="generation">生成评估</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item v-if="runForm.mode === 'retrieval'" label="top_k">
+          <el-input-number v-model="runForm.top_k" :min="1" :max="50" />
+        </el-form-item>
+        <el-form-item label="重排序">
+          <el-switch v-model="runForm.rerank" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="runDialogVisible = false">取消</el-button>
+        <el-button type="primary" class="run-confirm" :disabled="!runForm.kb_id" @click="submitRun">发起</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -295,6 +401,9 @@ onMounted(() => {
 }
 .detail-body {
   min-height: 200px;
+}
+.error-alert {
+  margin-bottom: 12px;
 }
 .detail-summary {
   display: flex;

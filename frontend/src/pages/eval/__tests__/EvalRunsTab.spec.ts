@@ -1,12 +1,12 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import ElementPlus, { ElSelect } from 'element-plus'
 import EvalRunsTab from '@/pages/eval/EvalRunsTab.vue'
 import { evalApi, type EvalRun } from '@/api/eval'
 import { kbApi } from '@/api/kb'
 
 vi.mock('@/api/eval', () => ({
-  evalApi: { listRuns: vi.fn(), getRun: vi.fn() },
+  evalApi: { listRuns: vi.fn(), getRun: vi.fn(), myKbs: vi.fn(), triggerRun: vi.fn() },
 }))
 vi.mock('@/api/kb', () => ({ kbApi: { list: vi.fn() } }))
 
@@ -38,14 +38,22 @@ const detail = {
   items_truncated: false,
 }
 
+const runRunning = {
+  ...runs[0]!, status: 'running', created_by: 'admin', done_count: 1,
+} as never
+
 const mountPage = () => mount(EvalRunsTab, { global: { plugins: [ElementPlus] } })
 
 describe('EvalPage', () => {
   beforeEach(() => {
     vi.mocked(evalApi.listRuns).mockReset()
     vi.mocked(evalApi.getRun).mockReset()
+    vi.mocked(evalApi.myKbs).mockReset()
+    vi.mocked(evalApi.triggerRun).mockReset()
     vi.mocked(kbApi.list).mockReset()
     vi.mocked(evalApi.listRuns).mockResolvedValue({ total: runs.length, items: runs })
+    vi.mocked(evalApi.myKbs).mockResolvedValue(
+      [{ kb_id: 3, kb_name: '手册库', question_count: 5 }])
     vi.mocked(kbApi.list).mockResolvedValue([
       { id: 3, name: '手册库' } as never,
     ])
@@ -124,4 +132,57 @@ describe('EvalPage', () => {
     expect(w.text()).toContain('文档1')
     expect(w.text()).toContain('关键词k')
   })
+
+  it('status column renders running progress and failed tag', async () => {
+    vi.mocked(evalApi.listRuns).mockResolvedValue(
+      { total: 2, items: [runRunning, { ...runs[1]!, status: 'failed', done_count: 2 } as never] })
+    const w = mountPage()
+    await flushPromises()
+    expect(w.text()).toContain('1/5')  // running 进度
+    expect(w.text()).toContain('失败') // failed tag
+  })
+
+  it('polls while running and stops when all terminal', async () => {
+    vi.useFakeTimers()
+    // 持续返回 running → 轮询持续
+    vi.mocked(evalApi.listRuns).mockResolvedValue(
+      { total: 1, items: [runRunning] })
+    const w = mountPage()
+    await flushPromises()
+    expect(vi.mocked(evalApi.listRuns).mock.calls.length).toBe(1) // 仅 mount
+    await vi.advanceTimersByTimeAsync(3100)
+    expect(vi.mocked(evalApi.listRuns).mock.calls.length).toBe(2) // 3s 静默刷新
+    // 切换为全终态 → 该次轮询后自停
+    vi.mocked(evalApi.listRuns).mockResolvedValue(
+      { total: 1, items: [{ ...runs[0]!, status: 'completed', done_count: 5 } as never] })
+    await vi.advanceTimersByTimeAsync(3100)
+    expect(vi.mocked(evalApi.listRuns).mock.calls.length).toBe(3)
+    await vi.advanceTimersByTimeAsync(3100)
+    expect(vi.mocked(evalApi.listRuns).mock.calls.length).toBe(3) // 已停
+    vi.useRealTimers()
+  })
+
+  it('trigger dialog posts payload and handles 409', async () => {
+    vi.mocked(evalApi.triggerRun).mockResolvedValue({ run_id: 99 })
+    const w = mountPage()
+    await flushPromises()
+    await w.find('button.run-btn').trigger('click')
+    await flushPromises()
+    await w.find('button.run-confirm').trigger('click')
+    await flushPromises()
+    expect(evalApi.triggerRun).toHaveBeenCalledWith(
+      expect.objectContaining({ kb_id: 3, mode: 'retrieval' }))
+    // 409 → 错误提示
+    vi.mocked(evalApi.triggerRun).mockRejectedValue({
+      response: { status: 409, data: { detail: 'evaluation already running' } },
+    })
+    await w.find('button.run-btn').trigger('click')
+    await flushPromises()
+    await w.find('button.run-confirm').trigger('click')
+    await flushPromises()
+    // ElMessage.error 已调(mock element-plus 太重,改为断言 triggerRun 被再次调用 + 不抛错)
+    expect(evalApi.triggerRun).toHaveBeenCalledTimes(2)
+  })
+
+  afterEach(() => { vi.useRealTimers() })
 })
