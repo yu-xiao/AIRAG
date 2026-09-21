@@ -133,6 +133,20 @@ def item_kwargs(r: dict) -> dict:
     )
 
 
+def _fresh_chat_llm():
+    """绕过 make_chat_llm 的 lru_cache 新建 ChatOpenAI(仅 worker 评估用)。
+
+    worker 里 _run_async→asyncio.run 每个任务一个新事件循环;lru_cache 的
+    进程级单例(内部 httpx/openai 异步客户端)绑定首个任务后即关闭的循环,
+    同 worker 第二个 generation 任务复用会在 llm.ainvoke 抛
+    'NoneType' object has no attribute 'send'。__wrapped__ 是 functools
+    契约属性,直调被包裹函数即绕缓存;graph.py 的缓存本身不动——API 进程
+    (单一常驻循环)依赖它省客户端开销。API/CLI 不经此路径,不受影响。"""
+    from app.services.chat_graph.graph import make_chat_llm
+
+    return make_chat_llm.__wrapped__()
+
+
 async def run_eval_task(run_id: int, mode: str, rerank: bool,
                         top_k: int) -> None:
     """状态机:running→completed/failed;逐题插 EvalItem+commit(进度可见)。
@@ -172,12 +186,9 @@ async def run_eval_task(run_id: int, mode: str, rerank: bool,
                     if not _s.ZHIPU_API_KEY:
                         raise RuntimeError(
                             "ZHIPU_API_KEY 未配置,生成评估无法执行")
-                    from app.services.chat_graph.graph import (
-                        build_graph,
-                        make_chat_llm,
-                    )
+                    from app.services.chat_graph.graph import build_graph
 
-                    llm = make_chat_llm()
+                    llm = _fresh_chat_llm()
                     graph = build_graph(llm=llm)
                     for q in questions:
                         r = await generation_item(run.kb_id, q, llm, graph,

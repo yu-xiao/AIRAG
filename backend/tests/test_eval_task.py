@@ -101,3 +101,51 @@ async def test_generation_without_key_fails(client, auth_headers, db_session,
     run = (await db_session.execute(
         select(EvalRun).where(EvalRun.id == run_id))).scalar_one()
     assert run.status == "failed" and "ZHIPU" in run.error
+
+
+async def test_generation_uses_fresh_uncached_llm(client, auth_headers,
+                                                  db_session, monkeypatch):
+    """M15 修复:worker 每任务一个新事件循环(asyncio.run),make_chat_llm 的
+    lru_cache 单例跨循环复用会被毒化——run_eval_task 的 generation 分支必须
+    经 _fresh_chat_llm() 绕缓存新建,graph.ainvoke 拿到的正是该 fresh 实例。"""
+    from sqlalchemy import select, text
+
+    import app.services.chat_graph.graph as graph_mod
+    import app.services.eval_runner as runner
+    from app.core.config import settings
+    from app.services.eval_runner import run_eval_task
+
+    class FakeLLM:
+        async def ainvoke(self, msgs):  # eval_judge._judge 只读 .content
+            class R:
+                content = '{"score": 0.5, "reasons": "stub"}'
+            return R()
+
+    fresh_llm = FakeLLM()
+    seen: dict = {}
+
+    def fake_build_graph(llm=None, checkpointer=None):
+        class FakeGraph:
+            async def ainvoke(self, state):
+                seen["llm"] = llm  # 闭包捕获 llm 标识
+                return {"answer": "ans", "hits": [], "citations": [],
+                        "refused": False}
+
+        return FakeGraph()
+
+    monkeypatch.setattr(settings, "ZHIPU_API_KEY", "test-key")
+    monkeypatch.setattr(runner, "_fresh_chat_llm", lambda: fresh_llm)
+    monkeypatch.setattr(graph_mod, "build_graph", fake_build_graph)
+
+    run_id = await _mk_running_run(client, auth_headers, db_session, n=1)
+    await db_session.execute(
+        text("UPDATE eval_runs SET mode='generation' WHERE id=:i"),
+        {"i": run_id})
+    await db_session.commit()
+    await run_eval_task(run_id, "generation", False, 8)
+    db_session.expire_all()
+    run = (await db_session.execute(
+        select(EvalRun).where(EvalRun.id == run_id))).scalar_one()
+    assert run.status == "completed"
+    assert seen["llm"] is fresh_llm  # graph 消费的就是工厂 fresh 实例,非缓存单例
+    assert run.items[0].faithfulness == 0.5  # judge 走的也是同一 fresh llm
