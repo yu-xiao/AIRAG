@@ -19,6 +19,12 @@ const router = createRouter({
         },
         { path: 'chat', name: 'chat', component: () => import('@/pages/ChatPage.vue'), meta: { title: '对话' } },
         {
+          path: 'eval',
+          name: 'eval',
+          component: () => import('@/pages/EvalPage.vue'),
+          meta: { title: '评估记录' },
+        },
+        {
           path: 'keys',
           name: 'keys',
           component: () => import('@/pages/KeysPage.vue'),

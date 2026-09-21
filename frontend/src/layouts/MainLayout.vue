@@ -9,6 +9,7 @@ import {
   Key,
   Moon,
   Sunny,
+  TrendCharts,
   User,
 } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
@@ -56,6 +57,9 @@ function onLogout() {
         </el-menu-item>
         <el-menu-item index="/chat">
           <el-icon><ChatDotRound /></el-icon><span>对话</span>
+        </el-menu-item>
+        <el-menu-item index="/eval">
+          <el-icon><TrendCharts /></el-icon><span>评估记录</span>
         </el-menu-item>
         <el-menu-item index="/keys">
           <el-icon><Key /></el-icon><span>API 密钥</span>
