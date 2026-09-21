@@ -1,5 +1,5 @@
 # backend/app/api/eval.py
-"""M14:评估记录只读 API(admin 全量;非 admin 仅 owner 库)。"""
+"""M15:评估 API——只读记录+题集 CRUD+Web 触发(admin 全量;非 admin 仅 owner 库)。"""
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -286,5 +286,14 @@ async def trigger_run(
     await db.refresh(run)
     from app.workers.eval_tasks import run_evaluation
 
-    run_evaluation.delay(run.id, payload.mode, payload.rerank, top_k)
+    try:
+        run_evaluation.delay(run.id, payload.mode, payload.rerank, top_k)
+    except Exception as e:
+        # I-1:.delay() 抛异常(broker 不可达/连接断)时消息已丢,run 若留
+        # running 则同 kb+mode 永久 409、前端轮询永不停 → 收口 failed
+        run.status = "failed"
+        run.error = f"dispatch failed: {e}"[:500]
+        await db.commit()
+        raise HTTPException(
+            status_code=502, detail="evaluation dispatch failed") from e
     return {"run_id": run.id}

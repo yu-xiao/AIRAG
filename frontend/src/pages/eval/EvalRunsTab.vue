@@ -289,7 +289,7 @@ onMounted(() => {
       @selection-change="onSelectionChange"
     >
       <template #empty>
-        <el-empty description="暂无评估记录——在服务器用 eval CLI 加 --save 生成" />
+        <el-empty description="暂无评估记录——点「运行评估」发起第一次评估" />
       </template>
       <!-- reserve-selection + row-key:轮询刷新替换 runs 数组引用后勾选保留
            (对比场景选好两条,刷新不清空) -->

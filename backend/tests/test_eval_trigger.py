@@ -1,6 +1,7 @@
 # backend/tests/test_eval_trigger.py
 """M15 T5:触发端点守卫(409/422/403/404/422 top_k)+ eager 内联执行 +
-列表/明细新字段(status/created_by/done_count/error)。"""
+列表/明细新字段(status/created_by/done_count/error)。
+终审 I-1:dispatch 失败收口 failed + 502;worker 启动孤儿 running 清扫。"""
 from sqlalchemy import select, text
 
 from app.models import EvalQuestion, EvalRun
@@ -103,3 +104,48 @@ async def test_list_fields_and_running_visibility(client, auth_headers,
     assert item["status"] == "running"
     assert item["done_count"] == 0  # 进度 = len(items)
     assert item["created_by"] is None  # CLI/未触发行
+
+
+async def test_trigger_dispatch_failure_marks_run_failed(
+        client, auth_headers, db_session, monkeypatch):
+    """I-1:.delay() 抛异常 → 502;run 收口 failed(error 含 dispatch failed),
+    否则同 kb+mode 永久 409。eager 下 monkeypatch 实例 .delay 即拦住内联执行。"""
+    from app.workers.eval_tasks import run_evaluation
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("broker unreachable")
+
+    monkeypatch.setattr(run_evaluation, "delay", _boom)
+    kb_id = await _make_kb(client, auth_headers, "触发库D")
+    await _add_question(db_session, kb_id)
+    r = await client.post("/api/eval/runs", headers=auth_headers,
+                          json={"kb_id": kb_id, "mode": "retrieval"})
+    assert r.status_code == 502
+    assert r.json()["detail"] == "evaluation dispatch failed"
+    run = (await db_session.execute(
+        select(EvalRun).where(EvalRun.kb_id == kb_id))).scalars().one()
+    assert run.status == "failed"
+    assert "dispatch failed" in run.error
+
+
+async def test_recover_orphan_runs_sweeps_running(db_session):
+    """I-1:worker 启动清扫——预插 running 孤儿 → failed+语义,completed 不动。
+    直调处理器本体(worker_ready 信号在 celery eager/pytest 进程不触发)。"""
+    from app.workers.eval_tasks import _recover_orphan_runs
+
+    db_session.add_all([
+        EvalRun(kb_id=1, mode="retrieval", summary=None,
+                item_count=1, status="running"),
+        EvalRun(kb_id=2, mode="generation", summary={"hit": 1.0},
+                item_count=2, status="completed"),
+    ])
+    await db_session.commit()
+
+    _recover_orphan_runs()  # 自持引擎连接提交;会话重查前先失效缓存
+
+    db_session.expire_all()
+    runs = (await db_session.execute(
+        select(EvalRun).order_by(EvalRun.id))).scalars().all()
+    assert [r.status for r in runs] == ["failed", "completed"]
+    assert runs[0].error == "worker restarted while evaluation was running"
+    assert runs[1].error is None

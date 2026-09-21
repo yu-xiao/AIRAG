@@ -19,7 +19,7 @@ class EvalRun(Base, TimestampMixin):
     item_count: Mapped[int]
     status: Mapped[str] = mapped_column(
         String(16), default="completed", server_default="completed")
-    error: Mapped[str | None] = mapped_column(Text)      # 失败原因(或 500)
+    error: Mapped[str | None] = mapped_column(Text)      # 失败原因(截 500)
     triggered_by: Mapped[int | None] = mapped_column(Integer)  # 无 FK,联查展示
 
     # lazy="selectin":async ORM 下 select 后直接访问集合属性会触发同步

@@ -68,11 +68,12 @@ describe('EvalPage', () => {
     expect(w.text()).toContain('0.90') // 默认列:忠实度
   })
 
-  it('shows CLI hint on empty state', async () => {
+  it('shows run-trigger hint on empty state', async () => {
     vi.mocked(evalApi.listRuns).mockResolvedValue({ total: 0, items: [] })
     const w = mountPage()
     await flushPromises()
-    expect(w.text()).toContain('暂无评估记录')
+    // M15 终审 M-a:空态引导改为 Web 触发(原 CLI --save 提示已过时)
+    expect(w.text()).toContain('暂无评估记录——点「运行评估」发起第一次评估')
   })
 
   it('mode filter switches metric columns', async () => {
