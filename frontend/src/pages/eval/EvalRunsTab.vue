@@ -72,6 +72,7 @@ function fmtTime(iso: string) {
 
 // silent:轮询路径静默刷新,不闪 loading 遮罩、不弹错误(DocsPage 模式)
 async function load(silent = false) {
+  if (disposed) return
   if (!silent) loading.value = true
   forbidden.value = false
   try {
@@ -156,13 +157,16 @@ async function submitRun() {
 }
 
 // ---- running 3s 轮询(DocsPage 模式):hasRunning 开,全终态/卸载即停 ----
+// disposed:卸载后在途 load 的 finally→syncPolling 不再重建孤儿 interval
 let timer: number | undefined
+let disposed = false
 
 function hasRunning() {
   return runs.value.some((r) => r.status === 'running')
 }
 
 function syncPolling() {
+  if (disposed) return
   if (hasRunning()) {
     if (timer === undefined) timer = window.setInterval(() => load(true), 3000)
   } else if (timer !== undefined) {
@@ -172,6 +176,7 @@ function syncPolling() {
 }
 
 onBeforeUnmount(() => {
+  disposed = true
   if (timer !== undefined) window.clearInterval(timer)
 })
 

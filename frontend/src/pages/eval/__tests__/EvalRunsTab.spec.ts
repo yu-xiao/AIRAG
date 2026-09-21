@@ -162,6 +162,38 @@ describe('EvalPage', () => {
     vi.useRealTimers()
   })
 
+  it('unmount with in-flight poll does not resurrect orphan interval', async () => {
+    vi.useFakeTimers()
+    vi.mocked(evalApi.listRuns).mockResolvedValue(
+      { total: 1, items: [runRunning] })
+    const w = mountPage()
+    await flushPromises()
+    expect(vi.mocked(evalApi.listRuns).mock.calls.length).toBe(1)
+    // 两个轮询请求改为手动放行(deferred),制造重叠在途:
+    // 先落终态(停表,timer 置回 undefined)→ 卸载 → 后落 running(无守卫会重建孤儿 interval)
+    let releaseA!: () => void
+    let releaseB!: () => void
+    vi.mocked(evalApi.listRuns)
+      .mockImplementationOnce(() => new Promise((res) => {
+        releaseA = () => res({ total: 1, items: [{ ...runs[0]!, status: 'completed', done_count: 5 } as never] })
+      }))
+      .mockImplementationOnce(() => new Promise((res) => {
+        releaseB = () => res({ total: 1, items: [runRunning] })
+      }))
+    // 同步推进两个 tick:两次 load(true) 均在途(微任务未冲刷)
+    vi.advanceTimersByTime(3000)
+    vi.advanceTimersByTime(3000)
+    expect(vi.mocked(evalApi.listRuns).mock.calls.length).toBe(3)
+    releaseA() // 终态先落:syncPolling 停表 → clearInterval + timer = undefined
+    await flushPromises()
+    w.unmount() // 此后卸载
+    releaseB() // 在途 running 后落:finally→syncPolling 是唯一复活路径
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(3100)
+    expect(vi.mocked(evalApi.listRuns).mock.calls.length).toBe(3) // 孤儿轮询未复活
+    vi.useRealTimers()
+  })
+
   it('trigger dialog posts payload and handles 409', async () => {
     vi.mocked(evalApi.triggerRun).mockResolvedValue({ run_id: 99 })
     const w = mountPage()
