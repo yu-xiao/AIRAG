@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, type TableInstance } from 'element-plus'
 import { evalApi, type EvalItem, type EvalRun, type EvalRunDetail, type MyKb } from '@/api/eval'
 import { kbApi, type KbItem } from '@/api/kb'
 import TrendCard from '@/pages/eval/TrendCard.vue'
+import CompareDrawer from '@/pages/eval/CompareDrawer.vue'
 
 const loading = ref(false)
 const runs = ref<EvalRun[]>([])
@@ -200,6 +201,39 @@ async function openDetail(row: { id: number }) {
   }
 }
 
+// selection 列(checkbox)点击与行点击冲突:目标落在该列 cell 内则不开明细
+// (EP 的 row-click 对 checkbox 点击也无条件发出,需在此裁决——保留行点击入口)
+function onRowClick(row: EvalRun, _column: unknown, event: Event) {
+  if ((event.target as HTMLElement | null)?.closest('.el-table-column--selection')) return
+  openDetail(row)
+}
+
+// ---- 双 run 对比 ----
+const tableRef = ref<TableInstance>()
+const sel = ref<EvalRun[]>([])
+const cmpVisible = ref(false)
+
+/** 已选 2 条后仅已选行可勾(可反选),阻断第三选 */
+function canSelect(row: EvalRun) {
+  return sel.value.length < 2 || sel.value.some((s) => s.id === row.id)
+}
+
+/** 同 mode 校验:第二选不同 mode → 警告并回退该勾选(回退再触发 selection-change 收敛 sel) */
+function onSelectionChange(rows: EvalRun[]) {
+  if (rows.length === 2 && rows[0]!.mode !== rows[1]!.mode) {
+    const added = rows.find((r) => !sel.value.some((s) => s.id === r.id)) ?? rows[1]!
+    ElMessage.warning('只能对比相同模式的两个运行')
+    tableRef.value?.toggleRowSelection(added, false)
+    return
+  }
+  sel.value = rows
+}
+
+function openCompare() {
+  if (sel.value.length !== 2) return
+  cmpVisible.value = true
+}
+
 onMounted(() => {
   load()
   loadKbOptions()
@@ -230,6 +264,7 @@ onMounted(() => {
       </el-select>
       <el-button type="primary" @click="search">查询</el-button>
       <el-button type="primary" class="run-btn" @click="openRunDialog">运行评估</el-button>
+      <el-button class="cmp-btn" :disabled="sel.length !== 2" @click="openCompare">对比</el-button>
     </div>
 
     <el-alert
@@ -244,15 +279,18 @@ onMounted(() => {
     <TrendCard :kb-id="query.kbId || undefined" class="trend-block" />
 
     <el-table
+      ref="tableRef"
       v-loading="loading"
       :data="runs"
       class="eval-table"
       row-class-name="clickable"
-      @row-click="openDetail"
+      @row-click="onRowClick"
+      @selection-change="onSelectionChange"
     >
       <template #empty>
         <el-empty description="暂无评估记录——在服务器用 eval CLI 加 --save 生成" />
       </template>
+      <el-table-column type="selection" width="44" :selectable="canSelect" />
       <el-table-column prop="id" label="ID" width="70" />
       <el-table-column label="知识库" min-width="160">
         <template #default="{ row }">{{ row.kb_name ?? '(已删除)' }}</template>
@@ -378,6 +416,12 @@ onMounted(() => {
         <el-button type="primary" class="run-confirm" :disabled="!runForm.kb_id" @click="submitRun">发起</el-button>
       </template>
     </el-dialog>
+
+    <CompareDrawer
+      v-model:visible="cmpVisible"
+      :run-a="sel[0]?.id ?? null"
+      :run-b="sel[1]?.id ?? null"
+    />
   </div>
 </template>
 
