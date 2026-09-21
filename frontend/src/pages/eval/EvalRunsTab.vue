@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { evalApi, type EvalItem, type EvalRun, type EvalRunDetail, type MyKb } from '@/api/eval'
 import { kbApi, type KbItem } from '@/api/kb'
+import TrendCard from '@/pages/eval/TrendCard.vue'
 
 const loading = ref(false)
 const runs = ref<EvalRun[]>([])
@@ -239,6 +240,8 @@ onMounted(() => {
       title="仅库主/管理员可查看该库的评估记录"
       class="forbidden-alert"
     />
+
+    <TrendCard :kb-id="query.kbId || undefined" class="trend-block" />
 
     <el-table
       v-loading="loading"
