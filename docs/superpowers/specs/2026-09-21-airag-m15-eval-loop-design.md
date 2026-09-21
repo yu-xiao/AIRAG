@@ -58,7 +58,7 @@ M14 收官(main=8e908ec,2026-09-21 推送):评估结果有库(`eval_runs`/`eval_
 
 **题集 CRUD**:
 
-- `GET /api/eval/questions?kb_id=&page=1&page_size=50`:`kb_id` 必填;返回 `{"total", "items": [EvalQuestionOut]}`(`id, kb_id, question, expect_doc_ids, expect_keywords, reference_answer, created_at, updated_at`);`id asc`
+- `GET /api/eval/questions?kb_id=&page=1&page_size=50`:`kb_id` 必填;返回 `{"total", "items": [EvalQuestionOut]}`(`id, kb_id, question, expect_doc_ids, expect_keywords, reference_answer, created_at`——TimestampMixin 仅 created_at,与全库一致);`id asc`
 - `POST /api/eval/questions` body `{kb_id, question, expect_doc_ids?, expect_keywords?, reference_answer?}`:201 返回新建对象。校验:`question` 去空白后非空且 ≤2000 字(422);`expect_doc_ids` 为 int 列表、`expect_keywords` 为 string 列表(schema 层校验);**不校验文档存在性**(文档会重解析,软引用)
 - `PUT /api/eval/questions/{id}`:全量更新同款校验;题不存在或库不可见→404;非 owner→403
 - `DELETE /api/eval/questions/{id}`:204;同款 404/403
