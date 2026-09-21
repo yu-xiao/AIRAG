@@ -9,7 +9,7 @@ const loading = ref(false)
 const runs = ref<EvalRun[]>([])
 const total = ref(0)
 const forbidden = ref(false)
-const query = reactive({ kbId: 0 as number | 0, mode: '' as '' | 'retrieval' | 'generation', page: 1, pageSize: 20 })
+const query = reactive({ kbId: 0 as number | 0, mode: '' as '' | 'retrieval' | 'generation' | undefined, page: 1, pageSize: 20 })
 const kbOptions = ref<Pick<KbItem, 'id' | 'name'>[]>([])
 
 // 汇总指标列随 mode 过滤切换;「全部」给两条头部指标,缺席值显示 —
@@ -30,7 +30,8 @@ const METRIC_COLS: Record<'' | 'retrieval' | 'generation', { key: string; label:
     { key: 'refused_count', label: '拒答数' },
   ],
 }
-const metricCols = computed(() => METRIC_COLS[query.mode])
+// el-select 清空时 Element Plus 会把 v-model 置为 undefined,兜底回 '' 走默认列
+const metricCols = computed(() => METRIC_COLS[query.mode || ''])
 
 const ITEM_COLS: Record<'retrieval' | 'generation', { key: keyof EvalItem; label: string }[]> = {
   retrieval: [
@@ -52,6 +53,13 @@ function fmtMetric(summary: Record<string, number | null> | undefined, key: stri
 
 function fmtScore(v: number | null | undefined) {
   return v == null ? '—' : Number(v).toFixed(2)
+}
+
+/** 明细抽屉「期望」列:期望文档/关键词收缩展示(规范 B),两者皆空显示 — */
+function expectSummary(item: EvalItem) {
+  const docs = item.expect_doc_ids?.length ? `文档${item.expect_doc_ids.join(',')}` : ''
+  const kws = item.expect_keywords?.length ? `关键词${item.expect_keywords.join('、')}` : ''
+  return [docs, kws].filter(Boolean).join(' / ') || '—'
 }
 
 function isLow(v: number | null | undefined) {
@@ -237,6 +245,11 @@ onMounted(() => {
               <template #default="{ row }">
                 <el-tag v-if="row.refused" type="danger" size="small">拒答</el-tag>
                 <span v-else>—</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="期望" width="150" show-overflow-tooltip>
+              <template #default="{ row }">
+                {{ expectSummary(row) }}
               </template>
             </el-table-column>
             <el-table-column

@@ -81,6 +81,26 @@ describe('EvalPage', () => {
     expect(last?.mode).toBe('retrieval')
   })
 
+  it('clearing mode filter restores default metric columns', async () => {
+    const w = mountPage()
+    await flushPromises()
+    const modeSel = w
+      .findAllComponents(ElSelect)
+      .find((s) => s.props('placeholder') === '模式')!
+    await modeSel.vm.$emit('update:modelValue', 'retrieval')
+    await flushPromises()
+    expect(w.text()).toContain('MRR')
+    // 清空后 Element Plus 把 v-model 置为 undefined:默认列回归,且重查不带 mode
+    await modeSel.vm.$emit('update:modelValue', undefined)
+    await flushPromises()
+    expect(w.text()).toContain('命中率')
+    expect(w.text()).toContain('忠实度')
+    expect(w.text()).not.toContain('MRR')
+    const calls = vi.mocked(evalApi.listRuns).mock.calls
+    const last = calls[calls.length - 1]?.[0]
+    expect(last?.mode).toBeUndefined()
+  })
+
   it('403 from list shows inline forbidden alert', async () => {
     vi.mocked(evalApi.listRuns).mockRejectedValue({
       response: { status: 403 },
@@ -97,5 +117,8 @@ describe('EvalPage', () => {
     await w.find('.el-table__row').trigger('click')
     await flushPromises()
     expect(evalApi.getRun).toHaveBeenCalledWith(7)
+    // el-drawer 默认 append-to-body=false,内容渲染在组件树内(wrapper 未挂到 document)
+    expect(w.text()).toContain('文档1')
+    expect(w.text()).toContain('关键词k')
   })
 })
