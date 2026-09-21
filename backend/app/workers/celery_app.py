@@ -6,7 +6,8 @@ from app.core.config import settings
 celery_app = Celery(
     "airag",
     broker=settings.REDIS_URL,
-    include=["app.workers.pipeline", "app.workers.maintenance"],
+    include=["app.workers.pipeline", "app.workers.maintenance",
+             "app.workers.eval_tasks"],
 )
 
 celery_app.conf.update(

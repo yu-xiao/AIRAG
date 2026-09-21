@@ -131,3 +131,67 @@ def item_kwargs(r: dict) -> dict:
         relevancy=(r.get("relevancy") or {}).get("score"),
         reference_score=(r.get("reference") or {}).get("score"),
     )
+
+
+async def run_eval_task(run_id: int, mode: str, rerank: bool,
+                        top_k: int) -> None:
+    """状态机:running→completed/failed;逐题插 EvalItem+commit(进度可见)。
+
+    自持 NullPool 引擎(任务的事件循环与 API/CLI 不共享,池化连接
+    不得跨循环复用——pipeline._run_async + _engine 同款防御)。
+    """
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.core.config import settings
+    from app.models import EvalItem, EvalRun
+    from app.workers.pipeline import _engine
+
+    engine = _engine(settings.DATABASE_URL)
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+            run = await db.get(EvalRun, run_id)
+            if run is None:
+                logger.info(f"eval run {run_id} gone, skip")
+                return
+            questions = await load_questions(db, run.kb_id)
+            results: list[dict] = []
+            try:
+                if mode == "retrieval":
+                    from app.services.rerank.base import get_reranker
+
+                    reranker = get_reranker() if rerank else None
+                    for q in questions:
+                        r = await retrieval_item(db, run.kb_id, q, top_k,
+                                                 reranker)
+                        results.append(r)
+                        db.add(EvalItem(run_id=run.id, **item_kwargs(r)))
+                        await db.commit()
+                else:
+                    from app.core.config import settings as _s
+
+                    if not _s.ZHIPU_API_KEY:
+                        raise RuntimeError(
+                            "ZHIPU_API_KEY 未配置,生成评估无法执行")
+                    from app.services.chat_graph.graph import (
+                        build_graph,
+                        make_chat_llm,
+                    )
+
+                    llm = make_chat_llm()
+                    graph = build_graph(llm=llm)
+                    for q in questions:
+                        r = await generation_item(run.kb_id, q, llm, graph,
+                                                  rerank)
+                        results.append(r)
+                        db.add(EvalItem(run_id=run.id, **item_kwargs(r)))
+                        await db.commit()
+                run.summary = summarize(results)
+                run.item_count = len(results)
+                run.status = "completed"
+                await db.commit()
+            except Exception as e:
+                run.status = "failed"
+                run.error = str(e)[:500]
+                await db.commit()
+    finally:
+        await engine.dispose()
