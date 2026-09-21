@@ -2830,3 +2830,24 @@ git commit -m "test(m15): acceptance script, m14 guard fix, docs"
 2. `m15_acceptance.py` 全 PASS(worker 在跑)
 3. 用户走查通过(清单见 Task 11)
 4. 全程 spec 台账记录裁决;M16 候选回流记忆
+
+---
+
+## 执行记录(2026-09-21,SDD)
+
+**提交链**(spec 02ca850 → 计划 d19b23e → 计划勘误 2ed66cf):T1 cec188a → T2 57d708e → T3 4cc8a84 → T4 ebd1552 + d36e9bf(补:标 failed 前 rollback,防 PendingRollback 二次抛卡死 running)→ T5 79bfccd → T6 ce712d7 → T7 71a2595 → T8 6494b75 + 31cc8b1(补:disposed 守卫阻断卸载后孤儿轮询)→ T9 b242de6 + 50b202e(补:模式切换重置指标勾选)→ T10 e57750a → 收官裁定小修 1149ef5(`fix(eval-web): sidebar label matches route title; reserve selection across polling refresh`)→ T11 本提交(`test(m15): acceptance script, m14 guard fix, docs`,即含本记录的收官提交)。
+
+**测试与验收**:后端 pytest **316P→334P/0F**(计划预估 ~338,实际 334——T3 删 load_eval_set/purge 用例的净额大于计划假设,334 为不回退基线);前端 vitest 38→**54/54**(T7 +4、T8 +3、8b 补丁 +1、T9 +3、9b 补丁 +1、T10 +2、收官小修 +2 = MainLayout 文本断言 + EvalRunsTab 轮询保选);`npm run build`(vue-tsc + vite)零错。真栈 `m15_acceptance.py` **30/30 PASS、0 SKIP**(409 并发守卫项实际命中 PASS,未触发既知竞态):题集 CRUD 回环(3×201/PUT 改题/total==3 id asc/my-kbs 计数 3)、触发 retrieval 201 + 重复触发 409、轮询 completed(**7.8s**,进度快照 [info] done 0/3)、明细 items==3 + summary 四键 + created_by==admin + 题目 id asc、列表新字段(status/created_by/done_count)、权限负例(viewer 403 / 不可见 404 / 空题集 422)、generation 真 LLM completed(**106.8s**,summary 含三均值)、CLI `--save --json` exit 0 + stdout 纯 JSON 3 题(DB 题源)+ saved 行 stderr + 列表 +1 + created_by null、趋势数据 completed&summary ≥2、删除一题回环 total==2。验收后临时 user/KB 已清理(eval_questions 随 KB CASCADE;eval_runs 无 FK 按设计保留历史,m14 同款)。
+
+**m14 守卫修(T11 Step 1)**:`m14_acceptance.py` L229-233 `owner sees own run` 改守卫式(`if body["items"] else False`、`run_id=-1` 兜底)——m13 `if gen else set()` 同款。**m14 脚本自此退役**:其步骤③写 `eval_sets/*.json` 现场题集文件,T3 后 CLI 只读 DB,必然失败;m15 脚本取代其为回归基线。`backend/eval_sets/README.md` 同步改注「历史存量,已停用」(f6a7b8c9d0e1 迁移一次性导入后不再读取)。
+
+**实施期裁决备忘**(详见各任务 SDD 台账,收官任务补录三条):
+- T3:`generation_item(kb_id, q, llm, graph, use_rerank)` 签名带 llm/graph 参——Celery 任务建一次复用,避免逐题重建(LLM 客户端/graph 编译开销)。
+- T7:题集删除确认用组件内 `<el-dialog>` 而非 ElMessageBox——题集管理页签内自持状态,且可随页签卸载一并销毁。
+- T7/T10:明细抽屉(行点击)与 selection 列(勾选)冲突——`onRowClick` 判 `event.target.closest('.el-table-column--selection')` 落 selection 单元格则不开抽屉(EP row-click 对 checkbox 点击也无条件发出,组件侧裁决)。
+- 收官裁定①(1149ef5):侧边导航「评估记录」→「评估」,与 /eval 路由 title 及页内双页签一致;MainLayout.spec 文本断言(菜单项恰为「评估」且全文无「评估记录」)。
+- 收官裁定②(1149ef5):主表格 `row-key="id"` + selection 列 `reserve-selection`——3s 轮询刷新替换 runs 数组引用后勾选保留(对比场景选好两条不被清空);EvalRunsTab.spec fake timers 回归:mock 返回新数组引用刷新后勾选仍在(修复前该用例红,已验证)。
+- T11 自身:m15 验收脚本首跑暴露 POST /api/eval/questions 载荷漏 `kb_id` → 422(脚本笔误,非 API 缺陷),补齐后全绿。
+
+**用户走查清单**:题集管理 CRUD 对话框(tag 输入/正整数校验)、运行评估对话框→运行中进度→完成刷新、趋势卡片展开/模式切换/指标勾选/双主题、对比抽屉(选两条同 mode,Δ 着色)、CLI 不再是唯一入口提示语(空态)、侧边导航「评估」入口 + 勾选在轮询刷新后保留(收官小修两点)。
+

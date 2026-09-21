@@ -228,9 +228,11 @@ async def main() -> None:
             # ④ owner 列表见新 run;明细 items 与 item_count 一致
             r = await c.get(f"{API}/eval/runs", headers=owner)
             body = r.json()
-            check("owner sees own run", body["total"] == 1 and
-                  body["items"][0]["kb_name"] == f"m14验收库{SUFFIX}")
-            run_id = body["items"][0]["id"]
+            ok_list = body["total"] == 1 and (
+                body["items"][0]["kb_name"] == f"m14验收库{SUFFIX}"
+                if body["items"] else False)
+            check("owner sees own run", ok_list)
+            run_id = body["items"][0]["id"] if body["items"] else -1
             r = await c.get(f"{API}/eval/runs/{run_id}", headers=owner)
             d = r.json()
             check("detail items match count",

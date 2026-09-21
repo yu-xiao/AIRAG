@@ -1,14 +1,4 @@
-# 检索评估集
+# eval_sets(历史存量,已停用)
 
-每个知识库一个文件 `{kb_id}.json`,git 版本化。运行(backend 目录):
-
-    py -m scripts.eval_retrieval --kb <kb_id> [--top-k 8] [--rerank] [--json]
-
-字段:
-
-- `question`:评估问题
-- `expect_doc_ids`:期望命中的文档 id 列表(hit@k / MRR)
-- `expect_keywords`:期望出现在 top-k 内容中的关键词(recall)
-- `reference_answer`(可选,字符串):标准答案;eval_generation 会用它做一致性评审
-
-示例见 M5 验收(T12)生成的样例文件。
+M15 起评估题集入 `eval_questions` 表,经评估页「题集管理」维护;
+本目录文件仅在 f6a7b8c9d0e1 迁移时一次性导入,此后不再读取。
