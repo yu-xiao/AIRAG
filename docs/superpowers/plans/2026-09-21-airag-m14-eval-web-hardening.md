@@ -1846,3 +1846,13 @@ git commit -m "docs(m14): acceptance script, env comments, execution record"
 **用户走查清单**:评估页(双主题:列表/筛选/明细抽屉/空态/403 提示)、KB 编辑对话框清空描述保存生效、审计页看 `no_change` detail。
 
 **M15 候选**(输入待用户确认):Web 触发评估/双 run 对比、评估趋势图、出站集成、A2A、MinerU 本地化、LDAP/SSO。
+
+## 执行记录补遗(终审修复波)
+
+- **终审(whole-branch,161be43..8c43a02)**:权限模型/C4 防环(decompose 恒置 hopped,rerank 后直通 generate,零命中不可能成环)/C2 语义/C3·C9 规范化均独立核实为佳;9 项 deferred minors triage **全部 ride**;verdict **With fixes**,2 Important:
+  - ① EvalPage 清空模式筛选(EP 2.14.5 valueOnClear=undefined)→ `METRIC_COLS[undefined]` → 指标列全消失(用户可见 bug,spec 用例未覆盖清空路径);
+  - ② 明细抽屉缺 spec B 的 expect_doc_ids/expect_keywords 列(计划 T2 模板缺陷,非实现者过错——Self-Review 只对了 TS 类型没对列清单)。
+- **修复波 815deec**(`fix(eval): mode-clear metric columns fallback; drawer expect column (final review)`):①`METRIC_COLS[query.mode || '']` + 类型加 undefined + 清空路径 vitest 用例(默认两列回归 + listRuns mode=undefined);②「期望」列(expectSummary:文档id/关键词紧凑渲染,双空显示 —)+ 抽屉断言(el-drawer appendToBody 默认 false,DOM 在测试 wrapper 内,w.text() 可及)。限定性复审:**两项 ADDRESSED,零新破坏**。
+- **修复后终测**:前端 vitest **38/38**(37+1)、build 零错;后端未动(316P)。
+- M15 候选新增:**judge 定界符转义/nonce**(终审判定的唯一残留注入面,answer 含字面 `</answer>` 可提前闭合)。
+- 走查清单增补一条:评估页**模式筛选清空后默认指标列恢复**。
