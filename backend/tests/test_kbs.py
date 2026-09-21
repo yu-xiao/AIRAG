@@ -403,3 +403,46 @@ async def test_rename_kb_integrity_fallback_409(client, auth_headers,
     r = await client.put(f"/api/kbs/{kb.id}",
                          json={"name": "竞态改名库"}, headers=auth_headers)
     assert r.status_code == 409
+
+
+# ---- M14 Task3:描述清空语义(空串=显式清空入库 NULL;null=不改) ----
+async def test_rename_empty_description_clears_to_null(
+        client, auth_headers, db_session):
+    """M14:描述空串=显式清空 → 入库 NULL;null=未提供不动。"""
+    from app.models import KnowledgeBase
+
+    kb = await client.post(
+        "/api/kbs", json={"name": "清空描述库", "description": "旧描述"},
+        headers=auth_headers,
+    )
+    kb_id = kb.json()["id"]
+    resp = await client.put(
+        f"/api/kbs/{kb_id}", json={"description": ""}, headers=auth_headers
+    )
+    assert resp.status_code == 200
+    assert resp.json()["description"] is None
+    db_session.expire_all()
+    row = await db_session.get(KnowledgeBase, kb_id)
+    assert row.description is None  # 入库是 NULL,不是空串
+
+    # 再次清空已空的描述:仍是 NULL,幂等
+    resp2 = await client.put(
+        f"/api/kbs/{kb_id}", json={"description": ""}, headers=auth_headers
+    )
+    assert resp2.status_code == 200
+    db_session.expire_all()
+    assert (await db_session.get(KnowledgeBase, kb_id)).description is None
+
+
+async def test_create_empty_description_normalizes_null(
+        client, auth_headers, db_session):
+    from app.models import KnowledgeBase
+
+    kb = await client.post(
+        "/api/kbs", json={"name": "空描述建库", "description": ""},
+        headers=auth_headers,
+    )
+    assert kb.status_code == 201
+    db_session.expire_all()
+    row = await db_session.get(KnowledgeBase, kb.json()["id"])
+    assert row.description is None

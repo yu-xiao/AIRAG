@@ -79,7 +79,8 @@ async def rename_knowledge_base(
                              "knowledge base name already exists")
         kb.name = name
     if description is not None:
-        kb.description = description
+        # M14:空串=显式清空,入库 NULL(空=无描述的单一表示)
+        kb.description = description or None
     detail = ({"name": {"old": old_name, "new": kb.name}}
               if kb.name != old_name else {"description": "updated"})
     await audit(db, username, "kb_update", f"kb:{kb.id}", detail)

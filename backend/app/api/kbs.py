@@ -31,7 +31,7 @@ async def create_kb(
     if dup is not None:
         raise HTTPException(status_code=409, detail="knowledge base name already exists")
     kb = KnowledgeBase(
-        name=name, description=payload.description, owner_id=current.id
+        name=name, description=payload.description or None, owner_id=current.id
     )
     db.add(kb)
     try:

@@ -203,3 +203,31 @@ describe('KbPage rename dialog', () => {
     expect(w.find('.el-form-item__error').text()).toContain('已存在')
   })
 })
+
+describe('KbPage clear description (M14)', () => {
+  const ownerKb: KbItem = {
+    id: 5, name: '可清库', description: '旧描述', owner_id: 1,
+    embed_provider: 'zhipu', embed_model: 'embedding-3',
+    created_at: '2026-09-21T10:00:00', my_perm: 'owner', doc_count: 0,
+  }
+
+  it('rename submits empty string as explicit clear', async () => {
+    vi.mocked(kbApi.list).mockResolvedValue([ownerKb])
+    vi.mocked(kbApi.rename).mockResolvedValue({ ...ownerKb, description: null })
+    const w = mountPage()
+    await flushPromises()
+    await w.findAll('button').find((b) => b.text().trim() === '重命名')!.trigger('click')
+    await flushPromises()
+    // 挂载即开的创建对话框(route query create=1)其 textarea DOM 在取消后
+    // 仍保留(el-dialog 默认不销毁),且模板序在前——取最后一个才是重命名
+    // 对话框的描述框(KbPage.vue:414)
+    const areas = w.findAll('textarea')
+    await areas[areas.length - 1]!.setValue('')
+    await w.findAll('button').find((b) => b.text().trim() === '保存')!.trigger('click')
+    await flushPromises()
+    expect(kbApi.rename).toHaveBeenCalledWith(5, {
+      name: '可清库',
+      description: '',  // M14:空串直发(旧实现发 null → 清空无效)
+    })
+  })
+})

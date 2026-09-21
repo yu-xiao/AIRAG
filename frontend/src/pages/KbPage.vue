@@ -78,7 +78,7 @@ async function submit() {
   try {
     await kbApi.create({
       name: form.name.trim(),
-      description: form.description.trim() || null,
+      description: form.description.trim(),
     })
     ElMessage.success('知识库创建成功')
     dialogVisible.value = false
@@ -120,7 +120,7 @@ async function submitRename() {
   try {
     await kbApi.rename(renameForm.id, {
       name: renameForm.name.trim(),
-      description: renameForm.description.trim() || null,
+      description: renameForm.description.trim(),
     })
     ElMessage.success('已更新')
     renameVisible.value = false
@@ -347,7 +347,7 @@ onMounted(() => {
             {{ permMeta(row.my_perm).label }}
           </el-tag>
         </div>
-        <p class="kb-card-desc">{{ row.description ?? '暂无描述' }}</p>
+        <p class="kb-card-desc">{{ row.description || '暂无描述' }}</p>
         <div class="kb-card-meta">
           <span>{{ row.doc_count }} 篇文档</span>
           <span>{{ fmtTime(row.created_at) }}</span>
