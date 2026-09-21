@@ -458,6 +458,13 @@ Expected: FAIL(404 on POST /api/eval/questions——路由不存在)
 from pydantic import BaseModel, Field, field_validator
 
 
+def _strip_question(v: str) -> str:
+    v = v.strip()
+    if not v:
+        raise ValueError("question must not be blank")
+    return v
+
+
 class EvalQuestionIn(BaseModel):
     kb_id: int
     question: str = Field(min_length=1, max_length=2000)
@@ -467,11 +474,8 @@ class EvalQuestionIn(BaseModel):
 
     @field_validator("question")
     @classmethod
-    def _strip_question(cls, v: str) -> str:
-        v = v.strip()
-        if not v:
-            raise ValueError("question must not be blank")
-        return v
+    def _q(cls, v: str) -> str:
+        return _strip_question(v)
 
 
 class EvalQuestionUpdate(BaseModel):
@@ -481,7 +485,10 @@ class EvalQuestionUpdate(BaseModel):
     expect_keywords: list[str] = []
     reference_answer: str | None = None
 
-    _strip_question = EvalQuestionIn._strip_question
+    @field_validator("question")
+    @classmethod
+    def _q(cls, v: str) -> str:
+        return _strip_question(v)
 
 
 class EvalQuestionOut(BaseModel):
