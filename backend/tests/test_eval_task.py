@@ -54,6 +54,35 @@ async def test_run_eval_task_failure_marks_failed(client, auth_headers,
     assert "检索炸了" in run.error
 
 
+async def test_run_eval_task_keeps_committed_items_on_failure(
+        client, auth_headers, db_session, monkeypatch):
+    """I1/M2:第 2 题炸时,第 1 题已逐题 commit 的 EvalItem 保留;
+    except 先 rollback 再置 failed,DB 级异常不会二次炸掉状态机。"""
+    from sqlalchemy import select
+
+    import app.services.eval_runner as runner
+    from app.services.eval_runner import run_eval_task
+
+    calls = {"n": 0}
+
+    async def flaky(db, kb_id, q, top_k, reranker):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("第二题炸了")
+        return {"question": q.question, "hit_at_k": False,
+                "mrr": 0.0, "keyword_recall": 0.0}
+
+    run_id = await _mk_running_run(client, auth_headers, db_session, n=2)
+    monkeypatch.setattr(runner, "retrieval_item", flaky)
+    await run_eval_task(run_id, "retrieval", False, 8)
+    db_session.expire_all()
+    run = (await db_session.execute(
+        select(EvalRun).where(EvalRun.id == run_id))).scalar_one()
+    assert run.status == "failed"
+    assert "第二题炸了" in run.error
+    assert len(run.items) == 1  # 第 1 题已插并 commit 的保留
+
+
 async def test_generation_without_key_fails(client, auth_headers, db_session,
                                             monkeypatch):
     from sqlalchemy import select, text

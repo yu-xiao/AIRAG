@@ -190,6 +190,12 @@ async def run_eval_task(run_id: int, mode: str, rerank: bool,
                 run.status = "completed"
                 await db.commit()
             except Exception as e:
+                # 先 rollback 丢弃未提交脏状态:异常可能源自 DB 操作本身
+                # (逐题 commit/flush 失败、连接中断),session 处于
+                # PendingRollback 时直接 commit 会二次抛异常、逃出函数,
+                # run 永远停在 running——状态机必须兜住。已逐题 commit 的
+                # items 不受影响(它们已落库)。
+                await db.rollback()
                 run.status = "failed"
                 run.error = str(e)[:500]
                 await db.commit()
