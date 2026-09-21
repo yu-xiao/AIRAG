@@ -12,6 +12,17 @@ def run_evaluation(run_id: int, mode: str, rerank: bool, top_k: int) -> None:
     from app.services.eval_runner import run_eval_task
 
     _run_async(run_eval_task(run_id, mode, rerank, top_k))
+    # 图内节点(retrieve 等)经全局 SessionLocal 池化引擎取连接,绑定本任务
+    # 的事件循环;worker 每任务一个新循环,任务结束必须弃置全局池——否则
+    # 下一任务 checkout 到绑定已关闭循环的连接,pre-ping 打到死 proactor
+    # (NoneType.send)。dispose 只关池内连接,后续 checkout 自动重建。
+    _run_async(_dispose_shared_engine())
+
+
+async def _dispose_shared_engine() -> None:
+    from app.db.session import engine
+
+    await engine.dispose()
 
 
 async def _sweep_orphan_runs() -> int:

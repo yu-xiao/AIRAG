@@ -149,3 +149,30 @@ async def test_generation_uses_fresh_uncached_llm(client, auth_headers,
     assert run.status == "completed"
     assert seen["llm"] is fresh_llm  # graph 消费的就是工厂 fresh 实例,非缓存单例
     assert run.items[0].faithfulness == 0.5  # judge 走的也是同一 fresh llm
+
+
+async def test_run_evaluation_shell_disposes_shared_engine(
+        client, auth_headers, db_session, monkeypatch):
+    """M15 修复:worker 每任务一个新事件循环,图节点(retrieve 等)经全局
+    SessionLocal 池化引擎取的连接绑定本任务循环;任务壳必须在 run_eval_task
+    之后弃置全局池——否则下一任务 checkout 到死循环连接,pre-ping 打到已关
+    proactor(NoneType.send)。spy 拦截 dispose 断言恰被 await 一次;任务壳是
+    同步函数、内部 _run_async 可能切线程,list.append 即线程安全足够。"""
+    from sqlalchemy import select
+
+    import app.workers.eval_tasks as eval_tasks
+    from app.workers.eval_tasks import run_evaluation
+
+    calls: list = []
+
+    async def spy():
+        calls.append(1)
+
+    monkeypatch.setattr(eval_tasks, "_dispose_shared_engine", spy)
+    run_id = await _mk_running_run(client, auth_headers, db_session)
+    run_evaluation.run(run_id, "retrieval", False, 8)
+    assert calls == [1]  # 恰一次
+    db_session.expire_all()
+    run = (await db_session.execute(
+        select(EvalRun).where(EvalRun.id == run_id))).scalar_one()
+    assert run.status == "completed"  # 壳内先真跑完评估再 dispose
