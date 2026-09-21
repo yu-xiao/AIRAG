@@ -216,5 +216,35 @@ describe('EvalPage', () => {
     expect(evalApi.triggerRun).toHaveBeenCalledTimes(2)
   })
 
+  it('keeps selection across silent polling refresh (row-key + reserve-selection)', async () => {
+    vi.useFakeTimers()
+    // 两条同 mode 的 running 行:勾选后 3s 轮询静默刷新(mock 返回全新数组引用)
+    // 不清勾选——row-key="id" + reserve-selection 保选,对比入口仍可用
+    const mkRows = () => ([
+      { ...runs[0]!, id: 21, mode: 'retrieval', status: 'running', done_count: 1 } as never,
+      { ...runs[0]!, id: 22, mode: 'retrieval', status: 'running', done_count: 0 } as never,
+    ])
+    vi.mocked(evalApi.listRuns).mockResolvedValue({ total: 2, items: mkRows() })
+    const w = mountPage()
+    await flushPromises()
+    const boxes = w.findAll('.el-table__row .el-checkbox__original')
+    expect(boxes.length).toBe(2)
+    await boxes[0]!.setValue(true)
+    await boxes[1]!.setValue(true)
+    await flushPromises()
+    expect(w.find('button.cmp-btn').attributes('disabled')).toBeUndefined()
+    // 轮询刷新:新数组引用(内容等价,进度推进)
+    vi.mocked(evalApi.listRuns).mockResolvedValue({ total: 2, items: mkRows() })
+    await vi.advanceTimersByTimeAsync(3100)
+    expect(w.find('button.cmp-btn').attributes('disabled')).toBeUndefined()
+    expect(w.findAll('.el-table__row .el-checkbox')[0]!.classes()).toContain('is-checked')
+    expect(w.findAll('.el-table__row .el-checkbox')[1]!.classes()).toContain('is-checked')
+    // 终态后停表
+    vi.mocked(evalApi.listRuns).mockResolvedValue(
+      { total: 2, items: [{ ...runs[0]!, id: 21 } as never, { ...runs[0]!, id: 22 } as never] })
+    await vi.advanceTimersByTimeAsync(3100)
+    vi.useRealTimers()
+  })
+
   afterEach(() => { vi.useRealTimers() })
 })

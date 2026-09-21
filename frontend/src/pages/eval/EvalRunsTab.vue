@@ -284,13 +284,16 @@ onMounted(() => {
       :data="runs"
       class="eval-table"
       row-class-name="clickable"
+      row-key="id"
       @row-click="onRowClick"
       @selection-change="onSelectionChange"
     >
       <template #empty>
         <el-empty description="暂无评估记录——在服务器用 eval CLI 加 --save 生成" />
       </template>
-      <el-table-column type="selection" width="44" :selectable="canSelect" />
+      <!-- reserve-selection + row-key:轮询刷新替换 runs 数组引用后勾选保留
+           (对比场景选好两条,刷新不清空) -->
+      <el-table-column type="selection" width="44" :selectable="canSelect" reserve-selection />
       <el-table-column prop="id" label="ID" width="70" />
       <el-table-column label="知识库" min-width="160">
         <template #default="{ row }">{{ row.kb_name ?? '(已删除)' }}</template>

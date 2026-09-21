@@ -59,7 +59,7 @@ function onLogout() {
           <el-icon><ChatDotRound /></el-icon><span>对话</span>
         </el-menu-item>
         <el-menu-item index="/eval">
-          <el-icon><TrendCharts /></el-icon><span>评估记录</span>
+          <el-icon><TrendCharts /></el-icon><span>评估</span>
         </el-menu-item>
         <el-menu-item index="/keys">
           <el-icon><Key /></el-icon><span>API 密钥</span>
