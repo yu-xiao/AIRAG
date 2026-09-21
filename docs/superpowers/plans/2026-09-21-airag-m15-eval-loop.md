@@ -2851,3 +2851,12 @@ git commit -m "test(m15): acceptance script, m14 guard fix, docs"
 
 **用户走查清单**:题集管理 CRUD 对话框(tag 输入/正整数校验)、运行评估对话框→运行中进度→完成刷新、趋势卡片展开/模式切换/指标勾选/双主题、对比抽屉(选两条同 mode,Δ 着色)、CLI 不再是唯一入口提示语(空态)、侧边导航「评估」入口 + 勾选在轮询刷新后保留(收官小修两点)。
 
+## 执行记录补遗(终审修复波,控制端)
+
+- **终审(whole-branch,2ed66cf..0b47419)**:门禁独立复跑 334P/54T/build 零错;规格覆盖无缺口;verdict **With fixes**,1 Important:I-1 孤儿 running run 无恢复路径(worker 崩溃/未启动/派发失败→run 永久 running,同 kb+mode 永久 409,前端轮询永不停)。
+- **修复波 f700a35**:worker_ready 信号清扫(running→failed「worker restarted…」)+ 触发端点 `.delay()` 兜底(置 failed+502)+2 用例;顺手 M-a 空态文案(点「运行评估」发起)/M-d 两处注释如实化。336P/54T/build 零错。
+- **修复波后真栈复验发现新缺陷(28/30)**:generation 二次运行挂「'NoneType' object has no attribute 'send'」。诊断链:48d176a(fresh llm 绕 lru_cache,红鲱鱼但保留)+ 全量 traceback 定位真根因——图内 retrieve_node 走全局 SessionLocal 池化引擎,连接绑定首个任务的事件循环;worker 每任务 asyncio.run 新循环,二次 checkout pre-ping 打死循环 proactor。检索评估不走图(任务 NullPool 会话)故仅 generation 面。
+- **真修复 58d999b**:celery 壳 `run_evaluation` 在 `run_eval_task` 后 `_run_async(_dispose_shared_engine())`——worker 进程内每任务弃置全局池(连接自动重建,eager 测试不受扰);+1 用例锁壳层调用。338P。
+- **终态门禁(全部控制端亲验)**:pytest **338P/0F**;vitest **54/54**;build 零错;真栈 m15_acceptance **30/30 PASS**(单 worker 单后端,generation 235.8s 真 LLM);同 worker 生命周期第二次 generation(kb5)**completed**(跨循环毒化复现路径闭合,run 19,3 题 faithfulness/relevancy 均值 1.0)。
+- 环境观测:--reload 后端在连续文件变更后崩死一次(M8 已知备忘),走查前 curl 得 000 则重启 start_dev.bat;曾发现双 worker 并存(venv + 系统 python)已清,worker 保持单实例。
+
