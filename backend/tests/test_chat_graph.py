@@ -817,6 +817,34 @@ async def test_retrieve_parallel_queries_merge(monkeypatch):
     assert len(out["hits"]) == 3           # 去重后各保留一条
 
 
+async def test_retrieve_parallel_raises_after_others_complete(monkeypatch):
+    """M14:单查询异常上抛;其余任务正常完成(不被取消成孤儿,
+    消除 'Task exception was never retrieved' 日志噪音)。"""
+    import asyncio
+
+    from app.services.chat_graph import nodes as nodes_mod
+    from app.services.retrieval.searcher import SearchHit
+
+    done = []
+
+    async def fake_search_one(query, kb_ids):
+        if query == "炸":
+            raise RuntimeError("search boom")
+        await asyncio.sleep(0.02)
+        done.append(query)
+        return [SearchHit(1, 1, kb_ids[0], "f", 1, f"内容-{query}", 0.5,
+                          "vector")]
+
+    monkeypatch.setattr(nodes_mod, "_search_one", fake_search_one)
+    import pytest
+
+    with pytest.raises(RuntimeError, match="search boom"):
+        await nodes_mod.retrieve_node(
+            {"question": "q", "kb_ids": [3],
+             "sub_queries": ["好", "炸", "另一"]})
+    assert "好" in done and "另一" in done  # 未炸的都跑完了
+
+
 # ---- M14:零命中首次直达 decompose(勘误拍板恢复旧语义) ----
 async def test_zero_hit_first_round_goes_straight_to_decompose(monkeypatch):
     """首次零命中不再先 transform 重检索原始问题(M13 行为会检索两次),

@@ -76,7 +76,14 @@ async def retrieve_node(state: dict) -> dict:
         state.get("search_query") or state["question"]
     ]
     per_query = list(await asyncio.gather(
-        *(_search_one(q, state["kb_ids"]) for q in queries)))
+        *(_search_one(q, state["kb_ids"]) for q in queries),
+        return_exceptions=True,
+    ))
+    # M14:return_exceptions 消除孤儿任务("exception was never retrieved"
+    # 噪音);异常仍上抛首个,语义与串行一致
+    for r in per_query:
+        if isinstance(r, BaseException):
+            raise r
     # 跨查询轮转交错(chunk_id 去重),合并上限 2*top_k,留给 rerank 全局重排
     merged, seen = [], set()
     cap = settings.RETRIEVAL_TOP_K * 2
