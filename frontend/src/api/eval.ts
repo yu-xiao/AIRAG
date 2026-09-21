@@ -7,7 +7,10 @@ export interface EvalRun {
   kb_name: string | null
   mode: 'retrieval' | 'generation'
   item_count: number
-  summary: Record<string, number | null>
+  summary: Record<string, number | null> | null
+  status: 'running' | 'completed' | 'failed'
+  created_by: string | null
+  done_count: number
   created_at: string
 }
 
@@ -31,6 +34,7 @@ export interface EvalItem {
 export interface EvalRunDetail extends EvalRun {
   items: EvalItem[]
   items_truncated: boolean
+  error: string | null
 }
 
 export interface EvalRunQuery {
@@ -38,6 +42,40 @@ export interface EvalRunQuery {
   mode?: 'retrieval' | 'generation'
   page?: number
   page_size?: number
+}
+
+/** 镜像后端 EvalQuestionOut */
+export interface EvalQuestion {
+  id: number
+  kb_id: number
+  question: string
+  expect_doc_ids: number[] | null
+  expect_keywords: string[] | null
+  reference_answer: string | null
+  created_at: string
+}
+
+/** 创建/更新题目入参 */
+export interface QuestionInput {
+  question: string
+  expect_doc_ids?: number[]
+  expect_keywords?: string[]
+  reference_answer?: string | null
+}
+
+/** 镜像后端 MyKbOut:我有权管理题集的知识库及题目数 */
+export interface MyKb {
+  kb_id: number
+  kb_name: string
+  question_count: number
+}
+
+/** 触发评估运行入参 */
+export interface TriggerInput {
+  kb_id: number
+  mode: 'retrieval' | 'generation'
+  rerank?: boolean
+  top_k?: number
 }
 
 export const evalApi = {
@@ -50,6 +88,41 @@ export const evalApi = {
 
   async getRun(id: number): Promise<EvalRunDetail> {
     const { data } = await http.get(`/eval/runs/${id}`)
+    return data
+  },
+
+  async listQuestions(params: {
+    kb_id: number
+    page?: number
+    page_size?: number
+  }): Promise<{ total: number; items: EvalQuestion[] }> {
+    const { data } = await http.get('/eval/questions', { params })
+    return data
+  },
+
+  async createQuestion(
+    payload: QuestionInput & { kb_id: number },
+  ): Promise<EvalQuestion> {
+    const { data } = await http.post('/eval/questions', payload)
+    return data
+  },
+
+  async updateQuestion(id: number, payload: QuestionInput): Promise<EvalQuestion> {
+    const { data } = await http.put(`/eval/questions/${id}`, payload)
+    return data
+  },
+
+  async deleteQuestion(id: number): Promise<void> {
+    await http.delete(`/eval/questions/${id}`)
+  },
+
+  async myKbs(): Promise<MyKb[]> {
+    const { data } = await http.get('/eval/my-kbs')
+    return data
+  },
+
+  async triggerRun(payload: TriggerInput): Promise<{ run_id: number }> {
+    const { data } = await http.post('/eval/runs', payload)
     return data
   },
 }

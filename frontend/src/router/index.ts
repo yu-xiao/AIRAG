@@ -22,7 +22,7 @@ const router = createRouter({
           path: 'eval',
           name: 'eval',
           component: () => import('@/pages/EvalPage.vue'),
-          meta: { title: '评估记录' },
+          meta: { title: '评估' },
         },
         {
           path: 'keys',

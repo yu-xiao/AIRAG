@@ -1,7 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ElementPlus, { ElSelect } from 'element-plus'
-import EvalPage from '@/pages/EvalPage.vue'
+import EvalRunsTab from '@/pages/eval/EvalRunsTab.vue'
 import { evalApi, type EvalRun } from '@/api/eval'
 import { kbApi } from '@/api/kb'
 
@@ -14,17 +14,20 @@ const runs: EvalRun[] = [
   {
     id: 7, kb_id: 3, kb_name: '手册库', mode: 'retrieval', item_count: 5,
     summary: { item_count: 5, hit: 0.8, mrr: 0.75, keyword_recall: 0.6 },
+    status: 'completed', created_by: 'ed', done_count: 5,
     created_at: '2026-09-21T10:00:00',
   },
   {
     id: 8, kb_id: 4, kb_name: null, mode: 'generation', item_count: 2,
     summary: { item_count: 2, faithfulness_avg: 0.9, relevancy_avg: 0.85, refused_count: 1 },
+    status: 'completed', created_by: 'ed', done_count: 2,
     created_at: '2026-09-21T11:00:00',
   },
 ]
 
 const detail = {
   ...runs[0]!,
+  error: null,
   items: [
     {
       id: 1, question: '问题0', expect_doc_ids: [1], expect_keywords: ['k'],
@@ -35,7 +38,7 @@ const detail = {
   items_truncated: false,
 }
 
-const mountPage = () => mount(EvalPage, { global: { plugins: [ElementPlus] } })
+const mountPage = () => mount(EvalRunsTab, { global: { plugins: [ElementPlus] } })
 
 describe('EvalPage', () => {
   beforeEach(() => {
