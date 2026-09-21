@@ -59,6 +59,12 @@ function labelOf(key: string) {
   return TREND_METRICS[mode.value].find((m) => m.key === key)?.label ?? key
 }
 
+// 切模式即恢复该模式默认全选:否则旧键在新模式 summary 里缺席→全 null 空线,
+// labelOf 也找不到映射→legend 显示原始键名(如 faithfulness_avg)
+watch(mode, () => {
+  metricKeys.value = TREND_METRICS[mode.value].map((m) => m.key)
+})
+
 watch([expanded, mode, metricKeys, isDark, () => props.kbId],
   async () => {
     await nextTick()
