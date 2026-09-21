@@ -17,7 +17,7 @@ from app.models import (Chunk, Conversation, Document, KbPermission,
 from app.services.audit import audit
 from app.services.doc_ops import BUSY_STATUSES, DocOpError
 
-# 与 scripts/purge_orphan_evalsets.py 同源(backend/eval_sets)
+# backend/eval_sets(文件题集遗留,M15 起题源入 eval_questions 表)
 EVAL_DIR = Path(__file__).resolve().parents[2] / "eval_sets"
 
 

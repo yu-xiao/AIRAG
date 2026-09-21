@@ -4,12 +4,11 @@
     .venv\\Scripts\\python scripts\\m8_acceptance.py
 
 覆盖 M8：拒答子串判定（零命中 refused + 话术包含断言）/ 正常题不误伤回归 /
-KB 重名 409 / 孤儿 eval_sets dry-run。ZHIPU_API_KEY 未配置时打印 SKIP 整体退出。
+KB 重名 409（孤儿 eval_sets 清理已随 M15 文件题集废弃移除）。ZHIPU_API_KEY 未配置时打印 SKIP 整体退出。
 收尾直接清 DB（chunks/documents/kb_permissions/knowledge_bases，FK 顺序）。
 """
 import asyncio
 import json
-import subprocess
 import sys
 import time
 
@@ -268,17 +267,6 @@ def main():
                          and (r["citations"] or []) and len(r["citations"]) >= 1
                          and REFUSAL_PHRASE not in final_answer(r).strip()))
     check("S4 normal not refused, citations >= 1", s4_ok, str(s4)[:300])
-
-    # ---- S5: 孤儿清理 dry-run（不真删）----
-    proc = subprocess.run(
-        [sys.executable, "-m", "scripts.purge_orphan_evalsets"],
-        capture_output=True, text=True, timeout=60,
-    )
-    ok5 = ("DRY-RUN" in proc.stdout
-           and f"{kb_id}.json" not in proc.stdout
-           and f"{kb_b}.json" not in proc.stdout)
-    check("S5 purge dry-run runs, created kbs not orphaned", ok5,
-          proc.stdout[-300:] + proc.stderr[-200:])
 
     summary_and_exit()
     cleanup_kbs(kb_ids)

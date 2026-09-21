@@ -1,6 +1,4 @@
-from pathlib import Path
-
-from scripts.eval_metrics import hit_at_k, keyword_recall, load_eval_set, mrr
+from app.services.eval_runner import hit_at_k, keyword_recall, mrr
 
 
 def test_hit_at_k():
@@ -21,15 +19,3 @@ def test_keyword_recall():
     assert keyword_recall(["预算三千万元"], ["预算", "负责人"]) == 0.5
     assert keyword_recall(["内容"], []) == 1.0
     assert keyword_recall([], ["任何"]) == 0.0
-
-
-def test_load_eval_set(tmp_path):
-    f = tmp_path / "1.json"
-    f.write_text(
-        '{"kb_id": 1, "items": [{"question": "q", "expect_doc_ids": [1],'
-        ' "expect_keywords": ["k"]}]}',
-        encoding="utf-8",
-    )
-    data = load_eval_set(f)
-    assert data["kb_id"] == 1
-    assert data["items"][0]["question"] == "q"

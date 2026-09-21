@@ -3,18 +3,13 @@
 用法(backend 目录下):
     .venv\\Scripts\\python -m scripts.eval_generation --kb 3 [--rerank] [--json]
 
-复用 eval_sets/{kb_id}.json(格式见 eval_sets/README.md,expect_* 字段透传不使用);
+题源 eval_questions 表,经评估页题集管理维护(expect_* 字段透传不使用);
 对每题跑完整问答图,LLM 评 faithfulness(忠实度)与 relevancy(切题度)。
 """
 import argparse
 import asyncio
 import json
 import sys
-from pathlib import Path
-
-from scripts.eval_metrics import load_eval_set
-
-EVAL_DIR = Path(__file__).resolve().parents[1] / "eval_sets"
 
 
 def _fmt(score):
@@ -26,55 +21,21 @@ async def run(kb_id: int, use_rerank: bool) -> list[dict]:
     from app.db.session import SessionLocal
     from app.models import KnowledgeBase
     from app.services.chat_graph.graph import build_graph, make_chat_llm
-    from app.services.eval_judge import (
-        faithfulness_score,
-        reference_score,
-        relevancy_score,
-    )
+    from app.services.eval_runner import generation_item, load_questions
 
     if not settings.ZHIPU_API_KEY:
         sys.exit("ZHIPU_API_KEY 未配置:桩答案的 LLM-judge 评估无意义,拒绝运行")
-
-    set_path = EVAL_DIR / f"{kb_id}.json"
-    if not set_path.exists():
-        sys.exit(f"eval set not found: {set_path}(格式见 eval_sets/README.md)")
-    data = load_eval_set(set_path)
-
     async with SessionLocal() as db:
         kb = await db.get(KnowledgeBase, kb_id)
-    if kb is None:
-        sys.exit(f"knowledge base {kb_id} not found")
-
+        if kb is None:
+            sys.exit(f"knowledge base {kb_id} not found")
+        questions = await load_questions(db, kb_id)
+        if not questions:
+            sys.exit(f"no questions for kb {kb_id}(在评估页「题集管理」添加)")
     llm = make_chat_llm()  # 生成与评审共用同一实例(单例)
     graph = build_graph(llm=llm)
-    results = []
-    for item in data["items"]:
-        final = await graph.ainvoke(
-            {"question": item["question"], "kb_ids": [kb_id],
-             "rerank": use_rerank, "history": []}
-        )
-        answer = final.get("answer") or ""
-        contexts = [
-            h["content"]
-            for h in (final.get("hits") or [])[: settings.RETRIEVAL_TOP_K]
-        ]
-        results.append(
-            {
-                "question": item["question"],
-                "answer": answer,
-                "reference": (
-                    await reference_score(llm, item["question"], answer,
-                                          item["reference_answer"])
-                    if item.get("reference_answer") else None
-                ),
-                "faithfulness": await faithfulness_score(
-                    llm, item["question"], answer, contexts),
-                "relevancy": await relevancy_score(llm, item["question"], answer),
-                "citations": len(final.get("citations") or []),
-                "refused": bool(final.get("refused")),
-            }
-        )
-    return results
+    return [await generation_item(kb_id, q, llm, graph, use_rerank)
+            for q in questions]
 
 
 def main():

@@ -1,6 +1,3 @@
-import json
-
-
 class _FakeGraph:
     async def ainvoke(self, init, config=None):
         return {
@@ -10,11 +7,11 @@ class _FakeGraph:
         }
 
 
-async def test_eval_generation_run(tmp_path, monkeypatch, db_session):
+async def test_eval_generation_run(monkeypatch, db_session):
     import scripts.eval_generation as eg
     from app.core.config import settings
     from app.core.security import hash_password
-    from app.models import KnowledgeBase, User
+    from app.models import EvalQuestion, KnowledgeBase, User
 
     monkeypatch.setattr(settings, "ZHIPU_API_KEY", "k")
 
@@ -23,20 +20,16 @@ async def test_eval_generation_run(tmp_path, monkeypatch, db_session):
     await db_session.flush()
     kb = KnowledgeBase(name="评估库", owner_id=u.id)
     db_session.add(kb)
+    await db_session.flush()
+    db_session.add(EvalQuestion(kb_id=kb.id, question="预算多少",
+                                expect_doc_ids=[1]))
     await db_session.commit()
-
-    (tmp_path / f"{kb.id}.json").write_text(
-        json.dumps({"kb_id": kb.id,
-                    "items": [{"question": "预算多少", "expect_doc_ids": [1]}]}),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(eg, "EVAL_DIR", tmp_path)
 
     import app.services.chat_graph.graph as graph_mod
     monkeypatch.setattr(graph_mod, "build_graph",
                         lambda llm=None, checkpointer=None: _FakeGraph())
 
-    import app.services.eval_judge as ej
+    import app.services.eval_runner as er
 
     async def fake_f(llm, q, a, contexts):
         return {"score": 0.9, "reasons": "ok"}
@@ -44,8 +37,8 @@ async def test_eval_generation_run(tmp_path, monkeypatch, db_session):
     async def fake_r(llm, q, a):
         return {"score": 0.8, "reasons": "ok"}
 
-    monkeypatch.setattr(ej, "faithfulness_score", fake_f)
-    monkeypatch.setattr(ej, "relevancy_score", fake_r)
+    monkeypatch.setattr(er, "faithfulness_score", fake_f)
+    monkeypatch.setattr(er, "relevancy_score", fake_r)
 
     results = await eg.run(kb.id, False)
     assert len(results) == 1
