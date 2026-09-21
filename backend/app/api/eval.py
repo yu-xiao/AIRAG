@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.deps import get_current_user
 from app.core.perms import get_kb_perm, has_perm
 from app.db.session import get_db
@@ -22,6 +23,7 @@ from app.schemas.eval import (
     EvalQuestionUpdate,
     EvalRunDetailOut,
     EvalRunOut,
+    EvalTriggerIn,
 )
 
 router = APIRouter(prefix="/eval", tags=["eval"])
@@ -93,10 +95,20 @@ async def list_runs(
             select(KnowledgeBase).where(KnowledgeBase.id.in_(page_kb_ids))
         )).scalars().all()
         kb_names = {kb.id: kb.name for kb in kbs}
+    user_names: dict[int, str] = {}
+    page_uids = {r.triggered_by for r in rows if r.triggered_by is not None}
+    if page_uids:
+        users = (await db.execute(
+            select(User.id, User.username).where(User.id.in_(page_uids))
+        )).all()
+        user_names = {u[0]: u[1] for u in users}
     items = []
     for r in rows:
         out = EvalRunOut.model_validate(r)
         out.kb_name = kb_names.get(r.kb_id)
+        out.created_by = (user_names.get(r.triggered_by)
+                          if r.triggered_by is not None else None)
+        out.done_count = len(r.items)
         items.append(out)
     return {"total": total, "items": items}
 
@@ -122,11 +134,16 @@ async def get_run(
         select(EvalItem).where(EvalItem.run_id == run.id)
         .order_by(EvalItem.id).limit(ITEMS_HARD_CAP + 1)
     )).scalars().all()
-    # 手动构造:避免 from_attributes 触发 relationship 的无序预载
+    created_by = None
+    if run.triggered_by is not None:
+        u = await db.get(User, run.triggered_by)
+        created_by = u.username if u is not None else None
     return EvalRunDetailOut(
         id=run.id, kb_id=run.kb_id,
         kb_name=kb.name if kb is not None else None,
         mode=run.mode, summary=run.summary, item_count=run.item_count,
+        status=run.status, error=run.error, created_by=created_by,
+        done_count=len(item_rows[:ITEMS_HARD_CAP]),
         created_at=run.created_at,
         items=[EvalItemOut.model_validate(i) for i in item_rows[:ITEMS_HARD_CAP]],
         items_truncated=len(item_rows) > ITEMS_HARD_CAP,
@@ -238,3 +255,36 @@ async def my_kbs(
     rows = (await db.execute(stmt)).all()
     return [{"kb_id": r[0], "kb_name": r[1], "question_count": r[2]}
             for r in rows]
+
+
+@router.post("/runs", status_code=201)
+async def trigger_run(
+    payload: EvalTriggerIn,
+    current: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await _require_kb_owner(db, current, payload.kb_id)
+    q_count = (await db.execute(
+        select(func.count(EvalQuestion.id))
+        .where(EvalQuestion.kb_id == payload.kb_id))).scalar_one()
+    if q_count == 0:
+        raise HTTPException(status_code=422,
+                            detail="no questions for this knowledge base")
+    dup = (await db.execute(
+        select(EvalRun.id).where(
+            EvalRun.kb_id == payload.kb_id, EvalRun.mode == payload.mode,
+            EvalRun.status == "running"))).scalar_one_or_none()
+    if dup is not None:
+        raise HTTPException(status_code=409, detail="evaluation already running")
+    top_k = (payload.top_k if payload.top_k is not None
+             else settings.RETRIEVAL_TOP_K)
+    run = EvalRun(kb_id=payload.kb_id, mode=payload.mode, summary=None,
+                  item_count=q_count, status="running",
+                  triggered_by=current.id)
+    db.add(run)
+    await db.commit()  # 铁律:先 commit 再 delay(eager/竞态下任务要看得见行)
+    await db.refresh(run)
+    from app.workers.eval_tasks import run_evaluation
+
+    run_evaluation.delay(run.id, payload.mode, payload.rerank, top_k)
+    return {"run_id": run.id}

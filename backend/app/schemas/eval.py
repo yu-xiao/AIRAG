@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -9,7 +10,10 @@ class EvalRunOut(BaseModel):
     kb_name: str | None = None  # 装配时联查填入;KB 已删 → None
     mode: str
     item_count: int
-    summary: dict
+    summary: dict | None  # running/failed 行终态前为 NULL(M15)
+    status: str = "completed"
+    created_by: str | None = None  # 联查 users.username;CLI 行为 None
+    done_count: int = 0            # 进度分子 = len(items)
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -35,6 +39,14 @@ class EvalItemOut(BaseModel):
 class EvalRunDetailOut(EvalRunOut):
     items: list[EvalItemOut]
     items_truncated: bool
+    error: str | None = None
+
+
+class EvalTriggerIn(BaseModel):
+    kb_id: int
+    mode: Literal["retrieval", "generation"]
+    rerank: bool = False
+    top_k: int | None = Field(None, ge=1, le=50)  # 仅 retrieval 用
 
 
 def _strip_question(v: str) -> str:
