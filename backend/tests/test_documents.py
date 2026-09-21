@@ -277,3 +277,20 @@ async def test_upload_content_length_precheck_413(client, auth_headers,
         headers=auth_headers,
     )
     assert resp.status_code == 413
+
+
+async def test_upload_precheck_after_visibility_stranger_404(
+        client, auth_headers):
+    """M14:Web 面预检越界组合——对不可见库发超限 body → 404(非 413)。
+    与 M13 agent 面用例对称;锁定 documents.py:45-50 的预检后移顺序。"""
+    kb = await client.post("/api/kbs", json={"name": "预检越界库"},
+                           headers=auth_headers)
+    kb_id = kb.json()["id"]
+    stranger = await _register_and_login(client, "c8_stranger1")
+    big = b"x" * (21 * 1024 * 1024)  # MAX_UPLOAD_MB=20 默认下超限
+    resp = await client.post(
+        f"/api/kbs/{kb_id}/documents",
+        files={"file": ("big.bin", big, "application/octet-stream")},
+        headers=stranger,
+    )
+    assert resp.status_code == 404  # 可见性先行,不泄露也不误报 413

@@ -798,6 +798,7 @@ async def test_retrieve_parallel_queries_merge(monkeypatch):
     from app.services.chat_graph import nodes as nodes_mod
 
     enter_ts = {}
+    seq = iter(range(1000))  # M14:确定性唯一 chunk_id(salted hash 理论碰撞)
 
     async def fake_search_one(query, kb_ids):
         from app.services.retrieval.searcher import SearchHit
@@ -805,7 +806,7 @@ async def test_retrieve_parallel_queries_merge(monkeypatch):
         enter_ts[query] = asyncio.get_event_loop().time()
         await asyncio.sleep(0.05)          # 并行时三个查询进入时间应重叠
         # brief 片段的 dict 改为 SearchHit:合并段按属性取 chunk_id(生产契约)
-        return [SearchHit(abs(hash(query)) % 1000, 1, kb_ids[0], "f", 1,
+        return [SearchHit(next(seq), 1, kb_ids[0], "f", 1,
                           f"内容-{query}", 0.5, "vector")]
 
     monkeypatch.setattr(nodes_mod, "_search_one", fake_search_one)
