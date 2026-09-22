@@ -810,6 +810,25 @@ git commit -m "docs(m16): execution record and walkthrough checklist"
 3. 用户走查通过(清单见 Task 6)
 4. 全程 spec 台账记录裁决;M17 候选(取消运行中评估/题集导入导出等)回流记忆
 
-## 执行记录(待 SDD 填写)
+## 执行记录(2026-09-22,SDD)
 
-(各任务 commit 哈希、测试计数、验收输出、实施期裁决)
+**提交链**(spec 2cde3e0 → 计划 72a0b26):T1 783ba96 + 2c032ed(裁定扩展:CLI 人读路径 None 安全,并入 A1 波及面)→ T2 7dec00d → T3 6e1478b → T4 a784827 → T5 bc78351。五任务全部评审通过,零修复轮(三条裁定扩展均在评审前由控制端裁定并随任务提交)。
+
+**测试与验收(控制端亲验)**:pytest 338→**348P/0F**(T1 +5:retrieval_item 未测量/generation 期望透传 + summarize 三例;CLI None 安全 +1;T5 nonce 四例);vitest 54→**59/59**(T2 +3、T3 +2);`npm run build`(vue-tsc+vite)零错。真栈复跑 `m15_acceptance.py` **30/30 PASS、0 SKIP**(单 worker 单后端;retrieval run 27 completed 6.1s、generation run 28 真 LLM 96.9s、CLI `--save --json` 回归 rc 0、趋势 completed&summary ≥2)——A1 口径与验收断言兼容性实测确认(1 题设 doc_ids、2 题设 keywords,summary 键仍在)。
+
+**实施期裁决**(spec 偏离/被迫适配,详见 SDD 台账):
+- T1:CLI `eval_retrieval.py` 人读显示路径遇 None 会 TypeError(`:<6.3f`/`sum()`),裁定并入 A1 修复——逐题 `—`、汇总改走 `summarize` 单一来源(与 `--save` 落库同口径)。
+- T2:①`run 对话框 kb select 加 :teleported="false"`——EP 默认把选项 teleport 到 body,brief 逐字断言 `w.text()` 无通过路径,实证后采纳(全库唯一一处,生产影响仅弹层渲染位置,走查目检);②删 `fmtScore/isLow`(唯一调用点被新格式化器替换,保留则 unused-vars 红,逻辑并入 `fmtItemScore/isItemLow`)。
+- T3:①echarts 子模块 mock 须带命名导出存根(Vitest 4 对具名导入的 `() => ({})` 工厂抛错,与 evalTrend.spec 既有约定一致);②TrendCard onMounted 实例化 RO 后,既有 16 用例在 jsdom(无 ResizeObserver)红——evalTrend/EvalRunsTab 两个 spec 加模块级 no-op stubGlobal,不动断言。
+- 计划期自审修正:TrendCard `render()` 顶守卫须去掉 `!el.value`(否则空态→有数据切换永久早退),非空路径 `await nextTick()` 等画布 v-if 挂载。
+
+**用户走查清单**:
+1. 新建库+加题 → 不刷新页面,「运行评估」对话框下拉即时出现该库
+2. 混题集(部分题不设期望文档)run:明细未测量行 hit@k/MRR/关键词召回显「—」不标红;summary 均值只算测量题
+3. 生成评估明细「期望」列显示期望文档/关键词
+4. 文档列表首列显示 ID
+5. 趋势卡:选中无 completed run 的库 → 空态文案;拉伸窗口 → 图自适应
+6. 对话回归:正常问答/改写/拒答不受 nonce 化影响(措辞与引用正常)
+7. 双主题抽查(空态/红分/「—」在暗色下可读);运行评估对话框库下拉弹层(teleported 变更)目检
+
+**环境观测**:进程拓扑为 venv 父进程 + 基础解释器 multiprocessing/billiard 子进程(uvicorn reload 与 celery solo 各一组),属正常单实例拓扑,勿误判为 M15 的双 worker 事故(那是一次启动两个独立父进程)。
