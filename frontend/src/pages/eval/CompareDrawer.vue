@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { evalApi, type EvalRunDetail } from '@/api/eval'
+import { evalApi, type EvalItem, type EvalRunDetail } from '@/api/eval'
 import { computeSummaryDiff, ITEM_KEY, joinItems, type CompareRow } from '@/utils/evalCompare'
 import { TREND_METRICS } from '@/utils/evalTrend'
 
@@ -55,12 +55,32 @@ const onlyCount = computed(() => {
   return c
 })
 
-/** 逐题取数:汇总指标键经 ITEM_KEY 映射到 EvalItem 得分字段;缺席侧 null → — */
-function scoreOf(row: CompareRow, side: Side, metricKey: string): number | null {
+/** 逐题取数:汇总指标键经 ITEM_KEY 映射到 EvalItem 得分字段;缺席侧 null */
+function itemScore(it: EvalItem | null | undefined, metricKey: string): number | null {
   const field = ITEM_KEY[metricKey]
-  const it = row[side]
   if (!field || !it) return null
   return it[field] as number | null
+}
+
+/** 未测量判据:该题未设对应期望(hit/MRR 看期望文档、关键词召回看期望关键词)——
+ *  A1 前空期望按 0 落库的历史行由此识别,与明细抽屉 fmtItemScore 同口径(M16 终审修复) */
+function unmeasured(it: EvalItem | null | undefined, metricKey: string): boolean {
+  const field = ITEM_KEY[metricKey]
+  if (field === 'hit_at_k' || field === 'mrr') return !it?.expect_doc_ids?.length
+  if (field === 'keyword_recall') return !it?.expect_keywords?.length
+  return false
+}
+
+/** 逐题分值:未测量(null 新语义,或历史落库 0+空期望)显「—」,真测量 0 仍显 0.00 */
+function fmtItemScore(it: EvalItem | null | undefined, metricKey: string): string {
+  const v = itemScore(it, metricKey)
+  if (v == null || (v === 0 && unmeasured(it, metricKey))) return '—'
+  return Number(v).toFixed(2)
+}
+
+function isItemLow(it: EvalItem | null | undefined, metricKey: string): boolean {
+  const v = itemScore(it, metricKey)
+  return v != null && v < 0.5 && fmtItemScore(it, metricKey) !== '—'
 }
 
 function refusedOf(row: CompareRow, side: Side) {
@@ -80,10 +100,6 @@ function fmtDelta(d: number | null) {
 function deltaClass(d: number | null) {
   if (d == null || Math.abs(d) < 0.01) return ''
   return d > 0 ? 'delta-up' : 'delta-down'
-}
-
-function isLow(v: number | null) {
-  return v != null && v < 0.5
 }
 </script>
 
@@ -148,8 +164,8 @@ function isLow(v: number | null) {
               width="92"
             >
               <template #default="{ row }">
-                <span :class="{ 'score-low': isLow(scoreOf(row, side, col.key)) }">
-                  {{ fmtScore(scoreOf(row, side, col.key)) }}
+                <span :class="{ 'score-low': isItemLow(row[side], col.key) }">
+                  {{ fmtItemScore(row[side], col.key) }}
                 </span>
               </template>
             </el-table-column>

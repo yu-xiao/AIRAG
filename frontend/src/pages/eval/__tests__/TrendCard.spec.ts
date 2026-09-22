@@ -76,4 +76,23 @@ describe('TrendCard', () => {
     RO.instances[0]!.cb([], {} as never)
     expect(fakeChart.resize).toHaveBeenCalledTimes(1)
   })
+
+  it('recovers chart after switching from empty kb to kb with data', async () => {
+    // 锁承重修复:render 不带 !el.value 顶守卫(空态时画布随 v-if 卸载,
+    // 带守卫会在「空态→切库有数据」时永远早退),nextTick 后重挂画布并 init
+    vi.mocked(evalApi.listRuns)
+      .mockResolvedValueOnce({ total: 0, items: [] })
+      .mockResolvedValue({ total: 1, items: [runWithSummary as never] })
+    const w = mount(TrendCard, {
+      props: { kbId: 3 }, global: { plugins: [ElementPlus] },
+    })
+    await w.find('.trend-head').trigger('click')
+    await flushPromises()
+    expect(w.text()).toContain('暂无已完成的运行')
+    expect(w.find('.trend-canvas').exists()).toBe(false) // 先空态
+    await w.setProps({ kbId: 4 }) // 切到有数据的库
+    await flushPromises()
+    expect(w.find('.trend-canvas').exists()).toBe(true)
+    expect(initMock).toHaveBeenCalledTimes(1)
+  })
 })
