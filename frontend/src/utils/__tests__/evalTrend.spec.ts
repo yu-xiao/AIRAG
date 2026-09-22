@@ -17,6 +17,13 @@ vi.mock('echarts/components', () => ({
 vi.mock('echarts/renderers', () => ({ CanvasRenderer: {} }))
 vi.mock('@/api/eval', () => ({ evalApi: { listRuns: vi.fn() } }))
 
+// TrendCard 于 onMounted 实例化 ResizeObserver(jsdom 未实现),补空桩
+vi.stubGlobal('ResizeObserver', class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+})
+
 const mk = (id: number, status: EvalRun['status'], summary: EvalRun['summary'],
             at: string): EvalRun => ({
   id, kb_id: 3, kb_name: 'k', mode: 'retrieval', item_count: 2,

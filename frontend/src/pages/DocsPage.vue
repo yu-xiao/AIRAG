@@ -286,6 +286,8 @@ onUnmounted(() => {
       <template #empty>
         <el-empty description="暂无文档,上传一个试试" />
       </template>
+      <!-- 题集需填文档 id,列表原本无处可查,首列补 ID(M16) -->
+      <el-table-column prop="id" label="ID" width="70" />
       <el-table-column prop="filename" label="文件名" min-width="220" show-overflow-tooltip />
       <el-table-column label="状态" width="120" align="center">
         <template #default="{ row }">

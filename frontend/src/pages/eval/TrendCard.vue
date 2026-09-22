@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { LineChart } from 'echarts/charts'
@@ -20,25 +20,35 @@ const props = defineProps<{ kbId: number | undefined }>()
 const { isDark } = useTheme()
 const el = ref<HTMLDivElement>()
 const expanded = ref(false)
+const empty = ref(false)
+const rootEl = ref<HTMLDivElement>()
 const mode = ref<'retrieval' | 'generation'>('retrieval')
 const metricKeys = ref<string[]>(
   TREND_METRICS.retrieval.map((m) => m.key))
 
 let chart: ReturnType<typeof import('echarts/core').init> | null = null
-// ResizeObserver 可选(简报):v-if 展开重渲时 init 已覆盖尺寸。
-// 断言拓宽初始化类型——ro 无后续赋值,否则 CFA 把 ro?.disconnect() 收窄成 never
+// 实例化于 onMounted:观察卡片根元素,容器尺寸变化同步 chart(M16 救活)
 let ro: ResizeObserver | null = null as ResizeObserver | null
 
 const PALETTE = { light: ['#5b6ee1', '#3aa376', '#c98a2d'],
                   dark: ['#8b9cff', '#5ec89a', '#e0a75a'] }
 
 async function render() {
-  if (!expanded.value || !el.value || !props.kbId) return
+  // 注意:此处不判 !el.value——空态时画布 v-if 未挂载,带着守卫会在
+  // 「空态→切库/切模式有数据」时永远早退;判空移至 nextTick 之后
+  if (!expanded.value || !props.kbId) return
   const { init } = await import('echarts/core')
   const resp = await evalApi.listRuns({
     kb_id: props.kbId, mode: mode.value, page: 1, page_size: 100,
   })
   const { times, series } = buildTrendSeries(resp.items, metricKeys.value)
+  empty.value = times.length === 0
+  if (empty.value) {
+    if (chart) { chart.dispose(); chart = null }
+    return
+  }
+  await nextTick()  // empty=false 后画布随 v-if 挂载,el.value 就绪
+  if (!el.value) return
   chart ??= init(el.value)
   chart.setOption({
     backgroundColor: 'transparent',
@@ -72,6 +82,11 @@ watch([expanded, mode, metricKeys, isDark, () => props.kbId],
     render()
   }, { deep: true })
 
+onMounted(() => {
+  ro = new ResizeObserver(() => chart?.resize())
+  ro.observe(rootEl.value!)
+})
+
 onBeforeUnmount(() => {
   ro?.disconnect()
   chart?.dispose()
@@ -79,7 +94,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="trend-card">
+  <div class="trend-card" ref="rootEl">
     <div class="trend-head" @click="expanded = !expanded">
       <span class="trend-title">指标趋势</span>
       <el-tag size="small" type="info">{{ expanded ? '收起' : '展开' }}</el-tag>
@@ -96,7 +111,9 @@ onBeforeUnmount(() => {
           </el-checkbox>
         </el-checkbox-group>
       </div>
-      <div v-if="kbId" ref="el" class="trend-canvas" />
+      <!-- 三态互斥:有数据画布 / 选库无完成运行 / 未选库 -->
+      <div v-if="kbId && !empty" ref="el" class="trend-canvas" />
+      <el-empty v-else-if="kbId" description="暂无已完成的运行" :image-size="48" />
       <el-empty v-else description="先选择知识库" :image-size="48" />
     </template>
   </div>

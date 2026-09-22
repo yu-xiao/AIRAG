@@ -9,6 +9,12 @@ vi.mock('@/api/eval', () => ({
   evalApi: { listRuns: vi.fn(), getRun: vi.fn(), myKbs: vi.fn(), triggerRun: vi.fn() },
 }))
 vi.mock('@/api/kb', () => ({ kbApi: { list: vi.fn() } }))
+// 页内 TrendCard 于 onMounted 实例化 ResizeObserver(jsdom 未实现),补空桩
+vi.stubGlobal('ResizeObserver', class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+})
 
 const runs: EvalRun[] = [
   {
