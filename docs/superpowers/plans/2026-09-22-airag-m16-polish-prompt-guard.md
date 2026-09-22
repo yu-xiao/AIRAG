@@ -832,3 +832,10 @@ git commit -m "docs(m16): execution record and walkthrough checklist"
 7. 双主题抽查(空态/红分/「—」在暗色下可读);运行评估对话框库下拉弹层(teleported 变更)目检
 
 **环境观测**:进程拓扑为 venv 父进程 + 基础解释器 multiprocessing/billiard 子进程(uvicorn reload 与 celery solo 各一组),属正常单实例拓扑,勿误判为 M15 的双 worker 事故(那是一次启动两个独立父进程)。
+
+## 执行记录补遗(终审 + 修复波,控制端)
+
+- **终审(whole-branch,72a0b26..fabee91)**:评审者独立复跑门禁抽查(后端 DB 用例 + vitest 全量)全绿;规格覆盖确认 A1 消费方闭环(item_kwargs/EvalItemOut/run_eval_task/CLI 双路径/前端明细·汇总·对比·趋势全部追踪)与 C nonce 全仓穷尽(六处 LLM call site 全覆盖,无残留裸拼)。verdict **With fixes**,1 Important:I-1 CompareDrawer 逐题对比网格漏 B2 历史 0 兼容(spec 只写「明细表」未枚举对比抽屉——A1 前落库的历史行在对比抽屉仍显红 0.00,与明细抽屉「—」不一致)。
+- **修复波 10ec66c**:CompareDrawer 逐题格换 expect 感知三函数(unmeasured/fmtItemScore/isItemLow,与 EvalRunsTab 同口径;汇总表维持现状)+ 新建 CompareDrawer.spec(历史 0 行 vs 真测量 0 行断言「—」/红 0.00)+ TrendCard 空→有数据恢复路径用例(终审 triage 采纳项,锁「去守卫+nextTick」承重修复)。vitest 59→**61/61**、build 零错;复审两 finding **ADDRESSED**、零新破坏。
+- **终态门禁**:pytest **348P/0F**、vitest **61/61**、build 零错、真栈 m15_acceptance **30/30**(复跑于终审前,修复波仅动前端展示层,不影响该回归)。
+- **M17 候选回流**:取消运行中评估、题集导入导出(在案);新增:趋势「有 run 全未测量」仍画空轴(宜第三态提示)、CompareDrawer isItemLow 微重复、EP 升级时 el-drawer in-tree 渲染耦合备注。`pelican-bicycle.html`(仓库根预存未跟踪)非本里程碑产物,未动。
