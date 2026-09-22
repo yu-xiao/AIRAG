@@ -108,8 +108,8 @@ A2 透传后零前端改动,验证 + vitest 用例锁行为(生成明细行显�
 - B1:`openRunDialog` 触发重拉(mock `myKbs` 二次返回含新库,断言下拉出现)
 - B2:历史 0+空期望显「—」不标红;null 显「—」;真 0 仍红
 - B3:生成明细期望列渲染
-- B4:ID 列渲染
-- B5:零数据空态
+- B4:不新开 DocsPage 规格(首个该页测试须连路由/API 全套 mock,为一列不成比例);build 零错 + 走查覆盖
+- B5:零数据空态、resize 接线(ResizeObserver stub)
 
 ### 真栈
 
