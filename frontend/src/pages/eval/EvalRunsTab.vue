@@ -53,10 +53,6 @@ function fmtMetric(summary: Record<string, number | null> | null | undefined, ke
   return v == null ? '—' : Number(v).toFixed(2)
 }
 
-function fmtScore(v: number | null | undefined) {
-  return v == null ? '—' : Number(v).toFixed(2)
-}
-
 /** 明细抽屉「期望」列:期望文档/关键词收缩展示(规范 B),两者皆空显示 — */
 function expectSummary(item: EvalItem) {
   const docs = item.expect_doc_ids?.length ? `文档${item.expect_doc_ids.join(',')}` : ''
@@ -64,8 +60,24 @@ function expectSummary(item: EvalItem) {
   return [docs, kws].filter(Boolean).join(' / ') || '—'
 }
 
-function isLow(v: number | null | undefined) {
-  return v != null && v < 0.5
+/** 未测量显「—」:值为 null(A1 新语义),或历史落库 0 且该行未设对应期望
+ *  (A1 前空期望按 0/1.0 落库);真测量 0 仍显红 0.00(M16 走查②) */
+function fmtItemScore(row: EvalItem, key: keyof EvalItem) {
+  const v = row[key] as number | null | undefined
+  if (v == null) return '—'
+  const expectEmpty =
+    key === 'hit_at_k' || key === 'mrr'
+      ? !row.expect_doc_ids?.length
+      : key === 'keyword_recall'
+        ? !row.expect_keywords?.length
+        : false
+  if (v === 0 && expectEmpty) return '—'
+  return Number(v).toFixed(2)
+}
+
+function isItemLow(row: EvalItem, key: keyof EvalItem) {
+  const v = row[key] as number | null | undefined
+  return v != null && v < 0.5 && fmtItemScore(row, key) !== '—'
 }
 
 function fmtTime(iso: string) {
@@ -124,8 +136,14 @@ async function loadKbOptions() {
 // ---- 运行评估 ----
 const myKbs = ref<MyKb[]>([])
 
-async function loadMyKbs() {
-  try { myKbs.value = await evalApi.myKbs() } catch { /* 不阻塞 */ }
+async function loadMyKbs(silent = true): Promise<boolean> {
+  try {
+    myKbs.value = await evalApi.myKbs()
+    return true
+  } catch {
+    if (!silent) ElMessage.error('加载题集库失败,列表可能不是最新')
+    return false
+  }
 }
 
 const runDialogVisible = ref(false)
@@ -133,7 +151,16 @@ const runForm = reactive<{
   kb_id: number; mode: 'retrieval' | 'generation'; rerank: boolean; top_k: number
 }>({ kb_id: 0, mode: 'retrieval', rerank: false, top_k: 8 })
 
-function openRunDialog() {
+const runBtnLoading = ref(false)
+
+async function openRunDialog() {
+  // 打开前重拉:新加题的库无须整页刷新即出现;失败降级用缓存(M16 走查①)
+  runBtnLoading.value = true
+  try {
+    await loadMyKbs(false)
+  } finally {
+    runBtnLoading.value = false
+  }
   const eligible = myKbs.value.filter((k) => k.question_count > 0)
   runForm.kb_id = eligible[0]?.kb_id ?? 0
   runDialogVisible.value = true
@@ -263,7 +290,7 @@ onMounted(() => {
         <el-option label="生成评估" value="generation" />
       </el-select>
       <el-button type="primary" @click="search">查询</el-button>
-      <el-button type="primary" class="run-btn" @click="openRunDialog">运行评估</el-button>
+      <el-button type="primary" :loading="runBtnLoading" class="run-btn" @click="openRunDialog">运行评估</el-button>
       <el-button class="cmp-btn" :disabled="sel.length !== 2" @click="openCompare">对比</el-button>
     </div>
 
@@ -383,8 +410,8 @@ onMounted(() => {
               width="100"
             >
               <template #default="{ row }">
-                <span :class="{ 'score-low': isLow(row[col.key] as number | null) }">
-                  {{ fmtScore(row[col.key] as number | null) }}
+                <span :class="{ 'score-low': isItemLow(row, col.key) }">
+                  {{ fmtItemScore(row, col.key) }}
                 </span>
               </template>
             </el-table-column>
@@ -396,7 +423,8 @@ onMounted(() => {
     <el-dialog v-model="runDialogVisible" title="运行评估" width="420px">
       <el-form label-width="90px">
         <el-form-item label="知识库">
-          <el-select v-model="runForm.kb_id">
+          <!-- teleported=false:选项渲染在组件树内(默认弹层挂 body),重拉后新库可被断言/检索 -->
+          <el-select v-model="runForm.kb_id" :teleported="false">
             <el-option v-for="k in myKbs.filter((x) => x.question_count > 0)"
               :key="k.kb_id" :label="`${k.kb_name}(${k.question_count}题)`" :value="k.kb_id" />
           </el-select>

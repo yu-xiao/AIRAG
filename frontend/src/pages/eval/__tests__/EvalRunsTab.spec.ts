@@ -247,5 +247,64 @@ describe('EvalPage', () => {
     vi.useRealTimers()
   })
 
+  it('run dialog refreshes eligible kbs on open', async () => {
+    vi.mocked(evalApi.myKbs)
+      .mockResolvedValueOnce([{ kb_id: 3, kb_name: '手册库', question_count: 5 }])
+      .mockResolvedValueOnce([
+        { kb_id: 3, kb_name: '手册库', question_count: 5 },
+        { kb_id: 9, kb_name: '新题库', question_count: 2 },
+      ])
+    const w = mountPage()
+    await flushPromises()
+    await w.find('button.run-btn').trigger('click')
+    await flushPromises()
+    // mount 一次 + 打开对话框一次:新加题的库无须刷新页面即出现
+    expect(evalApi.myKbs).toHaveBeenCalledTimes(2)
+    expect(w.text()).toContain('新题库(2题)')
+  })
+
+  it('detail shows em-dash for unmeasured scores, red 0.00 for measured zero', async () => {
+    vi.mocked(evalApi.getRun).mockResolvedValue({
+      ...detail,
+      items: [
+        // 真测量 0(设了期望文档)→ 红 0.00
+        { ...detail.items[0]!, id: 1, expect_doc_ids: [1], hit_at_k: 0, mrr: 0 },
+        // A1 新语义:null → —
+        { ...detail.items[0]!, id: 2, expect_doc_ids: null, expect_keywords: null, hit_at_k: null, mrr: null, keyword_recall: null },
+        // 历史落库 0 + 空期望 → —(A1 前空期望按 0 落库)
+        { ...detail.items[0]!, id: 3, expect_doc_ids: null, hit_at_k: 0, mrr: 0 },
+      ],
+    } as never)
+    const w = mountPage()
+    await flushPromises()
+    await w.find('.el-table__row').trigger('click')
+    await flushPromises()
+    const rows = w.findAll('.items-table .el-table__row')
+    expect(rows.length).toBe(3)
+    expect(rows[0]!.text()).toContain('0.00')
+    expect(rows[0]!.findAll('.score-low').length).toBeGreaterThan(0)
+    for (const r of [rows[1]!, rows[2]!]) {
+      expect(r.text()).toContain('—')
+      expect(r.findAll('.score-low').length).toBe(0)
+    }
+  })
+
+  it('generation detail shows expect summary column', async () => {
+    vi.mocked(evalApi.getRun).mockResolvedValue({
+      ...runs[1]!, error: null, items_truncated: false,
+      items: [{
+        id: 5, question: 'q', expect_doc_ids: [8], expect_keywords: null,
+        answer: 'a', refused: false, hit_at_k: null, mrr: null,
+        keyword_recall: null, faithfulness: 0.9, relevancy: 0.8,
+        reference_score: null,
+      }],
+    } as never)
+    const w = mountPage()
+    await flushPromises()
+    await w.findAll('.el-table__row')[1]!.trigger('click')
+    await flushPromises()
+    expect(w.text()).toContain('文档8')
+  })
+
   afterEach(() => { vi.useRealTimers() })
 })
