@@ -38,6 +38,47 @@ async def test_retrieval_item_metrics(client, auth_headers, db_session,
     assert out["expect_doc_ids"] == [11]
 
 
+async def test_retrieval_item_unmeasured_when_no_expect(client, auth_headers,
+                                                         db_session,
+                                                         monkeypatch):
+    """M16 A1:未设期望文档/关键词 → 三指标 None(未测量),不再 0/0/1.0。"""
+    kb_id = (await client.post(
+        "/api/kbs", json={"name": "runner库M16"}, headers=auth_headers)
+    ).json()["id"]
+    q = EvalQuestion(kb_id=kb_id, question="无期望题")
+    db_session.add(q)
+    await db_session.commit()
+
+    async def fake_search(db, kb_ids, question, top_k):
+        return [_Hit(11, "内容")]
+
+    monkeypatch.setattr("app.services.eval_runner.hybrid_search", fake_search)
+    out = await retrieval_item(db_session, kb_id, q, 8, None)
+    assert out["hit_at_k"] is None and out["mrr"] is None
+    assert out["keyword_recall"] is None
+
+
+async def test_generation_item_carries_expect_fields(monkeypatch):
+    """M16 A2:生成明细透传期望两字段(复用既有 fake judge/graph 模式)。"""
+    q = EvalQuestion(kb_id=3, question="q", expect_doc_ids=[7],
+                     expect_keywords=["预算"])
+
+    class _Graph:
+        async def ainvoke(self, state):
+            return {"answer": "答", "refused": False, "citations": [],
+                    "hits": []}
+
+    async def fake_judge(llm, question, answer, *a):
+        return {"score": 0.9, "reasons": "r"}
+
+    monkeypatch.setattr("app.services.eval_runner.faithfulness_score",
+                        fake_judge)
+    monkeypatch.setattr("app.services.eval_runner.relevancy_score",
+                        fake_judge)
+    out = await generation_item(3, q, llm=None, graph=_Graph(), use_rerank=False)
+    assert out["expect_doc_ids"] == [7] and out["expect_keywords"] == ["预算"]
+
+
 async def test_generation_item_shape(monkeypatch):
     q = EvalQuestion(kb_id=3, question="q", reference_answer="ref")
 
@@ -59,7 +100,8 @@ async def test_generation_item_shape(monkeypatch):
     assert out == {"question": "q", "answer": "答", "refused": False,
                    "citations": 1, "faithfulness": {"score": 0.9, "reasons": "r"},
                    "relevancy": {"score": 0.9, "reasons": "r"},
-                   "reference": {"score": 0.9, "reasons": "r"}}
+                   "reference": {"score": 0.9, "reasons": "r"},
+                   "expect_doc_ids": None, "expect_keywords": None}
 
 
 async def test_load_questions_id_order(client, auth_headers, db_session):

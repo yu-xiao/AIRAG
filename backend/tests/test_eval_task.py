@@ -30,7 +30,7 @@ async def test_run_eval_task_completes(client, auth_headers, db_session):
         select(EvalRun).where(EvalRun.id == run_id))).scalar_one()
     assert run.status == "completed"
     assert run.summary["item_count"] == 2
-    assert "hit" in run.summary  # 空 KB 检索:hit=0.0 但键在
+    assert "hit" not in run.summary  # M16 A1:全题未设期望 → 未测量键缺席
     assert len(run.items) == 2
 
 

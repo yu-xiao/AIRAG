@@ -42,6 +42,34 @@ def test_summarize_reference_key_with_none_value():
     assert s["reference_avg"] is None
 
 
+def test_summarize_retrieval_skips_unmeasured():
+    """M16 A1:None(未测量)不计入均值分母;item_count 仍是全题数。"""
+    results = [
+        {"question": "q1", "hit_at_k": True, "mrr": 1.0,
+         "keyword_recall": 1.0},
+        {"question": "q2", "hit_at_k": None, "mrr": None,
+         "keyword_recall": None},
+    ]
+    s = summarize(results)
+    assert s["hit"] == 1.0 and s["mrr"] == 1.0 and s["keyword_recall"] == 1.0
+    assert s["item_count"] == 2
+
+
+def test_summarize_all_unmeasured_omits_metric_keys():
+    results = [{"question": "q", "hit_at_k": None, "mrr": None,
+                "keyword_recall": None}]
+    s = summarize(results)
+    assert s == {"item_count": 1}
+
+
+def test_summarize_keyword_only_measured():
+    """文档期望未设、关键词设了:hit/mrr 缺席,keyword_recall 独立测量。"""
+    results = [{"question": "q", "hit_at_k": None, "mrr": None,
+                "keyword_recall": 0.5}]
+    s = summarize(results)
+    assert s == {"item_count": 1, "keyword_recall": 0.5}
+
+
 async def test_save_run_roundtrip(db_session):
     results = [
         {"question": "q1", "expect_doc_ids": [11], "expect_keywords": ["三千"],

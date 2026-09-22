@@ -53,14 +53,17 @@ async def retrieval_item(db: AsyncSession, kb_id: int, q: EvalQuestion,
         order = reranker.rerank(q.question, [h.content for h in hits], top_k)
         hits = [hits[i] for i in order if 0 <= i < len(hits)]
     doc_ids = [h.document_id for h in hits]
+    # M16 A1:未设期望 = 未测量(None),不落 0/0/1.0 假语义
+    has_docs = bool(q.expect_doc_ids)
     return {
         "question": q.question,
         "expect_doc_ids": q.expect_doc_ids,
         "expect_keywords": q.expect_keywords,
-        "hit_at_k": hit_at_k(doc_ids, q.expect_doc_ids or []),
-        "mrr": mrr(doc_ids, q.expect_doc_ids or []),
-        "keyword_recall": keyword_recall(
-            [h.content for h in hits], q.expect_keywords or []),
+        "hit_at_k": hit_at_k(doc_ids, q.expect_doc_ids) if has_docs else None,
+        "mrr": mrr(doc_ids, q.expect_doc_ids) if has_docs else None,
+        "keyword_recall": (keyword_recall(
+            [h.content for h in hits], q.expect_keywords)
+            if q.expect_keywords else None),
     }
 
 
@@ -76,6 +79,8 @@ async def generation_item(kb_id: int, q: EvalQuestion, llm, graph,
                 for h in (final.get("hits") or [])[: settings.RETRIEVAL_TOP_K]]
     return {
         "question": q.question,
+        "expect_doc_ids": q.expect_doc_ids,
+        "expect_keywords": q.expect_keywords,
         "answer": answer,
         "reference": (await reference_score(llm, q.question, answer,
                                             q.reference_answer)
@@ -93,14 +98,20 @@ def _avg(vals: list[float]):
 
 
 def summarize(results: list[dict]) -> dict:
-    """retrieval/generation 通用汇总:各自字段缺席则跳过(自 eval_store 迁入)。"""
+    """retrieval/generation 通用汇总:字段缺席或 None(未测量,M16 A1)
+    则跳过、不计分母(自 eval_store 迁入)。"""
     s: dict = {"item_count": len(results)}
-    hits = [r["hit_at_k"] for r in results if "hit_at_k" in r]
-    if hits:
-        s["hit"] = _avg([float(h) for h in hits])
-        s["mrr"] = _avg([r["mrr"] for r in results if "mrr" in r])
-        s["keyword_recall"] = _avg(
-            [r["keyword_recall"] for r in results if "keyword_recall" in r])
+    hits = [r.get("hit_at_k") for r in results if "hit_at_k" in r]
+    measured = [h for h in hits if h is not None]
+    if measured:
+        s["hit"] = _avg([float(h) for h in measured])
+        mrrs = [r["mrr"] for r in results
+                if r.get("mrr") is not None]
+        s["mrr"] = _avg(mrrs)
+    krs = [r["keyword_recall"] for r in results
+           if r.get("keyword_recall") is not None]
+    if krs:
+        s["keyword_recall"] = _avg(krs)
     faith = [v for v in ((r.get("faithfulness") or {}).get("score")
                          for r in results) if v is not None]
     if faith or any("faithfulness" in r for r in results):
