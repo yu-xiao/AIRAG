@@ -94,6 +94,31 @@ async def test_question_perm_matrix(client, auth_headers, db_session):
                           json=PAYLOAD | {"kb_id": kb_id}, headers=admin)
     assert r.status_code == 201  # admin 全量
 
+    qid = r.json()["id"]
+    # M16 D:PUT/DELETE 越权变体——admin 200/204;editor 403;无 perm 局外人 404
+    r = await client.put(f"/api/eval/questions/{qid}",
+                         json=PAYLOAD | {"question": "admin改"},
+                         headers=admin)
+    assert r.status_code == 200 and r.json()["question"] == "admin改"
+
+    r = await client.put(f"/api/eval/questions/{qid}", json=PAYLOAD,
+                         headers=stranger)
+    assert r.status_code == 403  # editor 非 owner
+    r = await client.delete(f"/api/eval/questions/{qid}", headers=stranger)
+    assert r.status_code == 403
+
+    outsider = await _register_and_login(client, "m16_q_outsider")
+    r = await client.put(f"/api/eval/questions/{qid}", json=PAYLOAD,
+                         headers=outsider)
+    assert r.status_code == 404  # 不可见库
+    r = await client.delete(f"/api/eval/questions/{qid}", headers=outsider)
+    assert r.status_code == 404
+
+    r = await client.delete("/api/eval/questions/999999", headers=admin)
+    assert r.status_code == 404  # 不存在
+    r = await client.delete(f"/api/eval/questions/{qid}", headers=admin)
+    assert r.status_code == 204
+
 
 async def test_my_kbs_counts(client, auth_headers, db_session):
     kb_id = await _make_kb(client, auth_headers, "mykbs库")
