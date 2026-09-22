@@ -55,17 +55,25 @@ def main():
     if args.json:
         print(json.dumps(results, ensure_ascii=False, indent=2))
         return
+    from app.services.eval_runner import summarize
+
+    def _show(v, spec=""):
+        # M16 A1:未测量(None)显 —,数值按原 spec
+        return format(v, spec) if v is not None else "—"
+
     print(f"{'问题':<28} hit@{args.top_k}  MRR    关键词recall")
     for r in results:
+        hit = r["hit_at_k"]
+        hk = "—" if hit is None else str(hit)
         print(
-            f"{r['question'][:26]:<28} {str(r['hit_at_k']):<7} "
-            f"{r['mrr']:<6.3f} {r['keyword_recall']}"
+            f"{r['question'][:26]:<28} {hk:<7} "
+            f"{_show(r['mrr'], '<6.3f')} {_show(r['keyword_recall'])}"
         )
-    n = len(results)
+    s = summarize(results)  # 汇总走 summarize 测量口径,与 --save 落库同源
     print(
-        f"\n汇总:n={n}  hit={sum(r['hit_at_k'] for r in results) / n:.2f}  "
-        f"MRR={sum(r['mrr'] for r in results) / n:.3f}  "
-        f"recall={sum(r['keyword_recall'] for r in results) / n:.3f}"
+        f"\n汇总:n={len(results)}  hit={_show(s.get('hit'), '.2f')}  "
+        f"MRR={_show(s.get('mrr'), '.3f')}  "
+        f"recall={_show(s.get('keyword_recall'), '.3f')}"
     )
 
 

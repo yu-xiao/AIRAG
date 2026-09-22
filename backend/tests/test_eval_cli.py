@@ -29,6 +29,29 @@ def test_eval_retrieval_cli_main(monkeypatch, capfd):
     assert saved == {"kb_id": 3, "mode": "retrieval", "n": 1}
 
 
+def test_eval_retrieval_cli_none_safe_display(monkeypatch, capfd):
+    """M16 A1:未测量(None)人读表不崩、显 —;汇总走 summarize 测量口径。"""
+    import scripts.eval_retrieval as cli
+
+    async def fake_run(kb, top_k, rerank):
+        return [
+            {"question": "有期望", "expect_doc_ids": [1],
+             "expect_keywords": ["a"], "hit_at_k": True,
+             "mrr": 1.0, "keyword_recall": 1.0},
+            {"question": "无期望", "expect_doc_ids": None,
+             "expect_keywords": None, "hit_at_k": None,
+             "mrr": None, "keyword_recall": None},
+        ]
+
+    monkeypatch.setattr(cli, "run", fake_run)
+    monkeypatch.setattr(sys, "argv", ["eval_retrieval.py", "--kb", "3"])
+    cli.main()  # 不带 --json/--save 的人读路径,None 不抛 TypeError
+    out, _ = capfd.readouterr()
+    assert "—" in out
+    assert "hit=1.00" in out and "MRR=1.000" in out  # 分母=测量题数
+    assert "n=2" in out  # item_count 仍是全题数
+
+
 def test_eval_generation_cli_main(monkeypatch, capfd):
     import scripts.eval_generation as cli
 
