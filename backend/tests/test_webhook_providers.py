@@ -147,3 +147,117 @@ def test_long_content_truncated_utf8_safe():
     assert len(body.encode("utf-8")) < MAX_CONTENT_BYTES + 600
     assert "截断" in json.loads(body)["markdown"]["content"]
     json.loads(body)  # 截断后仍是合法 JSON、合法 UTF-8
+
+
+# ---- classify_response:平台 body 码三分类;None 交还状态码规则 ----
+import pytest
+
+from app.services.webhook_providers import SsrfBlockedError, classify_response
+
+
+@pytest.mark.parametrize("provider,code", [
+    ("wecom", 0), ("dingtalk", 0), ("feishu", 0)])
+def test_classify_platform_success(provider, code):
+    assert classify_response(provider, 200, f'{{"errcode": {code}}}'
+                             if provider != "feishu"
+                             else f'{{"code": {code}}}') == ("succeeded", None)
+
+
+def test_classify_feishu_legacy_statuscode_field():
+    assert classify_response("feishu", 200, '{"StatusCode": 0}') == ("succeeded", None)
+
+
+def test_classify_transient_codes_retry():
+    assert classify_response("wecom", 200, '{"errcode": 45009}')[0] == "retry"
+    assert classify_response("dingtalk", 200, '{"errcode": -1}')[0] == "retry"
+    assert classify_response("dingtalk", 200, '{"errcode": 90001}')[0] == "retry"
+    assert classify_response("feishu", 200, '{"code": 9499}')[0] == "retry"
+
+
+def test_classify_permanent_codes_dead():
+    assert classify_response("wecom", 200, '{"errcode": 93000}')[0] == "dead"
+    r = classify_response("dingtalk", 200, '{"errcode": 310000, "errmsg": "sign not match"}')
+    assert r[0] == "dead" and "310000" in r[1]
+
+
+def test_classify_unknown_code_conservative_retry():
+    assert classify_response("wecom", 200, '{"errcode": 88888}')[0] == "retry"
+
+
+def test_classify_none_for_generic_and_non_2xx():
+    assert classify_response("generic", 200, "{}")[0] is None
+    assert classify_response("wecom", 404, '{"errcode": 0}')[0] is None
+    assert classify_response("wecom", 500, None)[0] is None
+
+
+def test_classify_non_json_body_2xx_means_success():
+    assert classify_response("wecom", 200, "<html>gateway</html>") == ("succeeded", None)
+    assert classify_response("feishu", 200, None) == ("succeeded", None)
+
+
+def test_classify_error_message_carried():
+    outcome, err = classify_response("feishu", 200, '{"code": 9499, "msg": "too fast"}')
+    assert outcome == "retry" and "too fast" in err
+
+
+# ---- SSRF:IP 字面量/域名多记录/白名单/解析失败/scheme ----
+from app.services import webhook_providers as wp
+
+
+async def test_ssrf_blocks_private_literals():
+    for url in ("http://10.0.0.5/x", "http://192.168.1.1/x",
+                "http://127.0.0.1/x", "http://169.254.169.254/meta",
+                "http://[::1]/x", "http://[fe80::1]/x", "http://0.0.0.0/x"):
+        with pytest.raises(SsrfBlockedError):
+            await wp.check_url_allowed(url)
+
+
+async def test_ssrf_allows_public_literal():
+    await wp.check_url_allowed("https://93.184.216.34/cb")  # 无异常即过
+
+
+async def test_ssrf_domain_any_blocked_record_rejects(monkeypatch):
+    async def _multi(host):
+        return ["93.184.216.34", "10.0.0.9"]  # 多 A 记录任一私网即拒
+    monkeypatch.setattr(wp, "_resolve_host", _multi)
+    with pytest.raises(SsrfBlockedError):
+        await wp.check_url_allowed("https://good.example.com/cb")
+
+
+async def test_ssrf_domain_all_public_passes(monkeypatch):
+    async def _ok(host):
+        return ["93.184.216.34"]
+    monkeypatch.setattr(wp, "_resolve_host", _ok)
+    await wp.check_url_allowed("https://good.example.com/cb")
+
+
+async def test_ssrf_allowlist_covers_cidr(monkeypatch):
+    async def _priv(host):
+        return ["10.1.2.3"]
+    monkeypatch.setattr(wp, "_resolve_host", _priv)
+    await wp.check_url_allowed("http://in.example.com/cb",
+                               allowlist="127.0.0.1,10.0.0.0/8")
+    with pytest.raises(SsrfBlockedError):  # 白名单外仍拒
+        await wp.check_url_allowed("http://in.example.com/cb",
+                                   allowlist="127.0.0.1")
+
+
+async def test_ssrf_dns_failure_rejects(monkeypatch):
+    async def _boom(host):
+        raise OSError("dns down")
+    monkeypatch.setattr(wp, "_resolve_host", _boom)
+    with pytest.raises(SsrfBlockedError):
+        await wp.check_url_allowed("https://no.example.com/cb")
+
+
+async def test_ssrf_empty_resolve_rejects(monkeypatch):
+    async def _empty(host):
+        return []
+    monkeypatch.setattr(wp, "_resolve_host", _empty)
+    with pytest.raises(SsrfBlockedError):
+        await wp.check_url_allowed("https://void.example.com/cb")
+
+
+async def test_ssrf_bad_scheme_rejects():
+    with pytest.raises(SsrfBlockedError):
+        await wp.check_url_allowed("ftp://x/cb")

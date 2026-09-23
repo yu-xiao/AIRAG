@@ -56,6 +56,10 @@ class Settings(BaseSettings):
     # M17:出站 webhook
     WEBHOOK_MAX_ATTEMPTS: int = 5
     WEBHOOK_TIMEOUT_S: int = 10
+    # M18:webhook SSRF 防护与投递节奏
+    WEBHOOK_SSRF_ENFORCE: bool = True          # 关=false 应急跳过双检查点
+    WEBHOOK_SSRF_ALLOWLIST: str = ""            # 逗号分隔 IP/CIDR,如 "127.0.0.1,10.0.0.0/8"
+    WEBHOOK_DELIVER_ROUND_LIMIT: int = 500      # deliver_due 单轮真实尝试上限(大积压分轮)
     MAX_UPLOAD_MB: int = 20
 
 
