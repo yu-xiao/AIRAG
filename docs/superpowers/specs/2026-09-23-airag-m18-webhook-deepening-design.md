@@ -117,7 +117,7 @@ body 非 JSON(如网关 HTML 错误页)→ 按 HTTP 状态码原规则。实施�
 
 ## F. M17 七小项
 
-1. **端点统计列回填**:GET /webhooks 每端点附 `stats: {total, succeeded, pending, retrying, dead, last_activity_at}`(deliveries 单条 GROUP BY endpoint_id 聚合 + MAX(updated_at),Python 合并;无投递端点 stats.total=0);WebhooksPage 端点表「统计」列紧凑展示(如 `42 · ✅40 ♻1 ☠1`,title tooltip 含最近时间)
+1. **端点统计列回填**:GET /webhooks 每端点附 `stats: {total, succeeded, pending, retrying, dead, last_activity_at}`(deliveries 单条 GROUP BY endpoint_id 聚合;last_activity_at=MAX(created_at)——TimestampMixin 无 updated_at 列,行创建即事件落行,投递尝试不改该列;Python 合并;无投递端点 stats.total=0);WebhooksPage 端点表「统计」列紧凑展示(如 `42 · ✅40 ♻1 ☠1`,title tooltip 含最近时间)
 2. **3xx 语义文档**:新建 `docs/webhooks.md` 接收方指南——通用信封/验签公式/event_id 幂等/at-least-once/3xx=永久拒收不跟随/**三平台 body 码语义表**(B2 全文照录)/各平台加签算法
 3. **URL 长度防护**:create/update 显式校验 `len(url) ≤ 500`(HttpUrl 放行 2083 会撑爆 VARCHAR(500)),违规 422 `URL 超过 500 字符上限`
 4. **投递筛选重查 vitest**:WebhooksPage 投递页签筛选(端点/事件/状态)变更 → 回第 1 页并重新请求(现状疑缺,实施时查;测试锁定行为)
