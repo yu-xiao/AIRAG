@@ -3,7 +3,7 @@
 import hashlib
 import hmac as hmac_mod
 import json
-import time
+import uuid
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -18,7 +18,8 @@ from app.services.outbound import (
 
 
 async def _mk_ep(db_session, events=None, enabled=True, url="http://x/h"):
-    ep = WebhookEndpoint(name=f"ep{time.time_ns()}", url=url,
+    # Windows 时钟粒度可达毫秒级,同测试内连续 time_ns() 会撞名(唯一约束)
+    ep = WebhookEndpoint(name=f"ep{uuid.uuid4().hex[:12]}", url=url,
                          secret="wh_s3cret", events=events, enabled=enabled,
                          created_by=1)
     db_session.add(ep)

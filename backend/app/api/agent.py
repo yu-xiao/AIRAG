@@ -37,6 +37,7 @@ from app.services.agent_ratelimit import (
     quota_remaining,
 )
 from app.services.audit import audit
+from app.services.outbound import emit_event, nudge
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 
@@ -156,7 +157,14 @@ async def agent_ask(
          "elapsed_ms": outcome.elapsed_ms},
         ip=_ip(request),
     )
+    n = 0  # M17:拒答事件投递行数(未拒答/无订阅为 0)
+    if outcome.refused:
+        n = await emit_event(db, "chat.refused", {
+            "source": "rest", "kb_ids": payload.kb_ids,
+            "question": payload.query[:500]})  # M17
     await db.commit()
+    if n:
+        nudge()
     return AgentAskOut(
         answer=outcome.answer, citations=outcome.citations,
         refused=outcome.refused, tokens_used=outcome.tokens_used,

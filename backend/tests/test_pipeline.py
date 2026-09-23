@@ -1,4 +1,5 @@
 import io
+import time
 
 from sqlalchemy import select
 
@@ -68,3 +69,43 @@ async def test_run_missing_doc_silent_exit():
     from app.core.config import settings
     from app.workers.pipeline import _run
     await _run(999999999, settings.DATABASE_URL)  # 不得抛
+
+
+async def test_document_done_emits_delivery(client, auth_headers, db_session,
+                                            monkeypatch):
+    from app.models import WebhookDelivery, WebhookEndpoint
+    ep = WebhookEndpoint(name=f"pd{time.time_ns()}", url="http://x/h",
+                         secret="wh_s", events=["document.done"], created_by=1)
+    db_session.add(ep)
+    await db_session.commit()
+    monkeypatch.setattr("app.workers.pipeline.nudge", lambda: None)
+    kb_id = (await client.post(
+        "/api/kbs", json={"name": f"事件库{time.time_ns()}"},
+        headers=auth_headers)).json()["id"]
+    up = await _upload_pdf(client, auth_headers, kb_id)
+    assert up.status_code == 201
+    rows = (await db_session.execute(
+        select(WebhookDelivery))).scalars().all()
+    assert len(rows) == 1 and rows[0].event_type == "document.done"
+    assert rows[0].payload["data"]["document"]["kb_id"] == kb_id
+
+
+async def test_document_failed_emits_delivery(client, auth_headers,
+                                              db_session, monkeypatch):
+    from app.models import WebhookDelivery, WebhookEndpoint
+    from app.workers.pipeline import _mark_failed
+    ep = WebhookEndpoint(name=f"pf{time.time_ns()}", url="http://x/h",
+                         secret="wh_s", events=["document.failed"],
+                         created_by=1)
+    db_session.add(ep)
+    await db_session.commit()
+    monkeypatch.setattr("app.workers.pipeline.nudge", lambda: None)
+    kb_id = (await client.post(
+        "/api/kbs", json={"name": f"事件库二{time.time_ns()}"},
+        headers=auth_headers)).json()["id"]
+    up = await _upload_pdf(client, auth_headers, kb_id)
+    await _mark_failed(up.json()["id"], "boom")
+    rows = (await db_session.execute(
+        select(WebhookDelivery))).scalars().all()
+    assert len(rows) == 1 and rows[0].event_type == "document.failed"
+    assert "boom" in rows[0].payload["data"]["error"]

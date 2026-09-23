@@ -33,6 +33,7 @@ from app.services.agent_ratelimit import (
     quota_remaining,
 )
 from app.services.audit import audit
+from app.services.outbound import emit_event, nudge
 
 mcp = FastMCP(name="AIRag")
 
@@ -160,7 +161,14 @@ async def ask_knowledge_base(
                      "tokens": outcome.tokens_used,
                      "elapsed_ms": outcome.elapsed_ms},
                     ip=current_client_ip.get())
+        n = 0  # M17:拒答事件投递行数(未拒答/无订阅为 0)
+        if outcome.refused:
+            n = await emit_event(db, "chat.refused", {
+                "source": "mcp", "kb_ids": kb_ids,
+                "question": query[:500]})  # M17
         await db.commit()
+        if n:
+            nudge()
         return {"answer": outcome.answer,
                 "citations": [CitationOut(**c).model_dump()
                               for c in outcome.citations],

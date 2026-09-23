@@ -15,6 +15,7 @@ from app.services.eval_judge import (
     reference_score,
     relevancy_score,
 )
+from app.services.outbound import emit_event, nudge
 from app.services.retrieval.searcher import hybrid_search
 
 
@@ -178,6 +179,7 @@ async def run_eval_task(run_id: int, mode: str, rerank: bool,
             if run is None:
                 logger.info(f"eval run {run_id} gone, skip")
                 return
+            kb_id = run.kb_id  # M17:rollback 会过期实例,失败分支事件先取快照
             questions = await load_questions(db, run.kb_id)
             results: list[dict] = []
             try:
@@ -210,7 +212,13 @@ async def run_eval_task(run_id: int, mode: str, rerank: bool,
                 run.summary = summarize(results)
                 run.item_count = len(results)
                 run.status = "completed"
+                n = await emit_event(db, "eval.completed", {
+                    "run": {"id": run.id, "kb_id": run.kb_id, "mode": mode,
+                            "item_count": run.item_count,
+                            "summary": run.summary}})  # M17
                 await db.commit()
+                if n:
+                    nudge()
             except Exception as e:
                 # 先 rollback 丢弃未提交脏状态:异常可能源自 DB 操作本身
                 # (逐题 commit/flush 失败、连接中断),session 处于
@@ -220,6 +228,11 @@ async def run_eval_task(run_id: int, mode: str, rerank: bool,
                 await db.rollback()
                 run.status = "failed"
                 run.error = str(e)[:500]
+                n = await emit_event(db, "eval.failed", {
+                    "run": {"id": run_id, "kb_id": kb_id, "mode": mode},
+                    "error": str(e)[:500]})  # M17
                 await db.commit()
+                if n:
+                    nudge()
     finally:
         await engine.dispose()

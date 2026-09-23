@@ -12,6 +12,7 @@ from app.core.config import settings
 from app.models import Chunk, Document
 from app.services.chunking import split_blocks
 from app.services.embedding import get_provider
+from app.services.outbound import emit_event, nudge
 from app.services.parsing import get_parser
 from app.services.parsing.ocr import maybe_ocr
 from app.services.retrieval.tokenize import tokenize as _tok
@@ -51,7 +52,13 @@ async def _mark_failed(
             if doc is not None:
                 doc.status = "failed"
                 doc.error_msg = error_msg[:2000]
+                n = await emit_event(session, "document.failed", {
+                    "document": {"id": document_id, "kb_id": doc.kb_id,
+                                 "filename": doc.filename},
+                    "error": error_msg[:500]})  # M17
                 await session.commit()
+                if n:
+                    nudge()
     finally:
         await engine.dispose()
 
@@ -132,7 +139,13 @@ async def _run(document_id: int, db_url: str) -> None:
             doc.chunk_count = len(chunks)
             doc.status = "done"
             doc.error_msg = None
+            n = await emit_event(session, "document.done", {
+                "document": {"id": document_id, "kb_id": doc.kb_id,
+                             "filename": doc.filename,
+                             "chunk_count": doc.chunk_count}})  # M17
             await session.commit()
+            if n:
+                nudge()
             logger.info(f"document {document_id} done: {len(chunks)} chunks")
     finally:
         await engine.dispose()

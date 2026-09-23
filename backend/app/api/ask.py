@@ -15,6 +15,7 @@ from app.schemas.chat import AskIn
 from app.services.audit import audit
 from app.services.chat_graph.checkpointer import get_checkpointer
 from app.services.chat_graph.graph import build_graph
+from app.services.outbound import emit_event, nudge
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -99,6 +100,7 @@ async def ask(
             yield _sse("citations", citations)
             answer = final_state.get("answer") or ""
             refused = bool(final_state.get("refused"))
+            n = 0  # M17:拒答事件投递行数(未拒答/无订阅为 0)
             async with SessionLocal() as s2:
                 s2.add(Message(conversation_id=conv.id, role="assistant",
                                content=answer, citations=citations, refused=refused))
@@ -107,7 +109,13 @@ async def ask(
                     {"q": payload.question[:50], "kb_ids": payload.kb_ids},
                     request.client.host if request.client else None,
                 )
+                if refused:
+                    n = await emit_event(s2, "chat.refused", {  # M17
+                        "source": "web", "kb_ids": payload.kb_ids,
+                        "question": payload.question[:500]})
                 await s2.commit()
+            if refused and n:
+                nudge()
             # langchain-core 1.6: chat models stream internally on ainvoke, and
             # FakeListChatModel yields per-char chunks — done 携带完整 answer 作为
             # 权威终稿(客户端可对账),详见 task-5 报告"偏差"一节。
