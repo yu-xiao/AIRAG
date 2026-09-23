@@ -135,9 +135,14 @@ async def deliver_due(db: AsyncSession, client=None) -> int:
     """扫描到期行(pending 或 retrying 且 next_attempt_at 到期)分批投递。
 
     每批 50 按 id 升序;注入 client 时全程复用同一实例(测试语义),
-    自建则随本次调用创建/关闭。返回真实尝试(POST 过)的行数——禁用
-    端点跳过既不耗次也不计数。批内零尝试即停:状态无人推进,续扫必空转
-    (全禁用批会原样返回,死循环防线)。
+    自建则随本次调用创建/关闭。返回真实尝试(POST 过)的行数。批内零
+    尝试即停:状态无人推进,续扫必空转(死循环防线)。
+
+    扫描必须 join 端点排除禁用:否则禁用行不离开扫描集(deliver_one
+    跳过不改状态),最低 50 行全禁用时零尝试 break——队头饥饿,更高
+    id 的其他端点投递被永久静默堵死。禁用行保持 pending 不耗次,等
+    端点重新启用;行内无需再复查端点(deliver_one 内部仍保留,防单行
+    调用路径)。
     """
     owned = client is None
     ac = client if client is not None else httpx.AsyncClient()
@@ -146,6 +151,9 @@ async def deliver_due(db: AsyncSession, client=None) -> int:
         while True:
             rows = (await db.execute(
                 select(WebhookDelivery)
+                .join(WebhookEndpoint,
+                      WebhookDelivery.endpoint_id == WebhookEndpoint.id)
+                .where(WebhookEndpoint.enabled.is_(True))
                 .where(or_(
                     WebhookDelivery.status == "pending",
                     and_(WebhookDelivery.status == "retrying",
@@ -156,14 +164,11 @@ async def deliver_due(db: AsyncSession, client=None) -> int:
             )).scalars().all()
             attempted = 0
             for d in rows:
-                ep = await db.get(WebhookEndpoint, d.endpoint_id)
-                if ep is None or not ep.enabled:
-                    continue
                 await deliver_one(db, d, client=ac)
                 attempted += 1
             total += attempted
             if attempted == 0:
-                break  # 空批或全禁用:终止(已尝试过的行状态已离开扫描集)
+                break  # 空批:禁用行已被 join 挡在扫描集外,无队头饥饿
     finally:
         if owned:
             await ac.aclose()

@@ -173,6 +173,56 @@ async def test_deliver_disabled_endpoint_skipped(db_session):
     assert n == 0 and d.status == "pending" and d.attempts == 0
 
 
+async def _bulk_pending(db_session, ep, n):
+    """向同一端点直插 n 行 pending(不经 emit;队头饥饿场景需跨批量)。"""
+    rows = [WebhookDelivery(
+        endpoint_id=ep.id, event_type="test",
+        event_id=uuid.uuid4().hex, payload={"event_id": uuid.uuid4().hex},
+        status="pending", attempts=0,
+    ) for _ in range(n)]
+    db_session.add_all(rows)
+    await db_session.commit()
+    return rows
+
+
+async def test_deliver_due_head_of_line_disabled_stall(db_session):
+    """最低 55 行全属禁用端点时,更高 id 的 enabled 行必须仍被投递。
+
+    修复前:第一批 50 行全禁用→零尝试 break,enabled 行被队头饿死,
+    之后所有扫描取同一批再 break,引擎静默全停。
+    """
+    from app.services.outbound import deliver_due
+    dead_ep = await _mk_ep(db_session, events=[], enabled=False)
+    dead_rows = await _bulk_pending(db_session, dead_ep, 55)   # 55>50 跨批
+    live_ep = await _mk_ep(db_session, events=[], url="http://h/alive")
+    live = (await _bulk_pending(db_session, live_ep, 1))[0]    # 更高 id
+    n = await deliver_due(db_session, client=_FakeClient({"alive": 200}))
+    assert n == 1
+    await db_session.refresh(live)
+    assert live.status == "succeeded" and live.attempts == 1
+    for d in dead_rows:
+        await db_session.refresh(d)
+        assert d.status == "pending" and d.attempts == 0
+
+
+async def test_deliver_due_enabled_rows_beyond_first_batch(db_session):
+    """55 行禁用垫底 + 51 行 enabled:批 2 内的 enabled 行也要投到。
+
+    修复前第一批全禁用即 break,51 行 enabled(含跨到第二批的最后 1 行)
+    一行都投不出去;修复后 join 过滤禁用行,50+1 两批全部成功。
+    """
+    from app.services.outbound import deliver_due
+    dead_ep = await _mk_ep(db_session, events=[], enabled=False)
+    await _bulk_pending(db_session, dead_ep, 55)
+    live_ep = await _mk_ep(db_session, events=[], url="http://h/alive")
+    live_rows = await _bulk_pending(db_session, live_ep, 51)   # 50+1 跨批
+    n = await deliver_due(db_session, client=_FakeClient({"alive": 200}))
+    assert n == 51
+    for d in live_rows:
+        await db_session.refresh(d)
+        assert d.status == "succeeded" and d.attempts == 1
+
+
 async def test_deliver_due_scans_pending_and_due_retrying(db_session):
     from app.services.outbound import deliver_due
     # next_attempt_at 列为 naive TIMESTAMP(asyncpg 拒 aware),统一 naive UTC
