@@ -10,6 +10,7 @@ import httpx
 from sqlalchemy import select
 
 from app.models import WebhookDelivery, WebhookEndpoint
+from app.services import webhook_providers as wp
 from app.services.outbound import (
     BACKOFF_MINUTES,
     emit_event,
@@ -78,7 +79,9 @@ def test_sign_headers_formula():
 
 
 class _Resp:
-    def __init__(self, code): self.status_code = code
+    def __init__(self, code, text=None):
+        self.status_code = code
+        self.text = text  # M18:平台 body 码分类需要响应体(generic 不读)
 
 
 class _FakeClient:
@@ -88,8 +91,11 @@ class _FakeClient:
     async def __aexit__(self, *a): return False
     async def post(self, url, **kw):
         self.calls.append((url, kw))
-        r = self.routes.get(url.rstrip("/").rsplit("/", 1)[-1])
+        # 先去 query 再取路径末段:钉钉加签后 URL 带 ?timestamp=&sign=,
+        # 不剥离则路由键形如 "wx?timestamp=..." 永远 miss
+        r = self.routes.get(url.split("?", 1)[0].rstrip("/").rsplit("/", 1)[-1])
         if isinstance(r, Exception): raise r
+        if isinstance(r, tuple): return _Resp(r[0], r[1])  # (code, text)
         return _Resp(r)
 
 
@@ -241,3 +247,134 @@ async def test_deliver_due_scans_pending_and_due_retrying(db_session):
 
 def test_backoff_constants():
     assert BACKOFF_MINUTES == (1, 5, 15, 60, 60)
+
+
+# ---- M18:平台端点经 deliver_one 的构造与分类 ----
+async def _mk_platform_ep(db_session, provider, secret="SECk" + "1" * 15):
+    ep = WebhookEndpoint(
+        name=f"m18p{uuid.uuid4().hex[:10]}", url="http://h/wx",
+        secret=secret, events=[], enabled=True, created_by=1,
+        provider=provider)
+    db_session.add(ep)
+    await db_session.commit()
+    return ep
+
+
+async def _platform_delivery(db_session, ep, payload=None):
+    d = WebhookDelivery(
+        endpoint_id=ep.id, event_type="document.done",
+        event_id=uuid.uuid4().hex,
+        payload=payload or {"event_id": "e" * 32, "event_type": "document.done",
+                            "occurred_at": "t", "data": {
+                                "document": {"kb_id": 1, "filename": "f.pdf"}}},
+        status="pending", attempts=0)
+    db_session.add(d)
+    await db_session.commit()
+    return d
+
+
+async def test_deliver_wecom_body_success_and_platform_shape(db_session):
+    from app.services.outbound import deliver_one
+    ep = await _mk_platform_ep(db_session, "wecom")
+    d = await _platform_delivery(db_session, ep)
+    ac = _FakeClient({"wx": (200, '{"errcode": 0}')})
+    await deliver_one(db_session, d, client=ac)
+    assert d.status == "succeeded"
+    url, kw = ac.calls[0]
+    body = json.loads(kw["content"])
+    assert body["msgtype"] == "markdown"
+    assert "X-AIRag-Signature" not in kw["headers"]
+
+
+async def test_deliver_wecom_permanent_code_dead(db_session):
+    from app.services.outbound import deliver_one
+    ep = await _mk_platform_ep(db_session, "wecom")
+    d = await _platform_delivery(db_session, ep)
+    await deliver_one(db_session, d,
+                      client=_FakeClient({"wx": (200, '{"errcode": 93000}')}))
+    assert d.status == "dead" and "93000" in d.last_error
+
+
+async def test_deliver_dingtalk_transient_code_retries(db_session):
+    from app.services.outbound import deliver_one
+    ep = await _mk_platform_ep(db_session, "dingtalk")
+    d = await _platform_delivery(db_session, ep)
+    await deliver_one(db_session, d,
+                      client=_FakeClient({"wx": (200, '{"errcode": -1}')}))
+    assert d.status == "retrying" and d.attempts == 1
+    assert d.next_attempt_at is not None
+
+
+async def test_deliver_dingtalk_signed_url_and_body(db_session):
+    from app.services.outbound import deliver_one
+    ep = await _mk_platform_ep(db_session, "dingtalk")
+    d = await _platform_delivery(db_session, ep)
+    ac = _FakeClient({"wx": (200, '{"errcode": 0}')})
+    await deliver_one(db_session, d, client=ac)
+    url, kw = ac.calls[0]
+    assert url.startswith("http://h/wx?") and "timestamp=" in url and "sign=" in url
+    assert json.loads(kw["content"])["msgtype"] == "markdown"
+
+
+async def test_deliver_feishu_signed_body(db_session):
+    from app.services.outbound import deliver_one
+    ep = await _mk_platform_ep(db_session, "feishu", secret="fs" + "k" * 14)
+    d = await _platform_delivery(db_session, ep)
+    ac = _FakeClient({"wx": (200, '{"code": 0}')})
+    await deliver_one(db_session, d, client=ac)
+    _, kw = ac.calls[0]
+    obj = json.loads(kw["content"])
+    assert obj["msg_type"] == "text" and "sign" in obj and "timestamp" in obj
+
+
+# ---- SSRF 检查点2:投递前复核,配置性阻断直接 dead 不耗次 ----
+async def test_deliver_ssrf_blocked_goes_dead_without_attempt(db_session,
+                                                              monkeypatch):
+    from app.services.outbound import deliver_one
+
+    async def _priv(host):
+        return ["10.0.0.1"]
+    monkeypatch.setattr(wp, "_resolve_host", _priv)
+    ep = await _mk_ep(db_session, events=[], url="http://private.example/x")
+    d = WebhookDelivery(endpoint_id=ep.id, event_type="test",
+                        event_id="e" * 32, payload={"event_id": "e" * 32},
+                        status="pending", attempts=0)
+    db_session.add(d)
+    await db_session.commit()
+    await deliver_one(db_session, d,
+                      client=_FakeClient({}))  # 无路由:若发起 POST 会 KeyError
+    assert d.status == "dead" and "SSRF blocked" in d.last_error
+    assert d.attempts == 0  # 配置错误不算尝试,改 URL 后可重投
+
+
+async def test_deliver_ssrf_enforce_off_skips_check(db_session, monkeypatch):
+    from app.core.config import settings as cfg
+    from app.services.outbound import deliver_one
+    monkeypatch.setattr(cfg, "WEBHOOK_SSRF_ENFORCE", False)
+    ep = await _mk_ep(db_session, events=[], url="http://private.example/x")
+    d = WebhookDelivery(endpoint_id=ep.id, event_type="test",
+                        event_id="e" * 32, payload={"event_id": "e" * 32},
+                        status="pending", attempts=0)
+    db_session.add(d)
+    await db_session.commit()
+    await deliver_one(db_session, d, client=_FakeClient({"x": 200}))
+    assert d.status == "succeeded"  # ENFORCE=false 直投(conftest 替身也无所谓)
+
+
+# ---- deliver_due 轮上限 ----
+async def test_deliver_due_round_limit(db_session, monkeypatch):
+    from app.core.config import settings as cfg
+    from app.services.outbound import deliver_due
+    monkeypatch.setattr(cfg, "WEBHOOK_DELIVER_ROUND_LIMIT", 3)
+    ep = await _mk_ep(db_session, events=[], url="http://h/lim")
+    for _ in range(5):
+        db_session.add(WebhookDelivery(
+            endpoint_id=ep.id, event_type="test", event_id=uuid.uuid4().hex,
+            payload={"event_id": "x"}, status="pending", attempts=0))
+    await db_session.commit()
+    n = await deliver_due(db_session, client=_FakeClient({"lim": 200}))
+    assert n == 3  # 单轮上限即返,余 2 行留下轮(状态仍 pending)
+    from sqlalchemy import select as sa_select
+    left = (await db_session.execute(sa_select(WebhookDelivery))).scalars().all()
+    assert sum(1 for r in left if r.status == "succeeded") == 3
+    assert sum(1 for r in left if r.status == "pending") == 2

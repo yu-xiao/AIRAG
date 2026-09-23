@@ -7,7 +7,6 @@ emit_event 与业务同事务(audit() 同哲学,不自行 commit);nudge 须在
 模块级缓存——worker 每任务一个新事件循环,跨循环复用即 M15 毒化
 (NoneType.send,见 eval_runner._fresh_chat_llm 注释)。
 """
-import json
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -18,7 +17,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models import WebhookDelivery, WebhookEndpoint
-from app.services.webhook_providers import sign_headers  # noqa: F401 — 公式单源在 providers,旧 import 路径兼容
+from app.services.webhook_providers import (  # noqa: F401 — sign_headers 兼容旧 import
+    SsrfBlockedError,
+    build_request,
+    check_url_allowed,
+    classify_response,
+    sign_headers,
+)
 
 EVENT_TYPES = ("document.done", "document.failed", "eval.completed",
                "eval.failed", "chat.refused")
@@ -82,27 +87,49 @@ async def deliver_one(db: AsyncSession, delivery: WebhookDelivery,
     """投递单行并推进状态机;自建 client 随本次调用关闭(注入的不关)。
 
     端点已删除/禁用直接返回:不耗 attempts、状态不动,留待端点恢复后
-    由下一轮扫描补投。状态分派:2xx→succeeded;429/5xx 及网络异常→
-    退避重试,耗尽转 dead;其余 4xx→对方明确拒收,立即 dead。
+    由下一轮扫描补投。M18:构造/平台响应分类委托 webhook_providers;POST 前
+    SSRF 复核违规直接 dead 不耗次(配置错误,改 URL 后可重投)。状态分派:
+    2xx→classify(平台看 body 码);429/5xx 及网络异常→退避重试,耗尽转
+    dead;其余 4xx→对方明确拒收,立即 dead。
     """
     ep = await db.get(WebhookEndpoint, delivery.endpoint_id)
     if ep is None or not ep.enabled:
         return
+    if settings.WEBHOOK_SSRF_ENFORCE:
+        try:
+            await check_url_allowed(ep.url)
+        except SsrfBlockedError as e:
+            delivery.status = "dead"
+            delivery.last_error = f"SSRF blocked: {e}"[:500]
+            await db.commit()
+            return
     delivery.attempts += 1
-    body = json.dumps(delivery.payload, ensure_ascii=False)
-    headers = sign_headers(ep.secret, delivery.event_type, body)
+    url, body, headers = build_request(
+        ep.provider, ep.secret, delivery.event_type,
+        delivery.payload or {}, ep.url)
     owned = client is None
     ac = client if client is not None else httpx.AsyncClient()
     try:
         try:
-            resp = await ac.post(ep.url, content=body, headers=headers,
+            resp = await ac.post(url, content=body, headers=headers,
                                  timeout=settings.WEBHOOK_TIMEOUT_S)
         except httpx.HTTPError as e:  # 超时/连接/传输类统一按可重试处理
             _mark_retry_or_dead(delivery, str(e))
         else:
             code = resp.status_code
             delivery.response_status = code
-            if 200 <= code < 300:
+            # getattr 防御:既有测试替身 _Resp 可能无 text;generic 不读
+            outcome, err = classify_response(
+                ep.provider, code, getattr(resp, "text", None))
+            if outcome == "dead":
+                delivery.status = "dead"
+                delivery.last_error = err
+            elif outcome == "retry":
+                _mark_retry_or_dead(delivery, err or "platform error")
+            elif outcome == "succeeded":
+                delivery.status = "succeeded"
+                delivery.last_error = None
+            elif 200 <= code < 300:  # generic 2xx(None outcome)M17 原语义
                 delivery.status = "succeeded"
                 delivery.last_error = None
             elif code == 429 or code >= 500:
@@ -128,6 +155,10 @@ async def deliver_due(db: AsyncSession, client=None) -> int:
     id 的其他端点投递被永久静默堵死。禁用行保持 pending 不耗次,等
     端点重新启用;行内无需再复查端点(deliver_one 内部仍保留,防单行
     调用路径)。
+
+    M18 轮上限:单轮真实尝试行数 ≤ settings.WEBHOOK_DELIVER_ROUND_LIMIT
+    (默认 500,批内也截断),大积压分轮消化,余量留给下一轮 beat/nudge
+    (solo worker 防独占)。
     """
     owned = client is None
     ac = client if client is not None else httpx.AsyncClient()
@@ -149,11 +180,15 @@ async def deliver_due(db: AsyncSession, client=None) -> int:
             )).scalars().all()
             attempted = 0
             for d in rows:
+                if total + attempted >= settings.WEBHOOK_DELIVER_ROUND_LIMIT:
+                    break  # 批内也须截断:达到单轮行数上限即停
                 await deliver_one(db, d, client=ac)
                 attempted += 1
             total += attempted
             if attempted == 0:
                 break  # 空批:禁用行已被 join 挡在扫描集外,无队头饥饿
+            if total >= settings.WEBHOOK_DELIVER_ROUND_LIMIT:
+                break  # 大积压分轮消化,余量留给下一轮 beat/nudge(solo worker 防独占)
     finally:
         if owned:
             await ac.aclose()
