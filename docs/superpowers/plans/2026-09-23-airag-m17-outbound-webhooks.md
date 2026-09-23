@@ -976,3 +976,4 @@ git commit -m "test(m17): acceptance script with local receiver, docs"
 - **spec 偏差补备案(终审指出)**:spec D/E 的「统计字段/最近统计」未实现(GET /webhooks 无统计列,页面无该列)——计划期 schema 未包含即已偏离,投递记录页签+过滤在功能上覆盖,补记于此;M18 候选回填。
 - **M18 候选(终审 triage,全部可留)**:端点统计列回填;3xx→dead 语义文档化(接收方指导);URL 长度 500 vs HttpUrl 2083 差距防护;投递筛选变更重查 vitest;大积压阻塞 solo worker 的每轮行数上限;description 清空语义;copySecret 剪贴板拒绝反馈;企微/钉钉/飞书 payload 适配、per-KB 订阅、重投按钮、SSRF 黑名单(原非目标)。
 - **环境备忘**:进程核对应以精确串匹配(`--pool=solo`/` beat --`)或 CSV dump;本里程碑两次误判(双 beat/双 worker)皆因 findstr 链输出重复或 `%worker%` 误匹配 `app.workers`——控制端操作失误,未伤代码,已复盘。
+- **走查延后(用户拍板,2026-09-23)**:M17 用户走查暂不进行,先推送代码;走查清单(上文)留待后续处理,栈(backend+worker+beat+前端)保持运行随时可查。走查发现问题按修复波流程补。
