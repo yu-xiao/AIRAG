@@ -250,3 +250,128 @@ async def test_deliveries_list_filter_page(client, db_session):
         "/api/admin/webhook-deliveries?event_type=document.done",
         headers=headers)
     assert r.json()["total"] == 1
+
+
+async def _make_kb(client, headers, name) -> int:
+    """KB 建行走 API(owner_id NOT NULL,裸 ORM 构造会缺列;test_kbs 模式)。"""
+    resp = await client.post("/api/kbs", json={"name": name}, headers=headers)
+    assert resp.status_code == 201, resp.text
+    return resp.json()["id"]
+
+
+# ---- M18:create 扩展 ----
+async def test_create_with_provider_and_kb_ids(client, db_session):
+    headers = await _make_admin(client, db_session, "m18_admin1")
+    kb_id = await _make_kb(client, headers, "m18kbA")
+    r = await client.post("/api/admin/webhooks", json={
+        "name": "wecom-ep", "url": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send",
+        "provider": "wecom", "kb_ids": [kb_id]}, headers=headers)
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["provider"] == "wecom" and body["kb_ids"] == [kb_id]
+    r2 = await client.get("/api/admin/webhooks", headers=headers)
+    item = [e for e in r2.json() if e["name"] == "wecom-ep"][0]
+    assert item["provider"] == "wecom" and item["kb_ids"] == [kb_id]
+
+
+async def test_create_invalid_provider_422(client, db_session):
+    headers = await _make_admin(client, db_session, "m18_admin2")
+    r = await client.post("/api/admin/webhooks", json={
+        "name": "bad", "url": "https://h.example.com/cb",
+        "provider": "slack"}, headers=headers)
+    assert r.status_code == 422
+
+
+async def test_create_unknown_kb_422(client, db_session):
+    headers = await _make_admin(client, db_session, "m18_admin3")
+    r = await client.post("/api/admin/webhooks", json={
+        "name": "kbep", "url": "https://h.example.com/cb",
+        "kb_ids": [424242]}, headers=headers)
+    assert r.status_code == 422
+    assert "unknown kb" in r.json()["detail"]
+
+
+async def test_create_url_length_422(client, db_session):
+    headers = await _make_admin(client, db_session, "m18_admin4")
+    r = await client.post("/api/admin/webhooks", json={
+        "name": "longurl", "url": "https://h.example.com/" + "a" * 500,
+        }, headers=headers)
+    assert r.status_code == 422
+    assert "500" in r.json()["detail"]
+
+
+async def test_create_ssrf_private_422(client, db_session, monkeypatch):
+    from app.services import webhook_providers as wp
+
+    async def _priv(host):
+        return ["10.0.0.1"]
+    monkeypatch.setattr(wp, "_resolve_host", _priv)
+    headers = await _make_admin(client, db_session, "m18_admin5")
+    r = await client.post("/api/admin/webhooks", json={
+        "name": "ssrf", "url": "https://internal.example.com/cb"},
+        headers=headers)
+    assert r.status_code == 422
+    assert "SSRF" in r.json()["detail"]
+
+
+async def test_create_secret_rules_per_provider(client, db_session):
+    headers = await _make_admin(client, db_session, "m18_admin6")
+    # dingtalk 空签名密钥:合法(不加签),secret 存空串
+    r = await client.post("/api/admin/webhooks", json={
+        "name": "dt", "url": "https://oapi.dingtalk.com/robot/send?access_token=t",
+        "provider": "dingtalk"}, headers=headers)
+    assert r.status_code == 201
+    # generic 无自定义:自动生成(M17 语义)
+    r = await client.post("/api/admin/webhooks", json={
+        "name": "gen", "url": "https://h.example.com/g"}, headers=headers)
+    assert len(r.json()["secret"]) == 32
+
+
+# ---- M18:update 扩展 ----
+async def test_update_description_empty_clears_to_null(client, db_session):
+    headers = await _make_admin(client, db_session, "m18_admin7")
+    ep = await _create_ep(client, headers, "m18clr", description="旧描述")
+    r = await client.put(f"/api/admin/webhooks/{ep['id']}",
+                         json={"description": ""}, headers=headers)
+    assert r.status_code == 200
+    assert r.json()["description"] is None
+
+
+async def test_update_url_ssrf_and_length_rechecked(client, db_session,
+                                                    monkeypatch):
+    from app.services import webhook_providers as wp
+    headers = await _make_admin(client, db_session, "m18_admin8")
+    ep = await _create_ep(client, headers, "m18url")
+
+    async def _priv(host):
+        return ["192.168.0.1"]
+    monkeypatch.setattr(wp, "_resolve_host", _priv)
+    r = await client.put(f"/api/admin/webhooks/{ep['id']}",
+                         json={"url": "https://in.example.com/x"}, headers=headers)
+    assert r.status_code == 422
+    r = await client.put(f"/api/admin/webhooks/{ep['id']}",
+                         json={"url": "https://h.example.com/" + "b" * 500},
+                         headers=headers)
+    assert r.status_code == 422
+
+
+async def test_update_wecom_rotate_422(client, db_session):
+    headers = await _make_admin(client, db_session, "m18_admin9")
+    r = await client.post("/api/admin/webhooks", json={
+        "name": "wx", "url": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send",
+        "provider": "wecom"}, headers=headers)
+    wid = r.json()["id"]
+    r = await client.put(f"/api/admin/webhooks/{wid}",
+                         json={"rotate_secret": True}, headers=headers)
+    assert r.status_code == 422
+    assert "wecom" in r.json()["detail"]
+
+
+async def test_update_provider_and_kb_ids(client, db_session):
+    headers = await _make_admin(client, db_session, "m18_admin10")
+    kb_id = await _make_kb(client, headers, "m18kbB")
+    ep = await _create_ep(client, headers, "m18upd")
+    r = await client.put(f"/api/admin/webhooks/{ep['id']}", json={
+        "provider": "feishu", "kb_ids": [kb_id]}, headers=headers)
+    assert r.status_code == 200
+    assert r.json()["provider"] == "feishu" and r.json()["kb_ids"] == [kb_id]

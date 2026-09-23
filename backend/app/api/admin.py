@@ -10,7 +10,13 @@ from app.api.kbs import visible_kbs_for
 from app.core.config import settings
 from app.core.deps import require_admin
 from app.db.session import get_db
-from app.models import AuditLog, User, WebhookDelivery, WebhookEndpoint
+from app.models import (
+    AuditLog,
+    KnowledgeBase,
+    User,
+    WebhookDelivery,
+    WebhookEndpoint,
+)
 from app.schemas.admin import (
     AdminKeyCreateIn,
     AdminUserIn,
@@ -31,6 +37,7 @@ from app.services.api_keys import (
 )
 from app.services.audit import audit, purge_expired
 from app.services.outbound import EVENT_TYPES, deliver_one
+from app.services.webhook_providers import SsrfBlockedError, check_url_allowed
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -190,12 +197,40 @@ def _to_out(ep: WebhookEndpoint) -> WebhookOut:
         id=ep.id, name=ep.name, url=ep.url, events=ep.events,
         enabled=ep.enabled, description=ep.description,
         secret_masked=_masked(ep.secret), created_at=ep.created_at,
+        provider=ep.provider, kb_ids=ep.kb_ids,
     )
 
 
 def _validate_events(events: list[str]) -> None:
     if any(e not in EVENT_TYPES for e in events):
         raise HTTPException(status_code=422, detail="invalid event type")
+
+
+async def _validate_webhook_url(url_str: str) -> str:
+    """M18:长度闸(HttpUrl 放行 2083 会撑爆 VARCHAR(500))+ SSRF 检查点1。"""
+    if len(url_str) > 500:
+        raise HTTPException(status_code=422,
+                            detail="url exceeds 500 character limit")
+    if settings.WEBHOOK_SSRF_ENFORCE:
+        try:
+            await check_url_allowed(url_str)
+        except SsrfBlockedError as e:
+            raise HTTPException(
+                status_code=422,
+                detail=f"url blocked by SSRF policy: {e}") from e
+    return url_str
+
+
+async def _validate_kb_ids(db: AsyncSession, kb_ids: list[int]) -> None:
+    if not kb_ids:
+        return
+    found = (await db.execute(
+        select(KnowledgeBase.id).where(KnowledgeBase.id.in_(kb_ids))
+    )).scalars().all()
+    missing = sorted(set(kb_ids) - set(found))
+    if missing:
+        raise HTTPException(status_code=422,
+                            detail=f"unknown kb id: {missing}")
 
 
 @router.post("/webhooks", response_model=WebhookCreatedOut, status_code=201)
@@ -205,20 +240,33 @@ async def create_webhook(
     db: AsyncSession = Depends(get_db),
 ):
     _validate_events(payload.events)
+    if payload.kb_ids:
+        await _validate_kb_ids(db, payload.kb_ids)
+    url_str = await _validate_webhook_url(str(payload.url))
     dup = await db.execute(
         select(WebhookEndpoint).where(WebhookEndpoint.name == payload.name))
     if dup.scalars().first() is not None:
         raise HTTPException(status_code=409, detail="name already exists")
-    secret = payload.secret or secrets.token_hex(16)
+    # secret 按 provider:generic 必填(自动或自定义);wecom 占位随机
+    # (列非空,永不参与计算/回显);钉钉/飞书=可选加签密钥,空=不加签
+    if payload.provider == "generic":
+        secret = payload.secret or secrets.token_hex(16)
+    elif payload.provider == "wecom":
+        secret = secrets.token_hex(16)
+    else:
+        secret = payload.secret or ""
     ep = WebhookEndpoint(
-        name=payload.name, url=str(payload.url), secret=secret,
+        name=payload.name, url=url_str, secret=secret,
         events=payload.events, description=payload.description,
-        created_by=current.id,
+        created_by=current.id, provider=payload.provider,
+        kb_ids=payload.kb_ids or None,
     )
     db.add(ep)
     await db.flush()  # 取 ep.id 进审计 target
     await audit(db, current.username, "webhook_create",
-                f"webhook:{ep.id}", {"name": ep.name, "url": ep.url})
+                f"webhook:{ep.id}",
+                {"name": ep.name, "url": ep.url,
+                 "provider": payload.provider, "kb_ids": payload.kb_ids})
     await db.commit()
     await db.refresh(ep)
     out = _to_out(ep)
@@ -254,7 +302,7 @@ async def update_webhook(
         ep.name = payload.name
         changes["name"] = payload.name
     if payload.url is not None:
-        ep.url = str(payload.url)
+        ep.url = await _validate_webhook_url(str(payload.url))
         changes["url"] = ep.url
     if payload.events is not None:
         _validate_events(payload.events)
@@ -263,11 +311,22 @@ async def update_webhook(
     if payload.enabled is not None:
         ep.enabled = payload.enabled
         changes["enabled"] = payload.enabled
+    if payload.provider is not None and payload.provider != ep.provider:
+        ep.provider = payload.provider
+        changes["provider"] = payload.provider
+    if payload.kb_ids is not None:
+        await _validate_kb_ids(db, payload.kb_ids)
+        ep.kb_ids = payload.kb_ids or None   # [] → NULL(订阅全部)
+        changes["kb_ids"] = ep.kb_ids
     if payload.description is not None:
-        ep.description = payload.description
-        changes["description"] = payload.description
+        ep.description = payload.description or None  # "" → NULL 清空
+        changes["description"] = ep.description
     new_secret = None
     if payload.rotate_secret:
+        if ep.provider == "wecom":
+            raise HTTPException(
+                status_code=422,
+                detail="rotate_secret not supported for wecom")
         new_secret = secrets.token_hex(16)
         ep.secret = new_secret
         changes["rotate_secret"] = True

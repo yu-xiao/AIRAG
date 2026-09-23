@@ -48,12 +48,17 @@ class AuditLogOut(BaseModel):
 
 
 # ---- M17:webhook 端点管理(secret 明文仅 POST/rotate 响应一次) ----
+WebhookProvider = Literal["generic", "wecom", "dingtalk", "feishu"]
+
+
 class WebhookCreateIn(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     url: HttpUrl
     events: list[str] = []
     description: str | None = Field(None, max_length=200)
     secret: str | None = Field(None, min_length=16, max_length=64)
+    provider: WebhookProvider = "generic"
+    kb_ids: list[int] | None = None
 
 
 class WebhookUpdateIn(BaseModel):
@@ -66,6 +71,8 @@ class WebhookUpdateIn(BaseModel):
     enabled: bool | None = None
     description: str | None = None
     rotate_secret: bool = False
+    provider: WebhookProvider | None = None
+    kb_ids: list[int] | None = None
 
 
 class WebhookOut(BaseModel):
@@ -77,6 +84,8 @@ class WebhookOut(BaseModel):
     description: str | None
     secret_masked: str
     created_at: datetime
+    provider: str = "generic"
+    kb_ids: list[int] | None = None
 
 
 class WebhookCreatedOut(WebhookOut):
