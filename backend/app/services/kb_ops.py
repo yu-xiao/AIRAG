@@ -2,7 +2,8 @@
 """M12:KB 删除级联(Web 面唯一实现;spec C)。
 
 顺序:busy 409 → chunks → documents → kb_permissions → conversations
-array_remove 清悬空 id → KB 行 → 审计 → commit → 磁盘/评估集尽力清理。
+array_remove 清悬空 id → webhook 订阅 kb_ids 剔除 → KB 行 → 审计 →
+commit → 磁盘/评估集尽力清理。
 """
 import shutil
 from pathlib import Path
@@ -13,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models import (Chunk, Conversation, Document, KbPermission,
-                        KnowledgeBase)
+                        KnowledgeBase, WebhookEndpoint)
 from app.services.audit import audit
 from app.services.doc_ops import BUSY_STATUSES, DocOpError
 
@@ -51,6 +52,10 @@ async def delete_knowledge_base(
         .where(func.array_position(Conversation.kb_ids, kb_id).isnot(None))
         .values(kb_ids=func.array_remove(Conversation.kb_ids, kb_id))
     )
+    # M18:剔除 webhook 订阅悬空 kb_id(JSON 列无级联,同 Conversation 清理哲学)
+    for ep in (await db.execute(select(WebhookEndpoint))).scalars().all():
+        if ep.kb_ids and kb_id in ep.kb_ids:
+            ep.kb_ids = [k for k in ep.kb_ids if k != kb_id]
     await audit(db, username, "kb_delete", f"kb:{kb_id}",
                 {"name": kb.name, "doc_count": doc_count,
                  "member_count": member_count})

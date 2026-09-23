@@ -391,3 +391,51 @@ async def test_deliver_due_round_limit(db_session, monkeypatch):
     left = (await db_session.execute(sa_select(WebhookDelivery))).scalars().all()
     assert sum(1 for r in left if r.status == "succeeded") == 3
     assert sum(1 for r in left if r.status == "pending") == 2
+
+
+# ---- M18:per-KB 订阅过滤 ----
+async def _mk_kb_ep(db_session, kb_ids):
+    ep = WebhookEndpoint(
+        name=f"kbep{uuid.uuid4().hex[:10]}", url="http://x/h",
+        secret="wh_s3cret", events=[], enabled=True, created_by=1,
+        kb_ids=kb_ids)
+    db_session.add(ep)
+    await db_session.commit()
+    return ep
+
+
+def test_event_kb_ids_extraction():
+    from app.services.outbound import _event_kb_ids
+    assert _event_kb_ids("document.done",
+                         {"document": {"kb_id": 3}}) == {3}
+    assert _event_kb_ids("eval.failed", {"run": {"kb_id": 2}}) == {2}
+    assert _event_kb_ids("chat.refused", {"kb_ids": [3, 5]}) == {3, 5}
+    assert _event_kb_ids("document.done", {}) is None      # 缺失→None
+    assert _event_kb_ids("chat.refused", {"kb_ids": []}) is None
+
+
+async def test_emit_kb_subscription_filters(db_session):
+    """子集命中投/子集未命中跳/空订阅全部投/chat.refused 交集。"""
+    await _mk_kb_ep(db_session, kb_ids=[1])            # 订 KB1
+    await _mk_kb_ep(db_session, kb_ids=[])             # 空=全部
+    n = await emit_event(db_session, "document.done",
+                         {"document": {"kb_id": 1, "filename": "a"}})
+    await db_session.commit()
+    assert n == 2
+    n = await emit_event(db_session, "document.done",
+                         {"document": {"kb_id": 9, "filename": "b"}})
+    await db_session.commit()
+    assert n == 1  # 只剩「全部」端点
+    n = await emit_event(db_session, "chat.refused",
+                         {"source": "web", "kb_ids": [1, 7]})
+    await db_session.commit()
+    assert n == 2  # [1,7] ∩ {1} 非空 → 命中
+
+
+async def test_emit_kb_missing_kb_field_hits_all(db_session):
+    """事件缺 kb 字段(防御):宁可多投(at-least-once)。"""
+    await _mk_kb_ep(db_session, kb_ids=[1])
+    n = await emit_event(db_session, "document.done",
+                         {"document": {}})  # 无 kb_id
+    await db_session.commit()
+    assert n == 1

@@ -47,10 +47,29 @@ def _envelope(event_type: str, data: dict) -> dict:
     }
 
 
+def _event_kb_ids(event_type: str, data: dict) -> set[int] | None:
+    """事件携带的 kb 集合;无 kb 信息返回 None(过滤语义:None=不过滤,
+    宁可多投——at-least-once)。"""
+    d = data or {}
+    kb = None
+    if event_type in ("document.done", "document.failed"):
+        kb = (d.get("document") or {}).get("kb_id")
+    elif event_type in ("eval.completed", "eval.failed"):
+        kb = (d.get("run") or {}).get("kb_id")
+    elif event_type == "chat.refused":
+        ids = {int(k) for k in (d.get("kb_ids") or [])}
+        return ids or None
+    if kb is None:
+        return None
+    return {int(kb)}
+
+
 async def emit_event(db: AsyncSession, event_type: str, data: dict) -> int:
     """按订阅展开为每个匹配端点一条 pending 投递行;同事务不 commit。
 
     订阅语义:events 为 None/[] = 订阅全部;非空且不含本事件 → 跳过。
+    kb_ids 同理:None/[] = 订阅全部 KB;非空 → 与事件 kb 集合交集非空
+    才命中;事件缺 kb 信息(防御)→ 命中,宁可多投。
     """
     env = _envelope(event_type, data)
     eps = (await db.execute(
@@ -60,6 +79,10 @@ async def emit_event(db: AsyncSession, event_type: str, data: dict) -> int:
     for ep in eps:
         if ep.events and event_type not in ep.events:
             continue
+        if ep.kb_ids:  # M18:per-KB 订阅过滤(非空才限定;None/[]=全部)
+            ev_kbs = _event_kb_ids(event_type, data)
+            if ev_kbs is not None and not (ev_kbs & set(ep.kb_ids)):
+                continue
         db.add(WebhookDelivery(
             endpoint_id=ep.id, event_type=event_type,
             event_id=env["event_id"], payload=env,

@@ -1,6 +1,8 @@
 # backend/tests/test_webhook_events.py
 """M17 T3:事件在真实终态路径上展开成投递行 + commit 后 nudge。"""
 import time
+import uuid
+
 from sqlalchemy import select
 
 from app.models import WebhookDelivery, WebhookEndpoint
@@ -177,3 +179,27 @@ async def test_chat_refused_mcp_emits(client, auth_headers, db_session,
     data = rows[0].payload["data"]
     assert data["source"] == "mcp" and data["kb_ids"] == [kb_id]
     assert nudged == [1]
+
+
+# ---- M18:KB 删除剔除 webhook 订阅悬空 id ----
+async def test_kb_delete_prunes_webhook_subscriptions(client, auth_headers,
+                                                      db_session):
+    from app.models import KnowledgeBase, WebhookEndpoint
+    from app.services.kb_ops import delete_knowledge_base
+    # owner_id 非空约束:用夹具用户建库(直建行,delete 走同一 session)
+    me = (await client.get("/api/auth/me", headers=auth_headers)).json()
+    kb = KnowledgeBase(name=f"m18kb{uuid.uuid4().hex[:8]}", owner_id=me["id"])
+    db_session.add(kb)
+    await db_session.flush()
+    ep = WebhookEndpoint(
+        name=f"m18prune{uuid.uuid4().hex[:8]}", url="http://x/h",
+        secret="s" * 16, events=[], created_by=me["id"],
+        kb_ids=[kb.id, 999])
+    db_session.add(ep)
+    await db_session.commit()
+    await delete_knowledge_base(db_session, kb, username="tester")
+    await db_session.refresh(ep)
+    assert ep.kb_ids == [999]  # 目标 id 剔除,其余保留
+    assert (await db_session.execute(
+        select(KnowledgeBase).where(
+            KnowledgeBase.id == kb.id))).scalars().first() is None
