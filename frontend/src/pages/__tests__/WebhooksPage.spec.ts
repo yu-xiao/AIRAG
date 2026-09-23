@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ElementPlus, { ElSwitch } from 'element-plus'
 import WebhooksPage from '@/pages/WebhooksPage.vue'
 import { adminApi, type WebhookDeliveryResponse, type WebhookEndpoint } from '@/api/admin'
+import { kbApi } from '@/api/kb'
 
 vi.mock('@/api/admin', () => ({
   adminApi: {
@@ -12,8 +13,10 @@ vi.mock('@/api/admin', () => ({
     deleteWebhook: vi.fn(),
     testWebhook: vi.fn(),
     listWebhookDeliveries: vi.fn(),
+    redeliverWebhook: vi.fn(),
   },
 }))
+vi.mock('@/api/kb', () => ({ kbApi: { list: vi.fn() } }))
 
 const eps: WebhookEndpoint[] = [
   {
@@ -23,12 +26,20 @@ const eps: WebhookEndpoint[] = [
     created_at: '2026-09-22T10:00:00',
     // 反证字段:后端 list 永不回传明文,页面若误渲染 row.secret 此处即露馅
     secret: 'wh_plain_SECRET_XYZ',
+    // M18:平台 / KB 订阅范围 / 投递统计(list 聚合返回)
+    provider: 'generic',
+    kb_ids: [3],
+    stats: {
+      total: 42, succeeded: 40, pending: 0, retrying: 1, dead: 1,
+      last_activity_at: '2026-09-22T12:00:00',
+    },
   } as WebhookEndpoint,
   {
     id: 2, name: '备份端点', url: 'https://backup.example.com/hook',
     events: null, enabled: false,
     description: null, secret_masked: 'wh_****cd34',
     created_at: '2026-09-22T11:00:00',
+    provider: 'wecom', kb_ids: null, stats: null,
   },
 ]
 
@@ -46,6 +57,13 @@ const deliveries: WebhookDeliveryResponse = {
       status: 'retrying', attempts: 1, response_status: null,
       last_error: 'connect timeout', payload: null,
       next_attempt_at: '2026-09-22T12:05:00', created_at: '2026-09-22T12:01:00',
+    },
+    {
+      // M18:成功行——重投按钮只应出现在 dead / retrying 行
+      id: 13, endpoint_id: 1, endpoint_name: '已成功', event_type: 'chat.refused',
+      status: 'succeeded', attempts: 1, response_status: 200,
+      last_error: null, payload: null, next_attempt_at: null,
+      created_at: '2026-09-22T12:02:00',
     },
   ],
 }
@@ -67,6 +85,9 @@ describe('WebhooksPage', () => {
     vi.mocked(adminApi.deleteWebhook).mockReset()
     vi.mocked(adminApi.testWebhook).mockReset()
     vi.mocked(adminApi.listWebhookDeliveries).mockReset()
+    vi.mocked(adminApi.redeliverWebhook).mockReset()
+    vi.mocked(kbApi.list).mockReset()
+    vi.mocked(kbApi.list).mockResolvedValue([{ id: 3, name: 'KB甲' }] as never)
     vi.mocked(adminApi.listWebhooks).mockResolvedValue(eps)
   })
 
@@ -101,6 +122,7 @@ describe('WebhooksPage', () => {
       name: '新端点',
       url: 'https://new.example.com/hook',
       events: [], // 空数组 = 订阅全部
+      provider: 'generic', // M18:kb_ids 空时不带键
     })
     await vi.waitFor(() => {
       // 一次性弹窗:明文 + 「仅此一次」警示文案
@@ -167,5 +189,124 @@ describe('WebhooksPage', () => {
     expect(deadRow.find('.el-tag--danger')).toBeTruthy()
     const retryRow = rows.find((r) => r.text().includes('备份端点'))!
     expect(retryRow.find('.el-tag--warning')).toBeTruthy()
+  })
+
+  // ---- M18 ----
+
+  it('provider 联动:wecom 隐藏 secret 输入,dingtalk 显示加签密钥', async () => {
+    const w = mountPage()
+    await flushPromises()
+    await findBtn(w, '新建端点').trigger('click')
+    await flushPromises()
+    const sel = w.getComponent('.provider-select') as never as {
+      vm: { $emit: (e: string, v: unknown) => void }
+    }
+    expect(w.find('input[placeholder="留空自动生成"]').exists()).toBe(true) // generic
+    ;(sel.vm as never as { $emit: (e: string, v: unknown) => void })
+      .$emit('update:modelValue', 'wecom')
+    await flushPromises()
+    expect(w.find('input[placeholder="留空自动生成"]').exists()).toBe(false)
+    ;(sel.vm as never as { $emit: (e: string, v: unknown) => void })
+      .$emit('update:modelValue', 'dingtalk')
+    await flushPromises()
+    expect(w.find(
+      'input[placeholder="平台机器人加签密钥,未开启加签可留空"]').exists()).toBe(true)
+  })
+
+  it('KB 多选:提交 payload 携带 kb_ids', async () => {
+    vi.mocked(adminApi.createWebhook).mockResolvedValue({
+      ...eps[0]!, id: 9, secret: 'wh_plainsecret123',
+    } as never)
+    const w = mountPage()
+    await flushPromises()
+    await findBtn(w, '新建端点').trigger('click')
+    await flushPromises()
+    await w.find('input[placeholder="请输入端点名称"]').setValue('KB端点')
+    await w
+      .find('input[placeholder="https://example.com/webhook"]')
+      .setValue('https://kb.example.com/hook')
+    ;(w.getComponent('.kb-select') as never as {
+      vm: { $emit: (e: string, v: unknown) => void } }).vm.$emit('update:modelValue', [3])
+    await findBtn(w, '保存').trigger('click')
+    await flushPromises()
+    expect(adminApi.createWebhook).toHaveBeenCalledWith({
+      name: 'KB端点',
+      url: 'https://kb.example.com/hook',
+      events: [],
+      provider: 'generic',
+      kb_ids: [3],
+    })
+  })
+
+  it('统计列渲染 stats 总数', async () => {
+    const w = mountPage()
+    await flushPromises()
+    const row = w.findAll('.ep-table .el-table__row')
+      .find((r) => r.text().includes('面板端点'))!
+    expect(row.text()).toContain('42') // stats.total(eps[0] 夹具)
+  })
+
+  it('重投:dead/retrying 行显示按钮并调用 API;succeeded 行不显示', async () => {
+    vi.mocked(adminApi.listWebhookDeliveries).mockResolvedValue(deliveries)
+    vi.mocked(adminApi.redeliverWebhook)
+      .mockResolvedValue({ status: 'pending', delivery_id: 11 })
+    const w = mountPage()
+    await flushPromises()
+    await w.findAll('.el-tabs__item')
+      .find((t) => t.text() === '投递记录')!.trigger('click')
+    await flushPromises()
+    const rows = w.findAll('.d-table .el-table__row')
+    const deadRow = rows.find((r) => r.text().includes('面板端点'))! // dead(id 11)
+    const okRow = rows.find((r) => r.text().includes('已成功'))! // succeeded(id 13)
+    const btn = deadRow.findAll('button').find((b) => b.text().trim() === '重投')
+    expect(btn).toBeTruthy()
+    expect(okRow.findAll('button').find((b) => b.text().trim() === '重投'))
+      .toBeFalsy()
+    const { ElMessageBox } = await import('element-plus')
+    vi.spyOn(ElMessageBox, 'confirm').mockResolvedValue(undefined as never)
+    await btn!.trigger('click')
+    await flushPromises()
+    expect(adminApi.redeliverWebhook).toHaveBeenCalledWith(1, 11)
+  })
+
+  it('投递筛选变更触发重查', async () => {
+    vi.mocked(adminApi.listWebhookDeliveries).mockResolvedValue(deliveries)
+    const w = mountPage()
+    await flushPromises()
+    await w.findAll('.el-tabs__item')
+      .find((t) => t.text() === '投递记录')!.trigger('click')
+    await flushPromises()
+    expect(adminApi.listWebhookDeliveries).toHaveBeenCalledTimes(1)
+    ;(w.getComponent('.status-filter') as never as {
+      vm: { $emit: (e: string, v: unknown) => void } }).vm.$emit('update:modelValue', 'dead')
+    await flushPromises()
+    expect(adminApi.listWebhookDeliveries).toHaveBeenCalledTimes(2)
+    const lastCall = vi.mocked(adminApi.listWebhookDeliveries).mock.calls[1]![0]!
+    expect(lastCall.status).toBe('dead')
+    expect(lastCall.page).toBe(1)
+  })
+
+  it('copySecret 失败降级提示', async () => {
+    vi.mocked(adminApi.createWebhook).mockResolvedValue({
+      ...eps[0]!, id: 9, secret: 'wh_plainsecret123',
+    } as never)
+    const { ElMessage } = await import('element-plus')
+    const warn = vi.spyOn(ElMessage, 'warning')
+    const w = mountPage()
+    await flushPromises()
+    await findBtn(w, '新建端点').trigger('click')
+    await flushPromises()
+    await w.find('input[placeholder="请输入端点名称"]').setValue('cp')
+    await w.find('input[placeholder="https://example.com/webhook"]')
+      .setValue('https://cp.example.com/hook')
+    await findBtn(w, '保存').trigger('click')
+    await vi.waitFor(() => expect(w.text()).toContain('wh_plainsecret123'))
+    const clip = { writeText: vi.fn().mockRejectedValue(new Error('denied')) }
+    vi.stubGlobal('navigator', { clipboard: clip })
+    await findBtn(w, '复制').trigger('click')
+    await flushPromises()
+    expect(clip.writeText).toHaveBeenCalled()
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('剪贴板不可用'))
+    vi.unstubAllGlobals()
   })
 })

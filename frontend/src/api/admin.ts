@@ -47,7 +47,26 @@ export interface WebhookEndpoint {
   description: string | null
   secret_masked: string
   created_at: string
+  /** M18:平台适配(generic 自签 HMAC;wecom 无密钥;钉钉/飞书平台加签) */
+  provider: WebhookProvider
+  /** M18:KB 订阅范围;null = 全部知识库 */
+  kb_ids: number[] | null
+  /** M18:投递统计(list 聚合);无投递时后端可能回 null */
+  stats?: WebhookStats | null
 }
+
+/** M18:镜像后端 WebhookStats(total = 各状态之和) */
+export interface WebhookStats {
+  total: number
+  succeeded: number
+  pending: number
+  retrying: number
+  dead: number
+  last_activity_at: string | null
+}
+
+/** M18:webhook 平台类型 */
+export type WebhookProvider = 'generic' | 'wecom' | 'dingtalk' | 'feishu'
 
 /** 创建 / 轮换时一次性返回明文 secret,此后不再可见 */
 export type WebhookCreated = WebhookEndpoint & { secret: string }
@@ -124,6 +143,8 @@ export const adminApi = {
     events?: string[]
     description?: string
     secret?: string
+    provider?: WebhookProvider
+    kb_ids?: number[]
   }): Promise<WebhookCreated> {
     const { data } = await http.post<WebhookCreated>('/admin/webhooks', payload)
     return data
@@ -138,6 +159,8 @@ export const adminApi = {
       enabled?: boolean
       description?: string
       rotate_secret?: boolean
+      provider?: WebhookProvider
+      kb_ids?: number[]
     },
   ): Promise<WebhookEndpoint | WebhookCreated> {
     const { data } = await http.put<WebhookEndpoint | WebhookCreated>(
@@ -162,6 +185,17 @@ export const adminApi = {
     const { data } = await http.get<WebhookDeliveryResponse>(
       '/admin/webhook-deliveries',
       { params },
+    )
+    return data
+  },
+
+  /** M18:手动重投 dead/retrying 投递(立即重新排队) */
+  async redeliverWebhook(
+    eid: number,
+    did: number,
+  ): Promise<{ status: string; delivery_id: number }> {
+    const { data } = await http.post<{ status: string; delivery_id: number }>(
+      `/admin/webhooks/${eid}/deliveries/${did}/redeliver`,
     )
     return data
   },

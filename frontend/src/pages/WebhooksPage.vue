@@ -6,7 +6,10 @@ import {
   adminApi,
   type WebhookDeliveryRow,
   type WebhookEndpoint,
+  type WebhookProvider,
+  type WebhookStats,
 } from '@/api/admin'
+import { kbApi } from '@/api/kb'
 
 const tab = ref<'endpoints' | 'deliveries'>('endpoints')
 
@@ -32,6 +35,26 @@ const DELIVERY_STATUS: Record<
   dead: { label: '已放弃', type: 'danger' },
 }
 
+// M18:平台适配——generic = 自签 HMAC 密钥;wecom = 无密钥;钉钉/飞书 = 平台加签密钥
+const PROVIDER_OPTIONS = [
+  { value: 'generic', label: '通用(JSON+签名)', secretMode: 'generic' },
+  { value: 'wecom', label: '企业微信', secretMode: 'none' },
+  { value: 'dingtalk', label: '钉钉', secretMode: 'platform' },
+  { value: 'feishu', label: '飞书', secretMode: 'platform' },
+] as const
+const PROVIDER_LABEL: Record<string, string> = Object.fromEntries(
+  PROVIDER_OPTIONS.map((p) => [p.value, p.label]),
+)
+const URL_PLACEHOLDER: Record<string, string> = {
+  generic: 'https://example.com/webhook',
+  wecom: 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...',
+  dingtalk: 'https://oapi.dingtalk.com/robot/send?access_token=...',
+  feishu: 'https://open.feishu.cn/open-apis/bot/v2/hook/...',
+}
+
+// KB 订阅范围选项(admin 可见全部 KB);加载失败静默——订阅选填,不打断端点页
+const kbOptions = ref<{ id: number; name: string }[]>([])
+
 function eventLabel(e: string) {
   return EVENT_LABEL[e] ?? e
 }
@@ -41,6 +64,13 @@ const errMsg = (e: unknown, fallback: string) =>
 
 function fmtTime(iso: string) {
   return iso.replace('T', ' ').slice(0, 19)
+}
+
+/** M18:统计列 tooltip 明细 */
+function statsTooltip(s: WebhookStats): string {
+  return `成功 ${s.succeeded} · 重试 ${s.retrying} · 待投 ${s.pending} · 死信 ${s.dead} · 最近 ${
+    s.last_activity_at ? fmtTime(s.last_activity_at) : '—'
+  }`
 }
 
 // ---- 端点管理 ----
@@ -68,8 +98,10 @@ const form = reactive({
   url: '',
   description: '',
   events: [] as string[], // 空 = 订阅全部(后端语义)
-  secret: '', // 新建可选,留空自动生成
+  secret: '', // 新建可选:generic 自动生成留空;钉钉/飞书 = 平台加签密钥
   rotate: false, // 编辑时轮换密钥
+  provider: 'generic' as WebhookProvider, // M18:平台类型
+  kbIds: [] as number[], // M18:空 = 订阅全部知识库
 })
 const rules: FormRules = {
   name: [{ required: true, message: '请输入端点名称', trigger: 'blur' }],
@@ -93,6 +125,8 @@ function openCreate() {
   form.events = []
   form.secret = ''
   form.rotate = false
+  form.provider = 'generic'
+  form.kbIds = []
   formRef.value?.clearValidate()
   dialogVisible.value = true
 }
@@ -105,6 +139,8 @@ function openEdit(row: WebhookEndpoint) {
   form.events = row.events ? [...row.events] : []
   form.secret = ''
   form.rotate = false
+  form.provider = row.provider
+  form.kbIds = row.kb_ids ? [...row.kb_ids] : []
   formRef.value?.clearValidate()
   dialogVisible.value = true
 }
@@ -116,7 +152,7 @@ async function submit(formEl: FormInstance | undefined) {
   submitting.value = true
   try {
     if (editing.value) {
-      // 简化:全量带(name/url/events/enabled/description + rotate_secret)
+      // 简化:全量带(name/url/events/enabled/description/provider/kb_ids + rotate_secret)
       const r = await adminApi.updateWebhook(editing.value.id, {
         name: form.name,
         url: form.url,
@@ -124,17 +160,32 @@ async function submit(formEl: FormInstance | undefined) {
         enabled: editing.value.enabled,
         description: form.description || undefined,
         rotate_secret: form.rotate,
+        provider: form.provider,
+        kb_ids: [...(form.kbIds ?? [])], // [] = 订阅全部,语义等价 null
       })
       if (form.rotate && 'secret' in r && r.secret) oneTimeSecret.value = r.secret
       else ElMessage.success('已保存')
     } else {
-      const payload: { name: string; url: string; events: string[]; description?: string; secret?: string } = {
+      const payload: {
+        name: string
+        url: string
+        events: string[]
+        description?: string
+        secret?: string
+        provider: WebhookProvider
+        kb_ids?: number[]
+      } = {
         name: form.name,
         url: form.url,
         events: [...form.events],
+        provider: form.provider,
       }
       if (form.description) payload.description = form.description
-      if (form.secret) payload.secret = form.secret
+      // secret:generic = 签名密钥;钉钉/飞书 = 平台加签密钥(后端按 provider 解释)
+      if (form.secret && form.provider !== 'wecom') payload.secret = form.secret
+      // kb_ids 空时不带键(= 订阅全部);EP 多选清空时值可能变 undefined,按 length 兜底
+      const kbIds = form.kbIds ?? []
+      if (kbIds.length) payload.kb_ids = [...kbIds]
       const r = await adminApi.createWebhook(payload)
       // 正常契约必有 secret;空值守卫与 rotate 路径对齐,防御异常响应
       if (r.secret) oneTimeSecret.value = r.secret
@@ -196,8 +247,13 @@ async function remove(row: WebhookEndpoint) {
 
 async function copySecret() {
   if (!oneTimeSecret.value) return
-  await navigator.clipboard.writeText(oneTimeSecret.value)
-  ElMessage.success('已复制到剪贴板')
+  try {
+    await navigator.clipboard.writeText(oneTimeSecret.value)
+    ElMessage.success('已复制到剪贴板')
+  } catch {
+    // 非安全上下文 / 权限拒绝:key-value 已 user-select:all,降级为手动复制
+    ElMessage.warning('剪贴板不可用,请点击密钥文本手动复制(Ctrl+C)')
+  }
 }
 
 // ---- 投递记录(首次切入页签时惰性加载) ----
@@ -239,11 +295,48 @@ function searchDeliveries() {
   loadDeliveries()
 }
 
+// M18:筛选变更即时重查(查询按钮保留;任何筛选变化都回到第 1 页)
+watch(
+  [() => dQuery.endpointId, () => dQuery.eventType, () => dQuery.status],
+  () => searchDeliveries(),
+)
+
+/** M18:手动重投 dead/retrying 投递 */
+async function redeliver(row: WebhookDeliveryRow) {
+  try {
+    await ElMessageBox.confirm(
+      `重投「${row.endpoint_name}」的${eventLabel(row.event_type)}投递?将立即重新发送。`,
+      '手动重投',
+      { type: 'warning', confirmButtonText: '重投', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  try {
+    await adminApi.redeliverWebhook(row.endpoint_id, row.id)
+    ElMessage.success('已重新排队投递')
+    await loadDeliveries()
+  } catch (e) {
+    ElMessage.error(errMsg(e, '重投失败'))
+  }
+}
+
 watch(tab, (t) => {
   if (t === 'deliveries' && !deliveriesLoaded.value) loadDeliveries()
 })
 
-onMounted(loadEndpoints)
+onMounted(() => {
+  void Promise.all([
+    loadEndpoints(),
+    // KB 列表失败静默:订阅范围选填,别让 KB 加载失败打断端点页
+    kbApi
+      .list()
+      .then((r) => {
+        kbOptions.value = r.map((k) => ({ id: k.id, name: k.name }))
+      })
+      .catch(() => {}),
+  ])
+})
 </script>
 
 <template>
@@ -268,6 +361,11 @@ onMounted(loadEndpoints)
               <span class="mono">{{ row.url }}</span>
             </template>
           </el-table-column>
+          <el-table-column label="平台" min-width="120">
+            <template #default="{ row }">
+              {{ PROVIDER_LABEL[row.provider] ?? row.provider }}
+            </template>
+          </el-table-column>
           <el-table-column label="订阅" min-width="170">
             <template #default="{ row }">
               <template v-if="row.events?.length">
@@ -276,6 +374,11 @@ onMounted(loadEndpoints)
                 </el-tag>
               </template>
               <el-tag v-else size="small" type="info">全部</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="范围" width="80" align="center">
+            <template #default="{ row }">
+              {{ row.kb_ids?.length ? row.kb_ids.length + ' 库' : '全部' }}
             </template>
           </el-table-column>
           <el-table-column label="状态" width="80" align="center">
@@ -289,6 +392,19 @@ onMounted(loadEndpoints)
           <el-table-column label="secret" min-width="120">
             <template #default="{ row }">
               <span class="mono">{{ row.secret_masked }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="统计" width="70" align="center">
+            <template #default="{ row }">
+              <el-tooltip
+                v-if="row.stats"
+                effect="dark"
+                placement="top"
+                :content="statsTooltip(row.stats)"
+              >
+                <span>{{ row.stats.total }}</span>
+              </el-tooltip>
+              <span v-else>0</span>
             </template>
           </el-table-column>
           <el-table-column label="操作" width="170" align="center">
@@ -325,7 +441,12 @@ onMounted(loadEndpoints)
               :value="e.value"
             />
           </el-select>
-          <el-select v-model="dQuery.status" placeholder="状态" clearable class="filter-select">
+          <el-select
+            v-model="dQuery.status"
+            placeholder="状态"
+            clearable
+            class="filter-select status-filter"
+          >
             <el-option
               v-for="(s, key) in DELIVERY_STATUS"
               :key="key"
@@ -367,6 +488,19 @@ onMounted(loadEndpoints)
           <el-table-column label="最后错误" min-width="200" show-overflow-tooltip>
             <template #default="{ row }">{{ row.last_error ?? '—' }}</template>
           </el-table-column>
+          <el-table-column label="操作" width="70" align="center">
+            <template #default="{ row }">
+              <!-- 仅 dead/retrying 可手动重投;succeeded/pending 无意义 -->
+              <el-button
+                v-if="row.status === 'dead' || row.status === 'retrying'"
+                link
+                type="primary"
+                size="small"
+                @click="redeliver(row)"
+                >重投</el-button
+              >
+            </template>
+          </el-table-column>
         </el-table>
         <el-pagination
           v-model:current-page="dQuery.page"
@@ -387,8 +521,22 @@ onMounted(loadEndpoints)
         <el-form-item label="名称" prop="name">
           <el-input v-model="form.name" maxlength="64" placeholder="请输入端点名称" />
         </el-form-item>
+        <el-form-item label="平台类型">
+          <el-select v-model="form.provider" class="provider-select">
+            <el-option
+              v-for="p in PROVIDER_OPTIONS"
+              :key="p.value"
+              :label="p.label"
+              :value="p.value"
+            />
+          </el-select>
+          <div class="form-help">企业微信无需密钥;钉钉 / 飞书支持平台加签</div>
+        </el-form-item>
         <el-form-item label="回调 URL" prop="url">
-          <el-input v-model="form.url" placeholder="https://example.com/webhook" />
+          <el-input
+            v-model="form.url"
+            :placeholder="URL_PLACEHOLDER[form.provider] ?? 'https://example.com/webhook'"
+          />
         </el-form-item>
         <el-form-item label="描述">
           <el-input v-model="form.description" maxlength="200" placeholder="选填,用途备注" />
@@ -404,8 +552,28 @@ onMounted(loadEndpoints)
           </el-select>
           <div class="form-help">不选择任何事件 = 订阅全部五类事件</div>
         </el-form-item>
-        <el-form-item v-if="!editing" label="签名密钥">
+        <el-form-item label="知识库范围">
+          <el-select
+            v-model="form.kbIds"
+            multiple
+            class="kb-select"
+            placeholder="不选 = 订阅全部知识库"
+          >
+            <el-option v-for="k in kbOptions" :key="k.id" :label="k.name" :value="k.id" />
+          </el-select>
+          <div class="form-help">不选 = 订阅全部知识库</div>
+        </el-form-item>
+        <el-form-item v-if="!editing && form.provider === 'generic'" label="签名密钥">
           <el-input v-model="form.secret" placeholder="留空自动生成" />
+        </el-form-item>
+        <el-form-item
+          v-else-if="!editing && form.provider !== 'wecom'"
+          label="加签密钥(可选)"
+        >
+          <el-input
+            v-model="form.secret"
+            placeholder="平台机器人加签密钥,未开启加签可留空"
+          />
         </el-form-item>
         <el-form-item v-if="editing" label="轮换密钥">
           <el-switch v-model="form.rotate" />
