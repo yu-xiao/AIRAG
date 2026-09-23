@@ -42,6 +42,12 @@ const router = createRouter({
           component: () => import('@/pages/AuditLogPage.vue'),
           meta: { title: '审计日志' },
         },
+        {
+          path: 'admin/webhooks',
+          name: 'admin-webhooks',
+          component: () => import('@/pages/WebhooksPage.vue'),
+          meta: { title: '出站推送' },
+        },
       ],
     },
   ],

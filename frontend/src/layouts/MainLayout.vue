@@ -8,6 +8,7 @@ import {
   HomeFilled,
   Key,
   Moon,
+  Promotion,
   Sunny,
   TrendCharts,
   User,
@@ -70,6 +71,9 @@ function onLogout() {
           </el-menu-item>
           <el-menu-item index="/admin/audit-logs">
             <el-icon><Document /></el-icon><span>审计日志</span>
+          </el-menu-item>
+          <el-menu-item index="/admin/webhooks">
+            <el-icon><Promotion /></el-icon><span>出站推送</span>
           </el-menu-item>
         </el-menu-item-group>
       </el-menu>
