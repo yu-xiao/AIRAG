@@ -82,6 +82,9 @@ const rules: FormRules = {
 // secret 一次性明文:仅 create / rotate 响应携带,关闭即弃
 const oneTimeSecret = ref<string | null>(null)
 
+// 不用 resetFields:其恢复的是 form-item 挂载时快照,而 el-dialog 内容跨关闭持久
+// (首开为新建则编辑预填被清空,首开为编辑则新建带旧值)。表单为组件自有状态,
+// 每次 open 全字段显式赋值,只需 clearValidate 清上一次残留的校验红字。
 function openCreate() {
   editing.value = null
   form.name = ''
@@ -90,7 +93,7 @@ function openCreate() {
   form.events = []
   form.secret = ''
   form.rotate = false
-  formRef.value?.resetFields()
+  formRef.value?.clearValidate()
   dialogVisible.value = true
 }
 
@@ -102,7 +105,7 @@ function openEdit(row: WebhookEndpoint) {
   form.events = row.events ? [...row.events] : []
   form.secret = ''
   form.rotate = false
-  formRef.value?.resetFields()
+  formRef.value?.clearValidate()
   dialogVisible.value = true
 }
 
@@ -133,7 +136,9 @@ async function submit(formEl: FormInstance | undefined) {
       if (form.description) payload.description = form.description
       if (form.secret) payload.secret = form.secret
       const r = await adminApi.createWebhook(payload)
-      oneTimeSecret.value = r.secret
+      // 正常契约必有 secret;空值守卫与 rotate 路径对齐,防御异常响应
+      if (r.secret) oneTimeSecret.value = r.secret
+      else ElMessage.success('端点已创建')
     }
     dialogVisible.value = false
     await loadEndpoints()

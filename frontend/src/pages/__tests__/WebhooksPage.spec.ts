@@ -51,9 +51,13 @@ const deliveries: WebhookDeliveryResponse = {
 }
 
 const mountPage = () => mount(WebhooksPage, { global: { plugins: [ElementPlus] } })
-// 精确匹配:工具行「新建端点」/操作列「测试」等与对话框按钮须以全文相等区分
-const findBtn = (w: ReturnType<typeof mount>, text: string) =>
-  w.findAll('button').find((b) => b.text().trim() === text)!
+// 精确匹配:工具行「新建端点」/操作列「测试」等与对话框按钮须以全文相等区分;
+// 先断言存在再返回,失败时给出可读信息而非裸 undefined 崩溃
+const findBtn = (w: ReturnType<typeof mount>, text: string) => {
+  const btn = w.findAll('button').find((b) => b.text().trim() === text)
+  expect(btn, `button「${text}」未找到`).toBeTruthy()
+  return btn!
+}
 
 describe('WebhooksPage', () => {
   beforeEach(() => {
@@ -103,6 +107,26 @@ describe('WebhooksPage', () => {
       expect(w.text()).toContain('wh_plainsecret123')
       expect(w.text()).toContain('仅此一次')
     })
+  })
+
+  it('edit dialog prefills row values after a prior create-dialog open', async () => {
+    const w = mountPage()
+    await flushPromises()
+    // 先开一次新建(空表单挂载,form-item 记下空快照)再关掉:
+    // el-dialog 内容跨关闭持久,若 openEdit 误用 resetFields 会把预填清回挂载快照
+    await findBtn(w, '新建端点').trigger('click')
+    await flushPromises()
+    await findBtn(w, '取消').trigger('click')
+    await flushPromises()
+    await findBtn(w, '编辑').trigger('click')
+    await flushPromises()
+    expect(w.text()).toContain('编辑端点')
+    const nameInput = w.find('input[placeholder="请输入端点名称"]')
+    expect((nameInput.element as HTMLInputElement).value).toBe('面板端点')
+    const urlInput = w.find('input[placeholder="https://example.com/webhook"]')
+    expect((urlInput.element as HTMLInputElement).value).toBe(
+      'https://panel.example.com/hook',
+    )
   })
 
   it('toggle switch calls updateWebhook', async () => {
