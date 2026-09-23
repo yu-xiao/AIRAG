@@ -17,6 +17,9 @@ class WebhookEndpoint(Base, TimestampMixin):
     url: Mapped[str] = mapped_column(String(500))
     secret: Mapped[str] = mapped_column(String(64))
     events: Mapped[list | None] = mapped_column(JSON)   # None/空=订阅全部
+    provider: Mapped[str] = mapped_column(String(16), default="generic",
+                                          server_default="generic")
+    kb_ids: Mapped[list | None] = mapped_column(JSON)   # None/空=订阅全部 KB
     enabled: Mapped[bool] = mapped_column(Boolean, default=True,
                                           server_default="true")
     created_by: Mapped[int | None] = mapped_column(Integer)
