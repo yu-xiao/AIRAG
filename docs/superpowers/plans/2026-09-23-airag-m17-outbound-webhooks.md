@@ -967,3 +967,12 @@ git commit -m "test(m17): acceptance script with local receiver, docs"
 5. 启停 switch、rotate secret(masked 不泄明文)、编辑预填、删除级联清记录
 6. 非 admin 账号不见菜单、直调 403
 7. 双主题抽查
+
+## 执行记录补遗(终审 + 修复波,控制端)
+
+- **终审(whole-branch,fb1a868..e6fc231)**:spec 逐节覆盖确认(C 节退避/签名/状态机逐条核对)、secret 泄漏面全路径扫描干净(响应/审计/前端明文生命周期,含 vitest 植入伪 secret 的对抗性反证)、七挂点铁律抽验全对、admin 信任边界与 spec 一致。verdict **With fixes**,1 Important:`deliver_due` 按 id asc limit 50 无偏移扫描,禁用端点的行不离开扫描集——最低 50 行全属禁用端点时 `attempted==0→break` 永久触发,引擎静默全停且无报错(触发:接收器宕机积累 ≥50 行后端点被禁)。
+- **修复波 a0a2b08**:扫描查询 join `WebhookEndpoint` 过滤 `enabled=true`(禁用行不进扫描集,pending 不耗次语义不变;deliver_one 单行防御保留)+2 回归用例(55 行禁用队头+更高 id enabled 行仍投递;51 行跨批),RED 先复现饥饿(0==1/0==51)。381P/0F。复审 ADDRESSED,唯一新行为为罕见窗口返回计数多计 1(已披露,无消费方受影响)。
+- **验收复验**:worker 重启载入修复码后 `m17_acceptance.py` 复跑 **37/37 PASS**(run 32/33,receiver 51298)。终态门禁:pytest **381P/0F**、vitest **67/67**、build 零错。
+- **spec 偏差补备案(终审指出)**:spec D/E 的「统计字段/最近统计」未实现(GET /webhooks 无统计列,页面无该列)——计划期 schema 未包含即已偏离,投递记录页签+过滤在功能上覆盖,补记于此;M18 候选回填。
+- **M18 候选(终审 triage,全部可留)**:端点统计列回填;3xx→dead 语义文档化(接收方指导);URL 长度 500 vs HttpUrl 2083 差距防护;投递筛选变更重查 vitest;大积压阻塞 solo worker 的每轮行数上限;description 清空语义;copySecret 剪贴板拒绝反馈;企微/钉钉/飞书 payload 适配、per-KB 订阅、重投按钮、SSRF 黑名单(原非目标)。
+- **环境备忘**:进程核对应以精确串匹配(`--pool=solo`/` beat --`)或 CSV dump;本里程碑两次误判(双 beat/双 worker)皆因 findstr 链输出重复或 `%worker%` 误匹配 `app.workers`——控制端操作失误,未伤代码,已复盘。
