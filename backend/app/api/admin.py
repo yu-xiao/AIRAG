@@ -27,9 +27,11 @@ from app.schemas.admin import (
     WebhookCreatedOut,
     WebhookDeliveryOut,
     WebhookOut,
+    WebhookStats,
     WebhookUpdateIn,
 )
 from app.schemas.auth import ApiKeyCreatedOut
+from app.services import outbound
 from app.services.api_keys import (
     KbScopeInvalid,
     KeyQuotaExceeded,
@@ -278,9 +280,33 @@ async def list_webhooks(
     current: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    rows = await db.execute(
-        select(WebhookEndpoint).order_by(WebhookEndpoint.id))
-    return [_to_out(ep) for ep in rows.scalars().all()]
+    """M18:列表附投递统计——按 endpoint×status 一次聚合(计数同
+    deliveries 联查风格);无投递端点给全 0/None 默认。"""
+    rows = (await db.execute(
+        select(WebhookEndpoint).order_by(WebhookEndpoint.id))).scalars().all()
+    agg: dict[int, dict] = {}
+    for eid, status, cnt, last in (await db.execute(
+        select(WebhookDelivery.endpoint_id, WebhookDelivery.status,
+               func.count(), func.max(WebhookDelivery.created_at))
+        .group_by(WebhookDelivery.endpoint_id, WebhookDelivery.status))
+    ).all():
+        a = agg.setdefault(eid, {"total": 0, "succeeded": 0, "pending": 0,
+                                 "retrying": 0, "dead": 0,
+                                 "last_activity_at": None})
+        a["total"] += cnt
+        if status in a:
+            a[status] += cnt
+        if last is not None and (a["last_activity_at"] is None
+                                 or last > a["last_activity_at"]):
+            a["last_activity_at"] = last
+    out = []
+    for ep in rows:
+        o = _to_out(ep)
+        o.stats = WebhookStats(**agg.get(
+            ep.id, {"total": 0, "succeeded": 0, "pending": 0,
+                    "retrying": 0, "dead": 0, "last_activity_at": None}))
+        out.append(o)
+    return out
 
 
 @router.put("/webhooks/{webhook_id}")
@@ -388,6 +414,37 @@ async def test_webhook(
     await db.commit()
     return {"status": row.status, "response_status": row.response_status,
             "error": row.last_error}
+
+
+@router.post("/webhooks/{webhook_id}/deliveries/{delivery_id}/redeliver")
+async def redeliver_delivery(
+    webhook_id: int,
+    delivery_id: int,
+    current: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """M18:手动重投——dead/retrying 归零重排近即时投递(nudge);审计留痕。"""
+    ep = await db.get(WebhookEndpoint, webhook_id)
+    if ep is None:
+        raise HTTPException(status_code=404, detail="webhook not found")
+    d = await db.get(WebhookDelivery, delivery_id)
+    if d is None or d.endpoint_id != ep.id:
+        raise HTTPException(status_code=404, detail="delivery not found")
+    if d.status not in ("dead", "retrying"):
+        raise HTTPException(
+            status_code=422,
+            detail="only dead/retrying deliveries can be redelivered")
+    old_rs = d.response_status
+    d.attempts = 0
+    d.status = "pending"
+    d.next_attempt_at = None
+    d.last_error = None
+    await audit(db, current.username, "webhook_redeliver", f"webhook:{ep.id}",
+                {"delivery_id": d.id, "event_type": d.event_type,
+                 "old_response_status": old_rs})
+    await db.commit()
+    outbound.nudge()
+    return {"status": "pending", "delivery_id": d.id}
 
 
 @router.get("/webhook-deliveries")

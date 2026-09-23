@@ -375,3 +375,87 @@ async def test_update_provider_and_kb_ids(client, db_session):
         "provider": "feishu", "kb_ids": [kb_id]}, headers=headers)
     assert r.status_code == 200
     assert r.json()["provider"] == "feishu" and r.json()["kb_ids"] == [kb_id]
+
+
+# ---- M18:统计聚合 ----
+async def test_list_webhooks_stats_aggregation(client, db_session):
+    headers = await _make_admin(client, db_session, "m18_stat1")
+    ep = await _create_ep(client, headers, "statep")
+    _insert_delivery(db_session, ep["id"], status="succeeded")
+    _insert_delivery(db_session, ep["id"], status="succeeded")
+    _insert_delivery(db_session, ep["id"], status="dead")
+    await db_session.commit()
+    r = await client.get("/api/admin/webhooks", headers=headers)
+    item = [e for e in r.json() if e["id"] == ep["id"]][0]
+    assert item["stats"]["total"] == 3
+    assert item["stats"]["succeeded"] == 2
+    assert item["stats"]["dead"] == 1
+    assert item["stats"]["retrying"] == 0
+    assert item["stats"]["last_activity_at"] is not None
+
+
+async def test_list_webhooks_stats_zero_for_fresh(client, db_session):
+    headers = await _make_admin(client, db_session, "m18_stat2")
+    ep = await _create_ep(client, headers, "freshep")
+    r = await client.get("/api/admin/webhooks", headers=headers)
+    item = [e for e in r.json() if e["id"] == ep["id"]][0]
+    assert item["stats"]["total"] == 0
+    assert item["stats"]["last_activity_at"] is None
+
+
+# ---- M18:重投 ----
+async def test_redeliver_dead_resets_and_nudges(client, db_session, monkeypatch):
+    from app.services import outbound
+    ep = await _create_ep(client, headers := await _make_admin(
+        client, db_session, "m18_redel1"), "redep")
+    _insert_delivery(db_session, ep["id"], status="dead")
+    await db_session.commit()
+    from app.models import WebhookDelivery
+    d = (await db_session.execute(select(WebhookDelivery))).scalars().one()
+    d.attempts = 5
+    d.last_error = "permanent 404"
+    await db_session.commit()
+    nudged = []
+    monkeypatch.setattr(outbound, "nudge", lambda: nudged.append(1))
+    r = await client.post(
+        f"/api/admin/webhooks/{ep['id']}/deliveries/{d.id}/redeliver",
+        headers=headers)
+    assert r.status_code == 200 and r.json()["status"] == "pending"
+    await db_session.refresh(d)
+    assert d.status == "pending" and d.attempts == 0
+    assert d.last_error is None and d.next_attempt_at is None
+    assert nudged == [1]
+
+
+async def test_redeliver_succeeded_422(client, db_session):
+    headers = await _make_admin(client, db_session, "m18_redel2")
+    ep = await _create_ep(client, headers, "okp")
+    _insert_delivery(db_session, ep["id"], status="succeeded")
+    await db_session.commit()
+    from app.models import WebhookDelivery
+    d = (await db_session.execute(select(WebhookDelivery))).scalars().one()
+    r = await client.post(
+        f"/api/admin/webhooks/{ep['id']}/deliveries/{d.id}/redeliver",
+        headers=headers)
+    assert r.status_code == 422
+
+
+async def test_redeliver_cross_endpoint_404(client, db_session):
+    headers = await _make_admin(client, db_session, "m18_redel3")
+    ep1 = await _create_ep(client, headers, "ep1x")
+    ep2 = await _create_ep(client, headers, "ep2x")
+    _insert_delivery(db_session, ep1["id"], status="dead")
+    await db_session.commit()
+    from app.models import WebhookDelivery
+    d = (await db_session.execute(select(WebhookDelivery))).scalars().one()
+    r = await client.post(
+        f"/api/admin/webhooks/{ep2['id']}/deliveries/{d.id}/redeliver",
+        headers=headers)
+    assert r.status_code == 404
+
+
+async def test_redeliver_non_admin_403(client, db_session):
+    other = await _register_and_login(client, "m18_redel4")
+    r = await client.post("/api/admin/webhooks/1/deliveries/1/redeliver",
+                          headers=other)
+    assert r.status_code == 403

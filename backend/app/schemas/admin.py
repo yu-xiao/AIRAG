@@ -75,6 +75,16 @@ class WebhookUpdateIn(BaseModel):
     kb_ids: list[int] | None = None
 
 
+class WebhookStats(BaseModel):
+    """M18:端点投递聚合(last_activity_at=MAX(created_at),无 updated_at 列)。"""
+    total: int
+    succeeded: int
+    pending: int
+    retrying: int
+    dead: int
+    last_activity_at: datetime | None
+
+
 class WebhookOut(BaseModel):
     id: int
     name: str
@@ -86,6 +96,7 @@ class WebhookOut(BaseModel):
     created_at: datetime
     provider: str = "generic"
     kb_ids: list[int] | None = None
+    stats: WebhookStats | None = None
 
 
 class WebhookCreatedOut(WebhookOut):
