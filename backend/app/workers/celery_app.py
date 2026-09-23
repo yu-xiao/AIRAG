@@ -7,7 +7,7 @@ celery_app = Celery(
     "airag",
     broker=settings.REDIS_URL,
     include=["app.workers.pipeline", "app.workers.maintenance",
-             "app.workers.eval_tasks"],
+             "app.workers.eval_tasks", "app.workers.webhook_tasks"],
 )
 
 celery_app.conf.update(
@@ -20,6 +20,10 @@ celery_app.conf.update(
         "purge-expired-audit-logs": {
             "task": "app.workers.maintenance.purge_expired_audit_logs",
             "schedule": crontab(hour=3, minute=0),
-        }
+        },
+        "webhook-delivery-scan": {
+            "task": "app.workers.webhook_tasks.deliver_pending",
+            "schedule": 60.0,
+        },
     },
 )
