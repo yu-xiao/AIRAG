@@ -2157,3 +2157,22 @@ C 集群(M16 遗留:取消运行中评估/题集导入导出/趋势全未测量�
 - **_Resp 扩展向后兼容**(Task 4):只加属性不改构造签名,存量 `_FakeClient` 路由 int 分支不受影响。
 - **Windows beat 独立窗口**(start_beat.bat)与进程核对精确串(`--pool=solo`、` beat --`)遵循 M17 备忘。
 - 前端 EP 组件 valueOnClear 类坑:KB 多选 clearable 时置 undefined 而非 [](M14 教训;submit 已按 length 判空兜底)。
+
+## 执行记录(2026-09-23 SDD 完成终稿)
+
+**门禁总账**:pytest 381→**443P/0F**(+62);vitest 67→**74 passed**(16 文件,WebhooksPage.spec 13/13);`pnpm build` 零错;真栈 m18_acceptance **42/42 PASS 0 SKIP 首轮绿**(平台 mock 接收器七路径;清理后零残留);alembic 迁移 b0c1d2e3f4a5 真库 upgrade/downgrade/upgrade 三步验证。
+
+**任务与提交**:T1 c9acf9a 模型+迁移 / T2 cea9e5e 适配器构造面+conftest DNS 替身 / T3 59672a3 body 码分类+SSRF+config / T4 aef7b01 deliver_one 委托+检查点2+轮上限(修复波 7e61da2:last_error 截断,毒化队列防线)/ T5 8c402e2 kb 过滤+删除清理 / T6 11cbc70 create/update 校验 / T7 7b17546 统计+重投 / T8 a72e986 前端全量 / T9 36f7aba 接收方指南 / T10 8532068+d636aba 验收脚本+测试封闭性修复 / 终审修复波 2a7064c 编辑清空描述(F6 前端半边,`|| undefined` 吞空串)。**全部 10 任务经独立任务审查;终审(whole-branch)With fixes→已修并通过复验。**
+
+**裁定台账**(完整记录在 SDD 工作区,已随工作区清理;关键五条):
+1. 直接在 main 实施(项目 M1~M17 惯例),不建 worktree。
+2. T4 平台 dead 分支 `last_error=err[:500]`:计划固有缺陷的修正(审查证实 >500 字符 errmsg 会 asyncpg 22001→dead 永不落库→毒行堵死 deliver_due)。
+3. T7 WebhookStats 类置于 WebhookOut 前(计划排序在 py3.12 无 future-annotations 下会 NameError)。
+4. T10 单测钉 `allowlist=""`:走查 .env 白名单(127.0.0.1)泄入单测属环境耦合,测试须封闭。
+5. 终审 F6:编辑框空提交必须发 `description: ""`(后端 ""→NULL 已就绪),前端 `|| undefined` 吞串为违规。
+
+**M19 候选**(终审 triage 全部 ride,无一须合并前修):ALLOWLIST 拼错抛裸 ValueError(投递侧可成毒环,优先)/wecom 占位 secret 回显抑制+文档/切 provider 旧 secret 结转提示/PLATFORM_TRANSIENT 死表清理/范围列 KB 名 tooltip/wecom 编辑态隐藏轮换开关/.env.example ALLOWLIST 默认空/补充测试(IPv6 带端口、settings 默认路径、10.0.0.9 宽 CIDR 封闭);+M16 遗留三项(取消运行中评估/题集导入导出/趋势空态);大件仍等输入(A2A/MinerU 本地化/LDAP)。
+
+**环境备忘(本里程碑新增)**:cmd echo 重定向写 UTF-8 跟踪文件必乱码(GBK 代码页),仓库文件一律编辑器工具;栈重启后孤儿 spawn 子进程需单独清理;dev .env 已加 WEBHOOK_SSRF_ALLOWLIST=127.0.0.1(走查/验收需要,生产留空)。
+
+**走查待办**:M17+M18 合并走查,清单见本文件「用户走查清单」节(M17 存量五项+M18 新增六项);栈已在新代码上运行(8001/worker/beat/5173);**走查通过后再推 origin**(M17 先推码属特例拍板,M18 恢复走查后推送惯例)。
