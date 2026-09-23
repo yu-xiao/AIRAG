@@ -946,6 +946,24 @@ git commit -m "test(m17): acceptance script with local receiver, docs"
 4. 用户走查通过(清单见 Task 7)
 5. spec 台账记录裁决;M18 候选(企微/钉钉/飞书适配、per-KB 订阅、重投按钮、SSRF 黑名单)回流记忆
 
-## 执行记录(待 SDD 填写)
+## 执行记录(2026-09-23,SDD)
 
-(各任务 commit 哈希、测试计数、验收输出、实施期裁决)
+**提交链**(spec c268e10 → 计划 fb1a868):T1 7da4bea → T2 9893de2 → T3 c981107 → T4 9e9b963 → T5 efba2d0 → T6 bbab8da + 487f8d1(修复轮:resetFields 赋值后调用清空编辑预填→clearValidate+显式赋全字段+回归用例)→ T7 0580df7(验收脚本)。六任务一次评审通过(T6 经 1 修复轮),其余零修复轮。
+
+**测试与验收(控制端亲验)**:pytest 348→**379P/0F**(T1 +1、T2 +12、T3 +7、T4 +3、T5 +8);vitest 61→**67/67**(T6 +5、修复轮 +1);`npm run build` 零错;`alembic upgrade head`/`downgrade -1`/再 upgrade 可逆亲验。真栈 `m17_acceptance.py` **37/37 PASS、0 SKIP**(单 worker+单 beat+后端 8001;receiver 127.0.0.1:49628):endpoint 创建+masked、五事件端到端收包+HMAC 全验(eval.completed run30/chat.refused source=rest+截断/document.failed 坏 PDF/document.done 真 MinerU 解析 chunk≥1)、reject 端点 404→dead+permanent、beat 兜底(直插 pending 行 60s 周期补投)、viewer 三负例 403、清理+外部验签示例一并输出。
+
+**实施期裁决**(详见 SDD 台账):
+- T2:next_attempt_at 全链 naive UTC(T1 列无时区,asyncpg 拒 aware;`_utcnow_naive` 单源);conftest CLEANUP_ORDER 补两表(deliveries 前)。
+- T2 环境事故:宿主 DLP(360/金山)对 python.exe 写入的仓库文件透明加密→git 提交密文/pytest 读明文;恢复=工具重写+amend,blob 亲验干净;此后任务全程规避(编辑器工具写文件)。**建议用户把仓库加入 DLP 白名单**。
+- T3:MCP 用例走 `ask_knowledge_base.fn` 直调+contextvar(test_mcp 的 StreamableHTTPSessionManager 单 run 不可跨模块复用,已复现)——仍穿真实生产路径;eval failed 分支 rollback 后实例过期→run_id 参数化+kb_id 预快照;test_outbound time_ns 名字碰撞 flake 修复随任务提交。
+- T6:switch 触发用 ElSwitch `$emit('change')`(与 :model-value 配对,等效 brief 首选);投递表增「下次尝试」列(契约字段,评审通过)。
+- 验收脚本:chat.refused 走 admin 代发临时 key 给临时 viewer 用户(无自助签发/删除路由);beat 探针用 `beat.check` 事件类型直插 NullPool;执行中控制端曾误判双 beat(两条 findstr 链重复输出)全清重启单实例——环境操作失误,与代码无关,记录在案。
+
+**用户走查清单**:
+1. admin 菜单「出站推送」→ 端点管理;新建端点(自动 secret)→ 一次性 secret 弹窗+复制
+2. 外部接收器(如 webhook.site)配真端点 → 上传文档/跑评估/问库外问题 → 外部收到签名请求;用脚本输出的验签一行命令核对
+3. 测试发送:正确 URL→succeeded;错误 URL→失败反馈
+4. 投递记录页签:状态 tag/筛选/分页;停掉外部接收器再触发→retrying(1 分钟退避)→数次后 dead
+5. 启停 switch、rotate secret(masked 不泄明文)、编辑预填、删除级联清记录
+6. 非 admin 账号不见菜单、直调 403
+7. 双主题抽查
