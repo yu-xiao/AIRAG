@@ -295,6 +295,19 @@ async def test_deliver_wecom_permanent_code_dead(db_session):
     assert d.status == "dead" and "93000" in d.last_error
 
 
+async def test_deliver_wecom_oversized_errmsg_truncated_to_column(db_session):
+    """平台 dead 分支 errmsg 超长:必须截到 500 内,否则 String(500) 溢出
+    (asyncpg 22001),dead 永不落库、行卡 pending,deliver_due 每轮撞同一毒行。"""
+    from app.services.outbound import deliver_one
+    ep = await _mk_platform_ep(db_session, "wecom")
+    d = await _platform_delivery(db_session, ep)
+    await deliver_one(db_session, d, client=_FakeClient(
+        {"wx": (200, '{"errcode": 93000, "errmsg": "' + "x" * 600 + '"}')}))
+    await db_session.refresh(d)  # 重读即证明 commit 干净落库
+    assert d.status == "dead" and "93000" in d.last_error
+    assert len(d.last_error) <= 500  # 列宽 String(500),超长即 commit 失败
+
+
 async def test_deliver_dingtalk_transient_code_retries(db_session):
     from app.services.outbound import deliver_one
     ep = await _mk_platform_ep(db_session, "dingtalk")

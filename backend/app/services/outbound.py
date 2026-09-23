@@ -123,7 +123,9 @@ async def deliver_one(db: AsyncSession, delivery: WebhookDelivery,
                 ep.provider, code, getattr(resp, "text", None))
             if outcome == "dead":
                 delivery.status = "dead"
-                delivery.last_error = err
+                # 截断同邻支:errmsg 是对方可控文本,超 String(500) 会 22001,
+                # dead 落不了库、行卡 pending,deliver_due 每轮撞同一毒行
+                delivery.last_error = err[:500]
             elif outcome == "retry":
                 _mark_retry_or_dead(delivery, err or "platform error")
             elif outcome == "succeeded":
@@ -147,8 +149,8 @@ async def deliver_due(db: AsyncSession, client=None) -> int:
     """扫描到期行(pending 或 retrying 且 next_attempt_at 到期)分批投递。
 
     每批 50 按 id 升序;注入 client 时全程复用同一实例(测试语义),
-    自建则随本次调用创建/关闭。返回真实尝试(POST 过)的行数。批内零
-    尝试即停:状态无人推进,续扫必空转(死循环防线)。
+    自建则随本次调用创建/关闭。返回本轮处理行数(SSRF 阻断行无 POST 亦
+    计入)。批内零尝试即停:状态无人推进,续扫必空转(死循环防线)。
 
     扫描必须 join 端点排除禁用:否则禁用行不离开扫描集(deliver_one
     跳过不改状态),最低 50 行全禁用时零尝试 break——队头饥饿,更高
