@@ -151,6 +151,26 @@ describe('WebhooksPage', () => {
     )
   })
 
+  it('编辑清空描述:提交 payload 携带空串(后端 "" → NULL 清空,F6)', async () => {
+    vi.mocked(adminApi.updateWebhook).mockResolvedValue({
+      ...eps[0]!, description: null,
+    })
+    const w = mountPage()
+    await flushPromises()
+    await findBtn(w, '编辑').trigger('click')
+    await flushPromises()
+    const desc = w.find('input[placeholder="选填,用途备注"]')
+    await desc.setValue('临时备注')
+    await desc.setValue('') // 清空输入框
+    await findBtn(w, '保存').trigger('click')
+    await flushPromises()
+    // 恰为空串而非缺键:'' || undefined 会丢键,后端按「未发送 → 不变」处理,清空失效
+    expect(adminApi.updateWebhook).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ description: '' }),
+    )
+  })
+
   it('toggle switch calls updateWebhook', async () => {
     vi.mocked(adminApi.updateWebhook).mockResolvedValue({ ...eps[0]!, enabled: false })
     const w = mountPage()

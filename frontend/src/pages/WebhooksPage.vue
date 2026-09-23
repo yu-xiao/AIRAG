@@ -158,7 +158,7 @@ async function submit(formEl: FormInstance | undefined) {
         url: form.url,
         events: [...form.events],
         enabled: editing.value.enabled,
-        description: form.description || undefined,
+        description: form.description, // 空串照发:后端 "" → NULL,清空描述(F6)
         rotate_secret: form.rotate,
         provider: form.provider,
         kb_ids: [...(form.kbIds ?? [])], // [] = 订阅全部,语义等价 null
