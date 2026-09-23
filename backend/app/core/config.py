@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     AGENT_RATE_LIMIT_PER_MIN: int = 60
     # M10:每 key 每日 ask token 配额(Redis 按日计数,0=禁用)
     AGENT_ASK_DAILY_TOKENS: int = 200_000
+    # M17:出站 webhook
+    WEBHOOK_MAX_ATTEMPTS: int = 5
+    WEBHOOK_TIMEOUT_S: int = 10
     MAX_UPLOAD_MB: int = 20
 
 

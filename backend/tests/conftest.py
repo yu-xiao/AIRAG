@@ -51,6 +51,9 @@ CLEANUP_ORDER = [
     "kb_permissions",
     "knowledge_bases",
     "api_keys",
+    # M17:deliveries 先于 endpoints(FK CASCADE 子表在前)
+    "webhook_deliveries",
+    "webhook_endpoints",
     "users",
 ]
 
