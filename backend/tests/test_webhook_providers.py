@@ -205,11 +205,14 @@ from app.services import webhook_providers as wp
 
 
 async def test_ssrf_blocks_private_literals():
+    # allowlist 显式置空:本测断言「无白名单时私网/回环全拒」,不能被走查
+    # .env 的 WEBHOOK_SSRF_ALLOWLIST=127.0.0.1 环境值放行(test_ssrf_allowlist_
+    # covers_cidr 已覆盖白名单语义)
     for url in ("http://10.0.0.5/x", "http://192.168.1.1/x",
                 "http://127.0.0.1/x", "http://169.254.169.254/meta",
                 "http://[::1]/x", "http://[fe80::1]/x", "http://0.0.0.0/x"):
         with pytest.raises(SsrfBlockedError):
-            await wp.check_url_allowed(url)
+            await wp.check_url_allowed(url, allowlist="")
 
 
 async def test_ssrf_allows_public_literal():
