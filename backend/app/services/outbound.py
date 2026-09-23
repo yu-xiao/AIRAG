@@ -7,10 +7,7 @@ emit_event 与业务同事务(audit() 同哲学,不自行 commit);nudge 须在
 模块级缓存——worker 每任务一个新事件循环,跨循环复用即 M15 毒化
 (NoneType.send,见 eval_runner._fresh_chat_llm 注释)。
 """
-import hashlib
-import hmac
 import json
-import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -21,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models import WebhookDelivery, WebhookEndpoint
+from app.services.webhook_providers import sign_headers  # noqa: F401 — 公式单源在 providers,旧 import 路径兼容
 
 EVENT_TYPES = ("document.done", "document.failed", "eval.completed",
                "eval.failed", "chat.refused")
@@ -64,19 +62,6 @@ async def emit_event(db: AsyncSession, event_type: str, data: dict) -> int:
         ))
         n += 1
     return n
-
-
-def sign_headers(secret: str, event_type: str, body: str) -> dict[str, str]:
-    """签名头:hex(HMAC-SHA256(secret, f"{ts}.{body}"));ts 为 Unix 秒。"""
-    ts = str(int(time.time()))
-    sig = hmac.new(secret.encode(), f"{ts}.{body}".encode(),
-                   hashlib.sha256).hexdigest()
-    return {
-        "Content-Type": "application/json; charset=utf-8",
-        "X-AIRag-Event": event_type,
-        "X-AIRag-Timestamp": ts,
-        "X-AIRag-Signature": sig,
-    }
 
 
 def _mark_retry_or_dead(delivery: WebhookDelivery, err: str) -> None:

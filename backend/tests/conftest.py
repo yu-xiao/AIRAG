@@ -142,3 +142,15 @@ async def celery_eager():
     celery_app.conf.update(
         task_always_eager=old["always"], task_eager_propagates=old["propagates"]
     )
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _no_dns(monkeypatch):
+    """M18:webhook SSRF 校验的 DNS 替身——默认解析为公网地址,全测试套零真实
+    DNS;SSRF 专测另行 monkeypatch webhook_providers._resolve_host 覆写。"""
+    from app.services import webhook_providers as _wp
+
+    async def _fake(host: str) -> list[str]:
+        return ["93.184.216.34"]
+
+    monkeypatch.setattr(_wp, "_resolve_host", _fake)
