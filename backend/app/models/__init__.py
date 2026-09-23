@@ -6,6 +6,7 @@ from app.models.chat import Conversation, Message
 from app.models.audit import AuditLog
 from app.models.api_key import ApiKey
 from app.models.eval import EvalItem, EvalQuestion, EvalRun
+from app.models.webhook import WebhookDelivery, WebhookEndpoint
 
 __all__ = [
     "Base",
@@ -21,4 +22,6 @@ __all__ = [
     "EvalRun",
     "EvalItem",
     "EvalQuestion",
+    "WebhookEndpoint",
+    "WebhookDelivery",
 ]
