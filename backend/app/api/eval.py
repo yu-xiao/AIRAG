@@ -25,6 +25,7 @@ from app.schemas.eval import (
     EvalRunOut,
     EvalTriggerIn,
 )
+from app.services.audit import audit
 
 router = APIRouter(prefix="/eval", tags=["eval"])
 
@@ -297,3 +298,26 @@ async def trigger_run(
         raise HTTPException(
             status_code=502, detail="evaluation dispatch failed") from e
     return {"run_id": run.id}
+
+
+@router.post("/runs/{run_id}/cancel")
+async def cancel_run(
+    run_id: int,
+    current: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """M19 T3:协作式取消——running→cancelling;任务循环逐题 commit 后
+    检查点收口 cancelled(已完成子集照写 summary/item_count)。"""
+    run = await db.get(EvalRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="eval run not found")
+    await _require_kb_owner(db, current, run.kb_id)
+    if run.status in ("completed", "failed", "cancelled"):
+        raise HTTPException(status_code=409, detail="run already finished")
+    if run.status == "cancelling":
+        return {"id": run_id, "status": "cancelling"}  # 幂等,不重复 audit
+    run.status = "cancelling"
+    await audit(db, current.username, "eval_cancel", f"eval_run:{run_id}",
+                {"kb_id": run.kb_id, "mode": run.mode})
+    await db.commit()
+    return {"id": run_id, "status": "cancelling"}

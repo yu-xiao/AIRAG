@@ -161,7 +161,10 @@ def _fresh_chat_llm():
 
 async def run_eval_task(run_id: int, mode: str, rerank: bool,
                         top_k: int) -> None:
-    """状态机:running→completed/failed;逐题插 EvalItem+commit(进度可见)。
+    """状态机:running→completed/failed/cancelled;逐题插 EvalItem+commit
+    (进度可见)。M19 T3:取消是协作式——端点置 cancelling,循环逐题 commit
+    后 refresh 检查发现即 break,终态 cancelled(已完成子集照写
+    summary/item_count,数据诚实)。
 
     自持 NullPool 引擎(任务的事件循环与 API/CLI 不共享,池化连接
     不得跨循环复用——pipeline._run_async + _engine 同款防御)。
@@ -182,6 +185,7 @@ async def run_eval_task(run_id: int, mode: str, rerank: bool,
             kb_id = run.kb_id  # M17:rollback 会过期实例,失败分支事件先取快照
             questions = await load_questions(db, run.kb_id)
             results: list[dict] = []
+            cancelled = False  # M19 T3:检查点置位;终态据此分流
             try:
                 if mode == "retrieval":
                     from app.services.rerank.base import get_reranker
@@ -193,6 +197,10 @@ async def run_eval_task(run_id: int, mode: str, rerank: bool,
                         results.append(r)
                         db.add(EvalItem(run_id=run.id, **item_kwargs(r)))
                         await db.commit()
+                        await db.refresh(run)  # 拾取端点并发置的 cancelling
+                        if run.status == "cancelling":
+                            cancelled = True
+                            break
                 else:
                     from app.core.config import settings as _s
 
@@ -209,9 +217,16 @@ async def run_eval_task(run_id: int, mode: str, rerank: bool,
                         results.append(r)
                         db.add(EvalItem(run_id=run.id, **item_kwargs(r)))
                         await db.commit()
+                        await db.refresh(run)  # 拾取端点并发置的 cancelling
+                        if run.status == "cancelling":
+                            cancelled = True
+                            break
                 run.summary = summarize(results)
                 run.item_count = len(results)
-                run.status = "completed"
+                # M19 T3:取消与自然完成同一收口段,仅 status 不同——
+                # emit_event/commit 时序逐字不变;cancelled 时 summary/
+                # item_count 是已完成子集的诚实快照。
+                run.status = "cancelled" if cancelled else "completed"
                 n = await emit_event(db, "eval.completed", {
                     "run": {"id": run.id, "kb_id": run.kb_id, "mode": mode,
                             "item_count": run.item_count,

@@ -26,11 +26,13 @@ async def _dispose_shared_engine() -> None:
 
 
 async def _sweep_orphan_runs() -> int:
-    """所有 status='running' 的 EvalRun 收口为 failed,返回受影响行数。
+    """在途(status='running' 或 'cancelling',M19 T3)的 EvalRun 收口为
+    failed,返回受影响行数。
 
     触发时机是 worker_ready:solo 池单 worker,启动瞬间不可能有执行中的
     评估任务,残留 running 必是孤儿(worker 被杀/重启、Redis 断线丢
-    .delay() 消息),不收口则同 kb+mode 永久 409、前端 hasRunning()
+    .delay() 消息);cancelling 同理——取消请求已落库但原任务随 worker
+    消亡,无人再收口。不收口则同 kb+mode 永久 409、前端 hasRunning()
     3s 轮询永不停。DB 访问同 pipeline._mark_failed 模式:自持 NullPool
     引擎,用完 dispose(不与 API/worker 常驻引擎共享连接池)。"""
     from sqlalchemy import update
@@ -44,7 +46,7 @@ async def _sweep_orphan_runs() -> int:
         async with async_sessionmaker(engine, expire_on_commit=False)() as session:
             result = await session.execute(
                 update(EvalRun)
-                .where(EvalRun.status == "running")
+                .where(EvalRun.status.in_(("running", "cancelling")))
                 .values(
                     status="failed",
                     error="worker restarted while evaluation was running",
