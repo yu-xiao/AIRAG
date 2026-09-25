@@ -316,3 +316,10 @@ eval_runner 两循环(retrieval/generation)逐题 commit 后:
 5. 双主题抽查
 
 **不推送**:按惯例 M17(已推)之后的 M18+M19 合并走查通过后统一推 origin;栈已起(backend/worker/beat/前端)随时可查。
+
+## 执行记录补遗(终审 + 修复波,控制端)
+
+- **终审(whole-branch,d272a05..71cfaf6)**:评审者抽查复跑 M19 测试全绿;四个正确性重点(毒环完备性/取消竞态四方/secret 全读路径/bulk 注入与事务)源码级核查无 Critical。verdict **With fixes**,2 Important:①前端 submit() 仅 rotate 时捕获 PUT 响应的一次性密钥——「切到 generic」新密钥静默丢失(走查清单第 4 条直接矛盾,API 测试测不到的前端半边);②WebhookUpdateIn.im_secret max_length=200 超列宽 64(65~200 字符 asyncpg 截断 500)。
+- **修复波 16a7a36**:①捕获条件去 `form.rotate &&` 前置(凡响应带 secret 即弹一次性弹窗)+ vitest;②max_length=64 + 超长 422/边界 200 两路径断言。pytest **477P/0F**、vitest **82/82**、build 零错。复审两 finding ADDRESSED、零新破坏。
+- **M20 候选(终审 triage)**:cancel 条件 UPDATE(端点/任务丢更新窄竞态,worker 重启才收口)> `check_url_allowed` urlparse 括号异常包裹(理论逃逸,两调用方已先验)> 平台通道 im_secret_set=false 显「未设置」(前端未用现成字段)> eval.cancelled 独立事件 > 台账测试卫生项(T1 ENFORCE 钉死/deliver_due 整轮回归/T4 spy restore/T5 audit 断言等)。
+- 终态:本地 main=16a7a36(M18 d272a05 + M19 十三提交),origin=ac44db0;**M18+M19 合并走查通过后统一推**。
