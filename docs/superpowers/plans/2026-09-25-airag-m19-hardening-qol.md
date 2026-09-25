@@ -294,6 +294,25 @@ eval_runner 两循环(retrieval/generation)逐题 commit 后:
 3. 终审 clean 或修复波闭环;M20 候选回流记忆;不推送(合并走查后统一推)
 4. 范围按推荐默认执行(卡片未答,M13 先例)
 
-## 执行记录(待 SDD 填写)
+## 执行记录(2026-09-25,SDD)
 
-(各任务 commit 哈希、测试计数、验收输出、实施期裁决)
+**提交链**(spec f4a9108 → 计划 8def9bf):T1 4a9b45e → T2 f4ab9ea → T3 659f3e8 + 60747c4(修复轮:取消路径抑制 eval.completed emit)→ T4 d2d377d → T5 9afda12 → T6 f319f7c → T7 c38e303(验收脚本)。六任务评审:T3 经 1 修复轮,其余一次通过。
+
+**测试与验收(控制端亲验)**:pytest 443→**476P/0F**(+10/+8/+9/+6:白名单毒环与 SSRF 补测/secret 卫生/取消状态机/导入导出);vitest 74→**81/81**(+2/+5);build 零错。真栈 `m19_acceptance.py` **29/29 PASS 0 SKIP**(generation 真 LLM 取消回路 run 34/35:62.6s/24.2s cancelled、子集 items/summary 一致、防重不 409、终态再取消 409;export→删 2→bulk 回环 total 3→1→4;部分成功 errors[0].index;wecom secret None+masked 空;viewer 四负例 404;清理含端点与 KB)。
+
+**实施期裁决**(SDD 台账全量;关键):
+- T1:2001:db8::1 在 py3.12 判 is_private(RFC3849)→ 换真公网 IPv6;断拒用例显式 allowlist="" 隔离 dev .env。
+- T2:rotate 422 detail 加 `(provider: …)` 后缀(既有断言保绿);`im_secret or None` 落 `or ""`(列 NOT NULL,空串=不加签既定编码)。
+- T3 修复轮(评审 Important):取消收口段原样 emit eval.completed → 外部 IM 订阅者收「评估完成」假消息;改 `n = 0 if cancelled else emit_event(...)`+回归用例;**eval.cancelled 独立事件类型留 M20**。
+- T4:`@click.stop` 防取消按钮冒泡到行点击开抽屉(评审命名风险确认必要)。
+- T5:brief 导出顺序断言自相矛盾 → 取契约(id asc);非 dict 数组项整体 422(结构错边界)。
+- T7 脚本:计划清单「删 2 导 3 total==3」算术错误 → 修正为 3→1→4;cancel 模式按 ZHIPU_API_KEY 自动选 generation(取消窗口足够)。
+
+**用户走查清单增量**(M19 部分;叠加在 M17+M18 合并清单之上):
+1. 运行中的评估(生成模式最直观)→ 操作列「取消」→ 确认 → 状态「取消中」→「已取消」,题数为已完成子集;再触发同库同模式不报 409
+2. 题集管理:导出 JSON(浏览器下载)→ 删几题 → 导入该 JSON → 条数恢复;导入含坏行的文件 → 部分成功提示
+3. 趋势卡:选一个「跑过但全未设期望」的库 → 「有运行,但所选指标均未测量」空态
+4. 出站推送:企微端点创建无密钥弹窗、列表「无需密钥」;编辑企微端点无轮换开关;范围列悬停见 KB 名;切换通道保存后密钥按通道重置(generic 切换弹一次性新密钥)
+5. 双主题抽查
+
+**不推送**:按惯例 M17(已推)之后的 M18+M19 合并走查通过后统一推 origin;栈已起(backend/worker/beat/前端)随时可查。
