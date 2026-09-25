@@ -8,7 +8,8 @@ import time
 
 from sqlalchemy import select, text, update
 
-from app.models import AuditLog, EvalItem, EvalQuestion, EvalRun
+from app.models import (AuditLog, EvalItem, EvalQuestion, EvalRun,
+                        WebhookDelivery, WebhookEndpoint)
 
 
 async def _register_and_login(client, username):
@@ -149,6 +150,34 @@ async def test_run_task_cancel_at_later_question(client, auth_headers,
         select(EvalItem).where(EvalItem.run_id == run_id))).scalars().all()
     assert len(items) == 2
     assert calls["n"] == 2
+
+
+async def test_cancelled_run_emits_no_completed_event(
+        client, auth_headers, db_session, monkeypatch):
+    """取消收口不外发 eval.completed:全订阅端点(events=[] 照
+    test_webhook_events._subscribed_ep 模式)也零 WebhookDelivery 行,
+    nudge spy 未被调(emit 不发即 n=0,`if n:` 门自然关死)。"""
+    import app.services.eval_runner as runner
+    from app.services.eval_runner import run_eval_task
+
+    db_session.add(WebhookEndpoint(
+        name=f"cxl{time.time_ns()}", url="http://x/h", secret="wh_s",
+        events=[], created_by=1))
+    await db_session.commit()
+    run_id = await _mk_run(client, auth_headers, db_session, n=3)
+    fake, calls = _fake_retrieval_item(run_id, flip_at=1)
+    monkeypatch.setattr(runner, "retrieval_item", fake)
+    nudged = []
+    monkeypatch.setattr(runner, "nudge", lambda: nudged.append(1))
+    await run_eval_task(run_id, "retrieval", False, 8)
+    db_session.expire_all()
+    run = (await db_session.execute(
+        select(EvalRun).where(EvalRun.id == run_id))).scalar_one()
+    assert run.status == "cancelled"  # 前置:确是取消路径(非 completed)
+    deliveries = (await db_session.execute(
+        select(WebhookDelivery))).scalars().all()
+    assert deliveries == []
+    assert nudged == []
 
 
 async def test_sweep_collects_cancelling(client, auth_headers, db_session):

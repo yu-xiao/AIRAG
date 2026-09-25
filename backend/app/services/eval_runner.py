@@ -223,11 +223,12 @@ async def run_eval_task(run_id: int, mode: str, rerank: bool,
                             break
                 run.summary = summarize(results)
                 run.item_count = len(results)
-                # M19 T3:取消与自然完成同一收口段,仅 status 不同——
+                # M19 T3:取消与自然完成同一收口段,仅 status 不同;完成路径
                 # emit_event/commit 时序逐字不变;cancelled 时 summary/
                 # item_count 是已完成子集的诚实快照。
                 run.status = "cancelled" if cancelled else "completed"
-                n = await emit_event(db, "eval.completed", {
+                # 取消是用户动作,不发评估完成事件;eval.cancelled 事件类型留 M20
+                n = 0 if cancelled else await emit_event(db, "eval.completed", {
                     "run": {"id": run.id, "kb_id": run.kb_id, "mode": mode,
                             "item_count": run.item_count,
                             "summary": run.summary}})  # M17
