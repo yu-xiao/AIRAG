@@ -376,4 +376,27 @@ describe('WebhooksPage', () => {
     await flushPromises()
     expect(w.text()).toContain('轮换密钥')
   })
+
+  it('编辑提交:响应带 secret 即弹一次性弹窗(切到 generic,未开 rotate)', async () => {
+    // M19:PUT 把 provider 切到 generic 时后端返回 WebhookCreatedOut(新明文一次);
+    // rotate 只是带 secret 的子集——凡响应带 secret 都必须进弹窗,否则明文静默丢失
+    vi.mocked(adminApi.updateWebhook).mockResolvedValue({
+      ...eps[0]!, provider: 'generic', secret: 'wh_newswitchsecret1',
+    })
+    const w = mountPage()
+    await flushPromises()
+    await findBtn(w, '编辑').trigger('click')
+    await flushPromises()
+    await findBtn(w, '保存').trigger('click')
+    await flushPromises()
+    // rotate 开关未动:payload 明确 rotate_secret: false,新明文仍须弹出
+    expect(adminApi.updateWebhook).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ rotate_secret: false, provider: 'generic' }),
+    )
+    await vi.waitFor(() => {
+      expect(w.text()).toContain('wh_newswitchsecret1')
+      expect(w.text()).toContain('仅此一次')
+    })
+  })
 })

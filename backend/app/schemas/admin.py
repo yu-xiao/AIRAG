@@ -75,7 +75,9 @@ class WebhookUpdateIn(BaseModel):
     rotate_secret: bool = False
     provider: WebhookProvider | None = None
     kb_ids: list[int] | None = None
-    im_secret: str | None = Field(None, max_length=200)
+    # 上限对齐 models/webhook.py secret 列 String(64):放宽会在 pydantic 放行后
+    # 撞 asyncpg StringDataRightTruncation → 500(而非 422)
+    im_secret: str | None = Field(None, max_length=64)
 
 
 class WebhookStats(BaseModel):

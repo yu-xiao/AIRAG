@@ -533,6 +533,27 @@ async def test_switch_to_platform_takes_im_secret(client, db_session):
     assert (await _get_ep(client, headers, ep["id"]))["im_secret_set"] is False
 
 
+async def test_update_im_secret_length_capped_to_column(client, db_session):
+    """im_secret 上限对齐 secret 列 String(64):65 字符 422(而非 asyncpg
+    StringDataRightTruncation → 500);恰 64 字符可入列。"""
+    headers = await _make_admin(client, db_session, "m19_wh_imlen9")
+    ep = await _create_ep(client, headers, "imlen9")
+    r = await client.put(f"/api/admin/webhooks/{ep['id']}", json={
+        "provider": "dingtalk", "im_secret": "x" * 65}, headers=headers)
+    assert r.status_code == 422
+    # 编辑态(不切 provider)同样拦在 pydantic 层
+    ep2 = await _create_ep(client, headers, "imlen9b", provider="feishu",
+                           secret="feishu-sign-secret-0123456789abcdef")
+    r = await client.put(f"/api/admin/webhooks/{ep2['id']}", json={
+        "im_secret": "x" * 65}, headers=headers)
+    assert r.status_code == 422
+    # 边界:恰 64 字符过校验、入列
+    r = await client.put(f"/api/admin/webhooks/{ep['id']}", json={
+        "provider": "dingtalk", "im_secret": "x" * 64}, headers=headers)
+    assert r.status_code == 200, r.text
+    assert (await _get_ep(client, headers, ep["id"]))["im_secret_set"] is True
+
+
 async def test_wecom_switch_carries_no_placeholder(client, db_session):
     """wecom→dingtalk 不带 im_secret:占位 hex 不得结转进平台密钥位。"""
     headers = await _make_admin(client, db_session, "m19_wh_noph5")

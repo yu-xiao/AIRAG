@@ -118,7 +118,7 @@ const rules: FormRules = {
   ],
 }
 
-// secret 一次性明文:仅 create / rotate 响应携带,关闭即弃
+// secret 一次性明文:仅 create / rotate / 切换到 generic 响应携带,关闭即弃
 const oneTimeSecret = ref<string | null>(null)
 
 // 不用 resetFields:其恢复的是 form-item 挂载时快照,而 el-dialog 内容跨关闭持久
@@ -170,7 +170,9 @@ async function submit(formEl: FormInstance | undefined) {
         provider: form.provider,
         kb_ids: [...(form.kbIds ?? [])], // [] = 订阅全部,语义等价 null
       })
-      if (form.rotate && 'secret' in r && r.secret) oneTimeSecret.value = r.secret
+      // rotate 是「响应带 secret」的子集;provider 切到 generic 同样返回新明文
+      // (后端 WebhookCreatedOut),凡带 secret 都进一次性弹窗,否则明文永久丢失
+      if ('secret' in r && r.secret) oneTimeSecret.value = r.secret
       else ElMessage.success('已保存')
     } else {
       const payload: {
