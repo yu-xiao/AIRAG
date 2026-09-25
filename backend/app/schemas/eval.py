@@ -92,3 +92,22 @@ class EvalQuestionOut(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class EvalQuestionBulkIn(BaseModel):
+    """M19 T5:批量导入。questions 留 dict——单条校验逐条走
+    EvalQuestionIn(与单条 POST 同款语义),失败进 errors[index]
+    而非整体 422(部分成功);列表长度 >500 由 max_length 整体 422。"""
+
+    kb_id: int
+    questions: list[dict] = Field(max_length=500)
+
+
+class EvalQuestionBulkError(BaseModel):
+    index: int
+    detail: str
+
+
+class EvalQuestionBulkResultOut(BaseModel):
+    created: int
+    errors: list[EvalQuestionBulkError]

@@ -1,6 +1,10 @@
 # backend/app/api/eval.py
 """M15:评估 API——只读记录+题集 CRUD+Web 触发(admin 全量;非 admin 仅 owner 库)。"""
-from fastapi import APIRouter, Depends, HTTPException, Query
+import json
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from pydantic import ValidationError
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +22,9 @@ from app.models import (
 )
 from app.schemas.eval import (
     EvalItemOut,
+    EvalQuestionBulkError,
+    EvalQuestionBulkIn,
+    EvalQuestionBulkResultOut,
     EvalQuestionIn,
     EvalQuestionOut,
     EvalQuestionUpdate,
@@ -152,8 +159,9 @@ async def get_run(
 
 
 async def _require_kb_owner(db: AsyncSession, current: User,
-                            kb_id: int) -> None:
-    """题集/触发的统一权限门:M14 list_runs 的 kb 分支同款语义。"""
+                            kb_id: int) -> KnowledgeBase:
+    """题集/触发的统一权限门:M14 list_runs 的 kb 分支同款语义。
+    M19 T5 起返回 KB 本体(export 需要 kb_name;既有调用方忽略返回值)。"""
     kb = await db.get(KnowledgeBase, kb_id)
     perm = await get_kb_perm(db, current, kb) if kb is not None else None
     if perm is None:
@@ -161,6 +169,7 @@ async def _require_kb_owner(db: AsyncSession, current: User,
                             detail="knowledge base not found")
     if not has_perm(perm, "owner"):
         raise HTTPException(status_code=403, detail="owner or admin required")
+    return kb
 
 
 @router.get("/questions")
@@ -199,6 +208,70 @@ async def create_question(
     await db.commit()
     await db.refresh(q)
     return q
+
+
+@router.get("/questions/export")
+async def export_questions(
+    kb_id: int,
+    current: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """M19 T5:题集导出——可移植 JSON 附件(不含 id/kb_id/created_at,
+    可直接喂回 bulk);id asc;读操作不记 audit(与 questions GET 一致)。"""
+    kb = await _require_kb_owner(db, current, kb_id)
+    rows = (await db.execute(
+        select(EvalQuestion).where(EvalQuestion.kb_id == kb_id)
+        .order_by(EvalQuestion.id))).scalars().all()
+    body = {
+        "kb_id": kb_id, "kb_name": kb.name,
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "count": len(rows),
+        "questions": [{"question": q.question,
+                       "expect_doc_ids": q.expect_doc_ids,
+                       "expect_keywords": q.expect_keywords,
+                       "reference_answer": q.reference_answer}
+                      for q in rows],
+    }
+    return Response(content=json.dumps(body, ensure_ascii=False),
+                    media_type="application/json",
+                    headers={"Content-Disposition":
+                             f'attachment; filename="eval-questions-kb{kb_id}.json"'})
+
+
+@router.post("/questions/bulk",
+             response_model=EvalQuestionBulkResultOut, status_code=201)
+async def bulk_create_questions(
+    payload: EvalQuestionBulkIn,
+    current: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """M19 T5:批量导入(≤500)——部分成功:逐条走 EvalQuestionIn 校验
+    (与单条 POST 同款),非法条进 errors[{index, detail}],合法条一次
+    commit 收尾(audit 同事务)。"""
+    await _require_kb_owner(db, current, payload.kb_id)
+    created = 0
+    errors: list[EvalQuestionBulkError] = []
+    for i, raw in enumerate(payload.questions):
+        try:
+            item = EvalQuestionIn.model_validate(raw | {"kb_id": payload.kb_id})
+        except ValidationError as e:
+            first = e.errors()[0]
+            field = first["loc"][0] if first["loc"] else "questions"
+            label = "题干" if field == "question" else f"字段 {field}"
+            errors.append(EvalQuestionBulkError(
+                index=i, detail=f"{label}: {first['msg']}"))
+            continue
+        db.add(EvalQuestion(
+            kb_id=payload.kb_id, question=item.question,
+            expect_doc_ids=item.expect_doc_ids,
+            expect_keywords=item.expect_keywords,
+            reference_answer=item.reference_answer or None))
+        created += 1
+    await audit(db, current.username, "eval_questions_bulk",
+                f"kb:{payload.kb_id}",
+                {"created": created, "errors": len(errors)})
+    await db.commit()
+    return EvalQuestionBulkResultOut(created=created, errors=errors)
 
 
 @router.put("/questions/{question_id}", response_model=EvalQuestionOut)

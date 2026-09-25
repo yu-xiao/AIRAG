@@ -135,3 +135,99 @@ async def test_my_kbs_counts(client, auth_headers, db_session):
     other = await _register_and_login(client, "m15_mykbs_other")
     r = await client.get("/api/eval/my-kbs", headers=other)
     assert all(x["kb_id"] != kb_id for x in r.json())  # 非 owner 不见
+
+
+# ---- M19 T5:题集导出 / 批量导入 ----
+
+
+async def test_export_shape_and_order(client, auth_headers):
+    kb_id = await _make_kb(client, auth_headers, "导出库")
+    for i in (2, 0, 1):  # 乱序建,导出须按 id asc
+        await client.post("/api/eval/questions",
+                          json=PAYLOAD | {"kb_id": kb_id, "question": f"q{i}"},
+                          headers=auth_headers)
+    r = await client.get(f"/api/eval/questions/export?kb_id={kb_id}",
+                         headers=auth_headers)
+    assert r.status_code == 200
+    assert "eval-questions-kb" in r.headers["content-disposition"]
+    body = r.json()
+    assert body["kb_id"] == kb_id and body["count"] == 3
+    assert body["kb_name"] == "导出库" and body["exported_at"]
+    # 接口契约 id asc:创建序 q2,q0,q1 → id 序即创建序(非字母序/倒序)
+    assert [q["question"] for q in body["questions"]] == ["q2", "q0", "q1"]
+    # 可移植:不含 id/kb_id/created_at
+    assert set(body["questions"][0]) == {"question", "expect_doc_ids",
+                                         "expect_keywords", "reference_answer"}
+
+
+async def test_export_empty_kb(client, auth_headers):
+    kb_id = await _make_kb(client, auth_headers, "空导出库")
+    r = await client.get(f"/api/eval/questions/export?kb_id={kb_id}",
+                         headers=auth_headers)
+    assert r.status_code == 200 and r.json()["count"] == 0
+
+
+async def test_export_permissions(client, auth_headers, db_session):
+    """守卫同 questions GET(_require_kb_owner):不可见库 404;
+    可见非 owner(editor)403。"""
+    from sqlalchemy import text
+
+    kb_id = await _make_kb(client, auth_headers, "导出权限库")
+    other = await _register_and_login(client, "m19_exp_other")
+    r = await client.get(f"/api/eval/questions/export?kb_id={kb_id}",
+                         headers=other)
+    assert r.status_code == 404  # 无 perm → 不可见
+
+    sid = (await client.get("/api/auth/me", headers=other)).json()["id"]
+    await db_session.execute(text(
+        "INSERT INTO kb_permissions (kb_id, user_id, perm) "
+        "VALUES (:k, :u, 'editor')"), {"k": kb_id, "u": sid})
+    await db_session.commit()
+    r = await client.get(f"/api/eval/questions/export?kb_id={kb_id}",
+                         headers=other)
+    assert r.status_code == 403  # editor 非 owner
+
+
+async def test_bulk_creates_all(client, auth_headers):
+    kb_id = await _make_kb(client, auth_headers, "导入库")
+    qs = [{"question": f"bq{i}", "expect_doc_ids": [i],
+           "expect_keywords": [], "reference_answer": None} for i in range(3)]
+    r = await client.post("/api/eval/questions/bulk",
+                          json={"kb_id": kb_id, "questions": qs},
+                          headers=auth_headers)
+    assert r.status_code == 201
+    assert r.json() == {"created": 3, "errors": []}
+    r2 = await client.get(f"/api/eval/questions?kb_id={kb_id}",
+                          headers=auth_headers)
+    assert r2.json()["total"] == 3
+
+
+async def test_bulk_partial_success(client, auth_headers):
+    kb_id = await _make_kb(client, auth_headers, "半成功库")
+    qs = [{"question": "ok1"}, {"question": "   "},  # 空白题 → error
+          {"question": "ok2"}]
+    r = await client.post("/api/eval/questions/bulk",
+                          json={"kb_id": kb_id, "questions": qs},
+                          headers=auth_headers)
+    assert r.status_code == 201
+    body = r.json()
+    assert body["created"] == 2
+    assert len(body["errors"]) == 1 and body["errors"][0]["index"] == 1
+    assert "题干" in body["errors"][0]["detail"]
+    r2 = await client.get(f"/api/eval/questions?kb_id={kb_id}",
+                          headers=auth_headers)
+    assert r2.json()["total"] == 2  # 合法两条全部落库
+
+
+async def test_bulk_cap_and_permissions(client, auth_headers):
+    kb_id = await _make_kb(client, auth_headers, "上限库")
+    r = await client.post("/api/eval/questions/bulk",
+                          json={"kb_id": kb_id,
+                                "questions": [{"question": "x"}] * 501},
+                          headers=auth_headers)
+    assert r.status_code == 422  # >500 条整体拒绝
+    other = await _register_and_login(client, "m19_bulk_other")
+    r2 = await client.post("/api/eval/questions/bulk",
+                           json={"kb_id": kb_id, "questions": []},
+                           headers=other)
+    assert r2.status_code == 404  # 不可见;可见非 owner 403 分支见 export 用例
