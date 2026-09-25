@@ -1,5 +1,6 @@
 # backend/tests/test_admin_webhooks.py
 """M17 T5:admin webhook 端点 CRUD / rotate / test-send / 投递记录。"""
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -459,3 +460,128 @@ async def test_redeliver_non_admin_403(client, db_session):
     r = await client.post("/api/admin/webhooks/1/deliveries/1/redeliver",
                           headers=other)
     assert r.status_code == 403
+
+
+# ---- M19 T2:secret 卫生(wecom 占位不回显 / 切换重置 / 轮换限 generic)----
+async def _get_ep(client, headers, ep_id) -> dict:
+    r = await client.get("/api/admin/webhooks", headers=headers)
+    return [e for e in r.json() if e["id"] == ep_id][0]
+
+
+async def test_wecom_create_no_secret_echo(client, db_session):
+    """wecom 创建:secret=None(键存在值为 None)、masked 空、全文无占位 hex。"""
+    headers = await _make_admin(client, db_session, "m19_wh_wecom1")
+    r = await client.post("/api/admin/webhooks", json={
+        "name": "wx1", "url": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send",
+        "events": ["document.done"], "provider": "wecom"}, headers=headers)
+    assert r.status_code == 201, r.text
+    assert "secret" in r.json()
+    assert r.json()["secret"] is None  # 占位密钥永不下发
+    assert re.search(r"[0-9a-f]{32}", r.text) is None  # 响应无 32 位 hex
+
+    r = await client.get("/api/admin/webhooks", headers=headers)
+    item = [e for e in r.json() if e["name"] == "wx1"][0]
+    assert item["secret_masked"] == ""  # 空=「无需密钥」,不伪装有密钥
+
+
+async def test_wecom_masked_empty_platform_not(client, db_session):
+    """对照组:wecom masked 空串;dingtalk masked 非空。"""
+    headers = await _make_admin(client, db_session, "m19_wh_mask2")
+    await _create_ep(client, headers, "wx2", provider="wecom")
+    await _create_ep(client, headers, "dt2", provider="dingtalk",
+                     secret="dingtalk-sign-secret-0123456789")
+    r = await client.get("/api/admin/webhooks", headers=headers)
+    by_name = {e["name"]: e for e in r.json()}
+    assert by_name["wx2"]["secret_masked"] == ""
+    assert by_name["dt2"]["secret_masked"] != ""
+
+
+async def test_provider_switch_resets_secret(client, db_session):
+    """generic→wecom:masked 空、无明文字段;wecom→generic:新明文一次性。"""
+    headers = await _make_admin(client, db_session, "m19_wh_sw3")
+    ep = await _create_ep(client, headers, "sw3")  # generic,S1 明文
+    s1 = ep["secret"]
+
+    r = await client.put(f"/api/admin/webhooks/{ep['id']}",
+                         json={"provider": "wecom"}, headers=headers)
+    assert r.status_code == 200
+    assert "secret" not in r.json()  # WebhookOut 形态,无明文字段
+    assert r.json()["secret_masked"] == ""
+
+    r = await client.put(f"/api/admin/webhooks/{ep['id']}",
+                         json={"provider": "generic"}, headers=headers)
+    assert r.status_code == 200
+    s2 = r.json()["secret"]  # 新明文仅此一次
+    assert s2 and s2 != s1 and len(s2) == 32
+
+    item = await _get_ep(client, headers, ep["id"])
+    assert item["secret_masked"] == f"wh_****{s2[-4:]}" != ""
+
+
+async def test_switch_to_platform_takes_im_secret(client, db_session):
+    """切换到平台通道:im_secret 即新加签密钥;不带=清空(不加签)。"""
+    headers = await _make_admin(client, db_session, "m19_wh_im4")
+    ep = await _create_ep(client, headers, "im4")  # generic
+    r = await client.put(f"/api/admin/webhooks/{ep['id']}", json={
+        "provider": "dingtalk", "im_secret": "NEWHOOK"}, headers=headers)
+    assert r.status_code == 200
+    assert (await _get_ep(client, headers, ep["id"]))["im_secret_set"] is True
+
+    r = await client.put(f"/api/admin/webhooks/{ep['id']}",
+                         json={"provider": "feishu"}, headers=headers)
+    assert r.status_code == 200
+    assert (await _get_ep(client, headers, ep["id"]))["im_secret_set"] is False
+
+
+async def test_wecom_switch_carries_no_placeholder(client, db_session):
+    """wecom→dingtalk 不带 im_secret:占位 hex 不得结转进平台密钥位。"""
+    headers = await _make_admin(client, db_session, "m19_wh_noph5")
+    ep = await _create_ep(client, headers, "wx5", provider="wecom")
+    r = await client.put(f"/api/admin/webhooks/{ep['id']}",
+                         json={"provider": "dingtalk"}, headers=headers)
+    assert r.status_code == 200
+    assert (await _get_ep(client, headers, ep["id"]))["im_secret_set"] is False
+
+
+async def test_rotate_rejected_for_platforms(client, db_session):
+    """rotate 只属 generic(平台密钥来自 IM 后台,不可随机生成)。"""
+    headers = await _make_admin(client, db_session, "m19_wh_rot6")
+    wx = await _create_ep(client, headers, "wx6", provider="wecom")
+    dt = await _create_ep(client, headers, "dt6", provider="dingtalk")
+    for ep in (wx, dt):
+        r = await client.put(f"/api/admin/webhooks/{ep['id']}",
+                             json={"rotate_secret": True}, headers=headers)
+        assert r.status_code == 422
+        assert "rotate_secret not supported" in r.json()["detail"]
+    gen = await _create_ep(client, headers, "gen6")
+    r = await client.put(f"/api/admin/webhooks/{gen['id']}",
+                         json={"rotate_secret": True}, headers=headers)
+    assert r.status_code == 200  # 回归锁:generic rotate 明文一次
+    assert r.json()["secret"] and len(r.json()["secret"]) == 32
+
+
+async def test_provider_reset_audited(client, db_session):
+    """provider 切换的审计 detail 记 provider_reset=old->new(JSON 子串)。"""
+    headers = await _make_admin(client, db_session, "m19_wh_aud7")
+    ep = await _create_ep(client, headers, "aud7")
+    r = await client.put(f"/api/admin/webhooks/{ep['id']}",
+                         json={"provider": "wecom"}, headers=headers)
+    assert r.status_code == 200
+    r = await client.get("/api/admin/audit-logs?action=webhook_update",
+                         headers=headers)
+    assert r.status_code == 200
+    hits = [i for i in r.json()["items"]
+            if "provider_reset" in (i["detail"] or "")]
+    assert hits, r.json()
+    assert "generic->wecom" in hits[0]["detail"]
+
+
+async def test_create_generic_secret_once_unchanged(client, db_session):
+    """语义锁(M17 不回退):generic create 明文一次,GET 只 masked。"""
+    headers = await _make_admin(client, db_session, "m19_wh_lock8")
+    ep = await _create_ep(client, headers, "lock8")
+    assert ep["secret"] and len(ep["secret"]) == 32
+    r = await client.get("/api/admin/webhooks", headers=headers)
+    item = [e for e in r.json() if e["id"] == ep["id"]][0]
+    assert item["secret_masked"] == f"wh_****{ep['secret'][-4:]}"
+    assert ep["secret"] not in r.text

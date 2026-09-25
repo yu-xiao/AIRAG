@@ -45,10 +45,16 @@
   - 钉钉:secret=机器人加签密钥;请求 URL 追加
     `&timestamp={毫秒}&sign={urlencode(base64(HMAC-SHA256(key=f"{ts}\n{secret}", msg=b"")))}`
   - 飞书:secret=签名密钥;body 增 `"timestamp":"{秒}","sign":"{base64(同上)}"`
-  - 企微:key 在 webhook URL 内,无需 secret
+  - 企微:key 在 webhook URL 内,无需 secret;系统仍存一个占位密钥
+    (secret 列非空约束所致)——占位不参与任何签名、永不下发,创建/切换
+    响应 `secret=None`,列表 `secret_masked` 为空即「无需密钥」
   - generic 端点的 X-AIRag 签名头对平台端点不发(secret 语义已变为平台加签)
-- **平台加签密钥仅创建端点时填写**;编辑态无法重设(轮换生成的是随机串,
-  对平台签名无意义)——需更换平台密钥时请删除并重建端点(历史投递记录保留)
+- **平台密钥生命周期(M19)**:钉钉/飞书更换密钥请编辑 `im_secret`
+  (provider 切换请求带同字段,空串=取消加签);轮换已禁用——
+  `rotate_secret` 对平台通道一律 422:密钥来自 IM 后台,不可随机生成。
+  切换 provider 时旧 secret 不结转,按目标通道重置:generic→新随机密钥
+  (明文仅切换响应出现一次);wecom→新占位(永不下发);钉钉/飞书→
+  `im_secret`,缺省为空(不加签)
 
 ## 运维
 

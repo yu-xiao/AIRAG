@@ -63,7 +63,9 @@ class WebhookCreateIn(BaseModel):
 
 class WebhookUpdateIn(BaseModel):
     """无 secret 字段:明文写回一律拒绝(rotate_secret 专属通道)。
-    多余键按 pydantic 默认忽略——传 secret 静默丢弃而非 422。"""
+    多余键按 pydantic 默认忽略——传 secret 静默丢弃而非 422。
+    im_secret:平台通道(dingtalk/feishu)加签密钥专属编辑通道,
+    provider 切换请求带同字段(M19)。"""
 
     name: str | None = Field(None, min_length=1, max_length=100)
     url: HttpUrl | None = None
@@ -73,6 +75,7 @@ class WebhookUpdateIn(BaseModel):
     rotate_secret: bool = False
     provider: WebhookProvider | None = None
     kb_ids: list[int] | None = None
+    im_secret: str | None = Field(None, max_length=200)
 
 
 class WebhookStats(BaseModel):
@@ -92,15 +95,17 @@ class WebhookOut(BaseModel):
     events: list[str] | None
     enabled: bool
     description: str | None
-    secret_masked: str
+    secret_masked: str  # M19:wecom 恒空串(无需密钥,占位不下发)
     created_at: datetime
     provider: str = "generic"
     kb_ids: list[int] | None = None
+    # M19:平台通道是否已配置加签密钥(wecom/generic 恒 False)
+    im_secret_set: bool = False
     stats: WebhookStats | None = None
 
 
 class WebhookCreatedOut(WebhookOut):
-    secret: str  # 明文仅此一次
+    secret: str | None  # 明文仅此一次;wecom 无 secret → None(M19)
 
 
 class WebhookDeliveryOut(BaseModel):

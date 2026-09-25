@@ -195,11 +195,14 @@ def _masked(secret: str) -> str:
 
 
 def _to_out(ep: WebhookEndpoint) -> WebhookOut:
+    # M19:wecom 占位密钥不参与任何签名、永不下发——masked 空串即「无需密钥」
+    masked = "" if ep.provider == "wecom" else _masked(ep.secret)
     return WebhookOut(
         id=ep.id, name=ep.name, url=ep.url, events=ep.events,
         enabled=ep.enabled, description=ep.description,
-        secret_masked=_masked(ep.secret), created_at=ep.created_at,
+        secret_masked=masked, created_at=ep.created_at,
         provider=ep.provider, kb_ids=ep.kb_ids,
+        im_secret_set=ep.provider in ("dingtalk", "feishu") and bool(ep.secret),
     )
 
 
@@ -250,7 +253,8 @@ async def create_webhook(
     if dup.scalars().first() is not None:
         raise HTTPException(status_code=409, detail="name already exists")
     # secret 按 provider:generic 必填(自动或自定义);wecom 占位随机
-    # (列非空,永不参与计算/回显);钉钉/飞书=可选加签密钥,空=不加签
+    # (列非空,永不参与计算/回显,M19 响应 secret=None);钉钉/飞书=
+    # 可选加签密钥,空=不加签
     if payload.provider == "generic":
         secret = payload.secret or secrets.token_hex(16)
     elif payload.provider == "wecom":
@@ -272,7 +276,10 @@ async def create_webhook(
     await db.commit()
     await db.refresh(ep)
     out = _to_out(ep)
-    return WebhookCreatedOut(**out.model_dump(), secret=secret)
+    # M19:wecom 占位密钥永不下发——响应 secret=None(明文仅 generic/平台)
+    return WebhookCreatedOut(
+        **out.model_dump(),
+        secret=None if payload.provider == "wecom" else secret)
 
 
 @router.get("/webhooks", response_model=list[WebhookOut])
@@ -337,9 +344,26 @@ async def update_webhook(
     if payload.enabled is not None:
         ep.enabled = payload.enabled
         changes["enabled"] = payload.enabled
+    new_secret = None
     if payload.provider is not None and payload.provider != ep.provider:
+        # M19:换通道必重置 secret 语义——旧值(wecom 占位/平台密钥/旧明文)
+        # 一律不结转,按目标通道重置;generic→新随机密钥明文仅本次响应一次
+        old_provider = ep.provider
         ep.provider = payload.provider
         changes["provider"] = payload.provider
+        if payload.provider == "generic":
+            new_secret = secrets.token_hex(16)
+            ep.secret = new_secret
+        elif payload.provider == "wecom":
+            ep.secret = secrets.token_hex(16)  # 新占位,永不下发
+        else:  # dingtalk / feishu:密钥只来自 IM 后台,空=不加签
+            ep.secret = payload.im_secret or ""
+        changes["provider_reset"] = f"{old_provider}->{payload.provider}"
+    elif payload.im_secret is not None and ep.provider in ("dingtalk",
+                                                           "feishu"):
+        # 编辑态更换平台加签密钥(im_secret 专属通道;空串=取消加签)
+        ep.secret = payload.im_secret
+        changes["im_secret"] = True
     if payload.kb_ids is not None:
         await _validate_kb_ids(db, payload.kb_ids)
         ep.kb_ids = payload.kb_ids or None   # [] → NULL(订阅全部)
@@ -347,18 +371,22 @@ async def update_webhook(
     if payload.description is not None:
         ep.description = payload.description or None  # "" → NULL 清空
         changes["description"] = ep.description
-    new_secret = None
     if payload.rotate_secret:
-        if ep.provider == "wecom":
+        # M19:rotate 只属 generic——平台密钥来自 IM 后台,随机 hex 覆盖
+        # 只会打出永久死信(dingtalk 310000 等)
+        if ep.provider != "generic":
             raise HTTPException(
                 status_code=422,
-                detail="rotate_secret not supported for wecom")
+                detail="rotate_secret not supported; platform secret comes "
+                       f"from the IM console (provider: {ep.provider})")
         new_secret = secrets.token_hex(16)
         ep.secret = new_secret
         changes["rotate_secret"] = True
+    audit_detail = {"target": ep.name, "changed": sorted(changes)}
+    if "provider_reset" in changes:
+        audit_detail["provider_reset"] = changes["provider_reset"]
     await audit(db, current.username, "webhook_update",
-                f"webhook:{ep.id}",
-                {"target": ep.name, "changed": sorted(changes)})
+                f"webhook:{ep.id}", audit_detail)
     await db.commit()
     await db.refresh(ep)
     if new_secret is not None:
