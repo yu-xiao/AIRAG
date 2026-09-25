@@ -264,3 +264,100 @@ async def test_ssrf_empty_resolve_rejects(monkeypatch):
 async def test_ssrf_bad_scheme_rejects():
     with pytest.raises(SsrfBlockedError):
         await wp.check_url_allowed("ftp://x/cb")
+
+
+# ---- M19 T1:白名单 fail-open(毒环修复)+ SSRF 补测 ----
+# 毒环机理:白名单条目裸 ip_network(part) 拼错即抛 AddressValueError,在
+# check_url_allowed 的 DNS try 块之外逃出;deliver_one 只捕 SsrfBlockedError
+# → 行保持 pending(attempts 未增)→ deliver_due 按 id asc 每轮先撞同一行
+# 整轮中断 → 拼错存续期间全部投递停滞。
+import uuid
+
+from app.models import WebhookDelivery, WebhookEndpoint
+
+
+def test_allowlist_bad_entries_skipped_not_raised():
+    """M19 毒环修复:坏白名单条目 skip+warning,不抛、不放行。"""
+    nets = wp._allowlist_networks("127.0.0.1:8000,not-an-ip,10.0.0.0/8")
+    assert [str(n) for n in nets] == ["10.0.0.0/8"]
+
+
+async def test_check_url_survives_bad_allowlist():
+    """坏条目存在时 check_url_allowed 不抛;回环仍拒(坏条目不生效)。"""
+    with pytest.raises(SsrfBlockedError):
+        await wp.check_url_allowed("http://127.0.0.1/x",
+                                   allowlist="127.0.0.1:8000")
+    assert await wp.check_url_allowed("http://8.8.8.8/x",
+                                      allowlist="not-an-ip") is None
+
+
+class _Resp200:
+    status_code = 200
+    text = ""
+
+
+class _OKClient:
+    """deliver_one 注入替身:记录 POST,恒 200(注入即用,无需上下文协议)。"""
+    def __init__(self):
+        self.calls = []
+
+    async def post(self, url, **kw):
+        self.calls.append((url, kw))
+        return _Resp200()
+
+
+async def test_deliver_one_survives_bad_allowlist(db_session, monkeypatch):
+    """毒环回归:坏 allowlist 下 deliver_one 照常投公网端点,不被打断。
+
+    WEBHOOK_SSRF_ENFORCE 维持默认 true(检查点在):证明坏条目不再以
+    AddressValueError 逃出(修复前正是它穿透 except SsrfBlockedError)。
+    """
+    from app.core.config import settings as cfg
+    from app.services.outbound import deliver_one
+
+    monkeypatch.setattr(cfg, "WEBHOOK_SSRF_ALLOWLIST", "127.0.0.1:8000")
+    ep = WebhookEndpoint(name=f"m19{uuid.uuid4().hex[:12]}",
+                         url="http://8.8.8.8/cb", secret="wh_s3cret",
+                         events=[], enabled=True, created_by=1)
+    db_session.add(ep)
+    await db_session.commit()
+    d = WebhookDelivery(endpoint_id=ep.id, event_type="test",
+                        event_id="e" * 32, payload={"event_id": "e" * 32},
+                        status="pending", attempts=0)
+    db_session.add(d)
+    await db_session.commit()
+    c = _OKClient()
+    await deliver_one(db_session, d, client=c)  # 修复前此处抛 AddressValueError
+    await db_session.refresh(d)
+    assert d.status == "succeeded" and d.attempts == 1
+    assert len(c.calls) == 1
+
+
+async def test_ssrf_ipv6_with_port_allowed_public():
+    # 带端口 IPv6 字面量:bracket 解析正确即直判放行(2001:db8:: 在 py3.12
+    # ipaddress 属 is_private 文档段,故用真公网地址)
+    await wp.check_url_allowed("http://[2606:4700::1111]:8000/x")
+
+
+async def test_ssrf_ipv6_loopback_blocked():
+    with pytest.raises(SsrfBlockedError):
+        await wp.check_url_allowed("http://[::1]/x", allowlist="")
+
+
+async def test_ssrf_settings_default_path(monkeypatch):
+    """不传 allowlist 走 settings 默认(空=全拒私网;127/8=放行回环)。"""
+    from app.core.config import settings as cfg
+
+    monkeypatch.setattr(cfg, "WEBHOOK_SSRF_ALLOWLIST", "")
+    with pytest.raises(SsrfBlockedError):
+        await wp.check_url_allowed("http://10.0.0.9/x")
+    monkeypatch.setattr(cfg, "WEBHOOK_SSRF_ALLOWLIST", "127.0.0.0/8")
+    await wp.check_url_allowed("http://127.0.0.1/x")
+
+
+@pytest.mark.parametrize("host", ["10.0.0.9", "10.0.0.1", "192.168.0.9",
+                                  "172.20.1.5"])
+async def test_ssrf_wide_private_ranges_blocked_without_allowlist(host):
+    # 显式空 allowlist(dev .env 常设 127.0.0.1,不显式置空会走查环境值)
+    with pytest.raises(SsrfBlockedError):
+        await wp.check_url_allowed(f"http://{host}/x", allowlist="")

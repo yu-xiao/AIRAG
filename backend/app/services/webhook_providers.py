@@ -15,6 +15,8 @@ import json
 import time
 from urllib.parse import quote, urlparse
 
+from loguru import logger
+
 PROVIDERS = ("generic", "wecom", "dingtalk", "feishu")
 MAX_CONTENT_BYTES = 3800  # 企微 markdown 上限 4096 字节,留截断标记余量
 
@@ -126,12 +128,10 @@ async def _resolve_host(host: str) -> list[str]:
 
 
 # ---- 分类与 SSRF(Task 3)----
-PLATFORM_TRANSIENT: dict[str, frozenset[int]] = {
-    # 限频/系统繁忙类:走退避重试(官方错误码表精选,docs/webhooks.md 照录)
-    "wecom": frozenset({45009}),          # api freq limit
-    "dingtalk": frozenset({-1, 90001}),   # 系统繁忙 / 发送过快
-    "feishu": frozenset({9499}),          # 频控(100 次/分钟、5 次/秒)
-}
+# M19:原 PLATFORM_TRANSIENT 表已删(死表:零代码读取,分类实为「非永久即
+# retry」)。瞬态限频/系统繁忙码(如 wecom 45009、dingtalk -1/90001、feishu
+# 9499,官方错误码表精选见 docs/webhooks.md)与未知非零码一律 retry,保守
+# (at-least-once,误判可重投救);仅 PLATFORM_PERMANENT 命中才 dead。
 PLATFORM_PERMANENT: dict[str, frozenset[int]] = {
     "wecom": frozenset({93000}),          # URL 不合法/机器人被移除
     "dingtalk": frozenset({310000}),      # 安全设置校验未通过(keywords/sign/ip)
@@ -182,12 +182,18 @@ def _blocked_ip(addr) -> bool:
             or addr.is_multicast or addr.is_reserved or addr.is_unspecified)
 
 
-def _allowlist_networks(allowlist: str) -> list:
+def _allowlist_networks(raw: str | None) -> list:
     nets = []
-    for part in (allowlist or "").split(","):
+    for part in (raw or "").split(","):
         part = part.strip()
-        if part:
+        if not part:
+            continue
+        try:
             nets.append(ipaddress.ip_network(part, strict=False))
+        except ValueError:
+            # 白名单是放行豁免:坏条目跳过只会更严(拒多放少),
+            # 绝不让解析异常逃出去打断投递循环(M19 毒环修复)
+            logger.warning(f"WEBHOOK_SSRF_ALLOWLIST 坏条目已跳过: {part!r}")
     return nets
 
 
