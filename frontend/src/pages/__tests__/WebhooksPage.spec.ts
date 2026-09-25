@@ -1,6 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import ElementPlus, { ElSwitch } from 'element-plus'
+import ElementPlus, { ElSwitch, ElTooltip } from 'element-plus'
 import WebhooksPage from '@/pages/WebhooksPage.vue'
 import { adminApi, type WebhookDeliveryResponse, type WebhookEndpoint } from '@/api/admin'
 import { kbApi } from '@/api/kb'
@@ -328,5 +328,52 @@ describe('WebhooksPage', () => {
     expect(clip.writeText).toHaveBeenCalled()
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('剪贴板不可用'))
     vi.unstubAllGlobals()
+  })
+
+  // ---- M19 T6 ----
+
+  it('范围列 tooltip 显示消歧后的 KB 名;全库行无 tooltip', async () => {
+    vi.mocked(kbApi.list).mockResolvedValue([
+      { id: 3, name: 'KB甲' }, { id: 9, name: 'KB乙' }] as never)
+    vi.mocked(adminApi.listWebhooks).mockResolvedValue([
+      { ...eps[0]!, kb_ids: [3, 9] },
+      eps[1]!, // kb_ids=null → 「全部」无 tooltip
+    ] as never)
+    const w = mountPage()
+    await flushPromises()
+    const rows = w.findAll('.ep-table .el-table__row')
+    expect(rows.find((r) => r.text().includes('面板端点'))!.text())
+      .toContain('2 库')
+    expect(rows.find((r) => r.text().includes('备份端点'))!.text())
+      .toContain('全部')
+    // 统计列也有 tooltip:按内容含 KB 名筛出范围列那个
+    const tip = w.findAllComponents(ElTooltip)
+      .find((t) => String(t.props('content') ?? '').includes('KB甲'))
+    expect(tip).toBeTruthy()
+    expect(tip!.props('content')).toBe('KB甲\nKB乙')
+  })
+
+  it('wecom 编辑无轮换开关;secret 列显「无需密钥」', async () => {
+    const w = mountPage()
+    await flushPromises()
+    const rows = w.findAll('.ep-table .el-table__row')
+    expect(rows.find((r) => r.text().includes('备份端点'))!.text())
+      .toContain('无需密钥') // wecom 行灰字占位
+    expect(rows.find((r) => r.text().includes('面板端点'))!.text())
+      .toContain('wh_****ab12') // 非 wecom 行仍 masked
+    const editBtns = w.findAll('button')
+      .filter((b) => b.text().trim() === '编辑')
+    await editBtns[1]!.trigger('click') // 第二行 = wecom(eps[1])
+    await flushPromises()
+    expect(w.text()).toContain('编辑端点')
+    expect(w.text()).not.toContain('轮换密钥') // generic-only
+    // 对照:generic 端点编辑仍显示轮换开关
+    await w.findAll('button')
+      .filter((b) => b.text().trim() === '取消')[0]!.trigger('click')
+    await flushPromises()
+    await w.findAll('button')
+      .filter((b) => b.text().trim() === '编辑')[0]!.trigger('click')
+    await flushPromises()
+    expect(w.text()).toContain('轮换密钥')
   })
 })

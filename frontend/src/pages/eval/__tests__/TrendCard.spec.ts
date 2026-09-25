@@ -95,4 +95,20 @@ describe('TrendCard', () => {
     expect(w.find('.trend-canvas').exists()).toBe(true)
     expect(initMock).toHaveBeenCalledTimes(1)
   })
+
+  it('unmeasured 空态:有运行但所选指标均未测量', async () => {
+    // completed + summary 缺所选指标(retrieval 默认 hit/mrr/keyword_recall)
+    vi.mocked(evalApi.listRuns).mockResolvedValue({
+      total: 1,
+      items: [{ ...runWithSummary, summary: { item_count: 2 } } as never],
+    })
+    const w = mount(TrendCard, {
+      props: { kbId: 3 }, global: { plugins: [ElementPlus] },
+    })
+    await w.find('.trend-head').trigger('click')
+    await flushPromises()
+    expect(w.text()).toContain('均未测量')
+    expect(w.find('.trend-canvas').exists()).toBe(false)
+    expect(initMock).not.toHaveBeenCalled()
+  })
 })

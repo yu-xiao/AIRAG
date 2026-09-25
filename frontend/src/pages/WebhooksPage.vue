@@ -10,6 +10,7 @@ import {
   type WebhookStats,
 } from '@/api/admin'
 import { kbApi } from '@/api/kb'
+import { disambiguateKbNames } from '@/utils/kbLabel'
 
 const tab = ref<'endpoints' | 'deliveries'>('endpoints')
 
@@ -71,6 +72,12 @@ function statsTooltip(s: WebhookStats): string {
   return `成功 ${s.succeeded} · 重试 ${s.retrying} · 待投 ${s.pending} · 死信 ${s.dead} · 最近 ${
     s.last_activity_at ? fmtTime(s.last_activity_at) : '—'
   }`
+}
+
+/** M19 T6:范围列 tooltip——KB 名经重名消歧后的 \n 列表 */
+function scopeTooltip(kbIds: number[] | null): string {
+  const labels = disambiguateKbNames(kbOptions.value)
+  return (kbIds ?? []).map((id) => labels.get(id) ?? `#${id}`).join('\n')
 }
 
 // ---- 端点管理 ----
@@ -378,7 +385,17 @@ onMounted(() => {
           </el-table-column>
           <el-table-column label="范围" width="80" align="center">
             <template #default="{ row }">
-              {{ row.kb_ids?.length ? row.kb_ids.length + ' 库' : '全部' }}
+              <!-- 指定范围时 tooltip 给出 KB 名单(消歧后);空 = 全部,无 tooltip -->
+              <el-tooltip
+                v-if="row.kb_ids?.length"
+                effect="dark"
+                placement="top"
+                popper-class="scope-tip"
+                :content="scopeTooltip(row.kb_ids)"
+              >
+                <span>{{ row.kb_ids.length }} 库</span>
+              </el-tooltip>
+              <span v-else>全部</span>
             </template>
           </el-table-column>
           <el-table-column label="状态" width="80" align="center">
@@ -391,7 +408,9 @@ onMounted(() => {
           </el-table-column>
           <el-table-column label="secret" min-width="120">
             <template #default="{ row }">
-              <span class="mono">{{ row.secret_masked }}</span>
+              <!-- wecom 平台无密钥概念:灰字占位,避免 masked 误导 -->
+              <span v-if="row.provider === 'wecom'" class="no-secret">无需密钥</span>
+              <span v-else class="mono">{{ row.secret_masked }}</span>
             </template>
           </el-table-column>
           <el-table-column label="统计" width="70" align="center">
@@ -575,7 +594,8 @@ onMounted(() => {
             placeholder="平台机器人加签密钥,未开启加签可留空"
           />
         </el-form-item>
-        <el-form-item v-if="editing" label="轮换密钥">
+        <!-- 轮换仅 generic 有意义:wecom 无密钥,钉钉/飞书密钥由平台管理 -->
+        <el-form-item v-if="editing && form.provider === 'generic'" label="轮换密钥">
           <el-switch v-model="form.rotate" />
           <div class="form-help">开启后保存时生成新密钥,旧密钥立即失效</div>
         </el-form-item>
@@ -632,6 +652,10 @@ onMounted(() => {
   font-family: var(--app-font-mono);
   font-size: 13px;
 }
+.no-secret {
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+}
 .evt-tag {
   margin-right: 4px;
 }
@@ -671,5 +695,12 @@ onMounted(() => {
   font-size: 13px;
   word-break: break-all;
   user-select: all;
+}
+</style>
+
+<style>
+/* tooltip popper 挂 body,scoped 够不着:KB 名单按 \n 换行 */
+.scope-tip {
+  white-space: pre-line;
 }
 </style>

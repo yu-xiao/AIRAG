@@ -116,6 +116,28 @@ export const evalApi = {
     await http.delete(`/eval/questions/${id}`)
   },
 
+  /** M19 T5/T6:导出题集(JSON 附件,直接触发浏览器下载) */
+  async exportQuestions(kbId: number): Promise<Blob> {
+    const resp = await http.get<Blob>('/eval/questions/export', {
+      params: { kb_id: kbId },
+      responseType: 'blob',
+    })
+    return resp.data
+  },
+
+  /** M19 T5/T6:批量导入(部分成功);非 dict 数组项为整体 422,
+   *  错误详情走既有 response.data.detail 兜底 */
+  async bulkImport(
+    kbId: number,
+    questions: QuestionInput[],
+  ): Promise<{ created: number; errors: { index: number; detail: string }[] }> {
+    const { data } = await http.post('/eval/questions/bulk', {
+      kb_id: kbId,
+      questions,
+    })
+    return data
+  },
+
   async myKbs(): Promise<MyKb[]> {
     const { data } = await http.get('/eval/my-kbs')
     return data

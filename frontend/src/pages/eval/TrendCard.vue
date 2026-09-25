@@ -20,7 +20,8 @@ const props = defineProps<{ kbId: number | undefined }>()
 const { isDark } = useTheme()
 const el = ref<HTMLDivElement>()
 const expanded = ref(false)
-const empty = ref(false)
+// M19 T6:空态三态——'' 有数据 / 'no-runs' 无完成运行 / 'unmeasured' 有运行但所选指标全 null
+const emptyKind = ref<'' | 'no-runs' | 'unmeasured'>('')
 const rootEl = ref<HTMLDivElement>()
 const mode = ref<'retrieval' | 'generation'>('retrieval')
 const metricKeys = ref<string[]>(
@@ -42,12 +43,15 @@ async function render() {
     kb_id: props.kbId, mode: mode.value, page: 1, page_size: 100,
   })
   const { times, series } = buildTrendSeries(resp.items, metricKeys.value)
-  empty.value = times.length === 0
-  if (empty.value) {
+  const allUnmeasured = series.length > 0
+    && series.every((s) => s.data.every((v) => v == null))
+  emptyKind.value = times.length === 0
+    ? 'no-runs' : allUnmeasured ? 'unmeasured' : ''
+  if (emptyKind.value) {
     if (chart) { chart.dispose(); chart = null }
     return
   }
-  await nextTick()  // empty=false 后画布随 v-if 挂载,el.value 就绪
+  await nextTick()  // 空态解除后画布随 v-if 挂载,el.value 就绪
   if (!el.value) return
   chart ??= init(el.value)
   chart.setOption({
@@ -111,8 +115,11 @@ onBeforeUnmount(() => {
           </el-checkbox>
         </el-checkbox-group>
       </div>
-      <!-- 三态互斥:有数据画布 / 选库无完成运行 / 未选库 -->
-      <div v-if="kbId && !empty" ref="el" class="trend-canvas" />
+      <!-- 四态互斥:有数据画布 / 有运行但指标未测量 / 选库无完成运行 / 未选库 -->
+      <div v-if="kbId && !emptyKind" ref="el" class="trend-canvas" />
+      <el-empty
+        v-else-if="kbId && emptyKind === 'unmeasured'"
+        description="有运行,但所选指标均未测量" :image-size="48" />
       <el-empty v-else-if="kbId" description="暂无已完成的运行" :image-size="48" />
       <el-empty v-else description="先选择知识库" :image-size="48" />
     </template>

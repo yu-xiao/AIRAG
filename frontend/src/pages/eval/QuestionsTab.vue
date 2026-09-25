@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
-import { evalApi, type EvalQuestion, type MyKb } from '@/api/eval'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import {
+  evalApi,
+  type EvalQuestion,
+  type MyKb,
+  type QuestionInput,
+} from '@/api/eval'
 
 const kbs = ref<MyKb[]>([])
 const kbId = ref<number>(0)
@@ -20,6 +25,7 @@ const kwInput = ref('')
 const docInput = ref('')
 const deleteTarget = ref<EvalQuestion | null>(null)
 const deleteVisible = ref(false)
+const fileInput = ref<HTMLInputElement>()
 
 const currentKb = () => kbs.value.find((k) => k.kb_id === kbId.value)
 
@@ -120,6 +126,79 @@ async function confirmDelete() {
   }
 }
 
+// ---- M19 T6:导入 / 导出 ----
+
+/** 导出题集:blob → objectURL → a[download] 触发下载,用毕 revoke */
+async function doExport() {
+  if (!questions.value.length) return
+  try {
+    const blob = await evalApi.exportQuestions(kbId.value)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `eval-questions-kb${kbId.value}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch {
+    ElMessage.error('导出失败')
+  }
+}
+
+function pickImport() {
+  fileInput.value?.click()
+}
+
+/** 导入:兼容导出格式({questions:[...]})与裸数组;非 dict / 空题干条
+ *  先行剔除(后端对非 dict 项整体 422),确认后 bulkImport 部分成功 */
+async function onImportChange(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = '' // 允许再次选择同一文件
+  if (!file) return
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(await file.text())
+  } catch {
+    ElMessage.error('文件解析失败')
+    return
+  }
+  const arr = Array.isArray(parsed)
+    ? parsed
+    : Array.isArray((parsed as { questions?: unknown })?.questions)
+      ? (parsed as { questions: unknown[] }).questions
+      : []
+  const items = arr.filter(
+    (q): q is QuestionInput =>
+      !!q && typeof q === 'object' && !Array.isArray(q)
+      && typeof (q as QuestionInput).question === 'string'
+      && (q as QuestionInput).question.trim() !== '',
+  )
+  if (!items.length) {
+    ElMessage.error('文件中没有可导入的题目')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(`将导入 ${items.length} 题`, '导入题集')
+  } catch {
+    return // 用户取消
+  }
+  try {
+    const r = await evalApi.bulkImport(kbId.value, items)
+    ElMessage.success(`${r.created} 题导入成功`)
+    if (r.errors.length) {
+      // 最小可用:提示条只给首条,全量错误进 console
+      ElMessage.warning(`${r.errors.length} 条失败:首条 ${r.errors[0]!.detail}`)
+      console.warn('[题集导入] 失败条目:', r.errors)
+    }
+    await loadKbs() // question_count 变化
+    load()
+  } catch (e) {
+    const detail = (e as { response?: { data?: { detail?: string } } })
+      ?.response?.data?.detail
+    ElMessage.error(detail ?? '导入失败')
+  }
+}
+
 onMounted(async () => {
   await loadKbs()
   load()
@@ -134,6 +213,17 @@ onMounted(async () => {
       </el-select>
       <span v-if="currentKb()" class="count-hint">共 {{ currentKb()!.question_count }} 题</span>
       <el-button type="primary" class="add-btn" :disabled="!kbId" @click="openCreate">添加题目</el-button>
+      <el-button class="export-btn" :disabled="!questions.length" @click="doExport">导出</el-button>
+      <el-button class="import-btn" :disabled="!kbId" @click="pickImport">导入</el-button>
+      <!-- hidden 文件选择器:导入按钮代理点击,change 后清 value 便于重复导入 -->
+      <input
+        ref="fileInput"
+        type="file"
+        accept=".json"
+        class="import-file"
+        hidden
+        @change="onImportChange"
+      />
     </div>
     <el-table v-loading="loading" :data="questions" class="q-table">
       <template #empty><el-empty description="暂无题目——点「添加题目」开始建题集" /></template>
