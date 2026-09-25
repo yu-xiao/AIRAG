@@ -1,12 +1,18 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import ElementPlus, { ElSelect } from 'element-plus'
+import ElementPlus, { ElMessageBox, ElSelect } from 'element-plus'
 import EvalRunsTab from '@/pages/eval/EvalRunsTab.vue'
 import { evalApi, type EvalRun } from '@/api/eval'
 import { kbApi } from '@/api/kb'
 
 vi.mock('@/api/eval', () => ({
-  evalApi: { listRuns: vi.fn(), getRun: vi.fn(), myKbs: vi.fn(), triggerRun: vi.fn() },
+  evalApi: {
+    listRuns: vi.fn(),
+    getRun: vi.fn(),
+    myKbs: vi.fn(),
+    triggerRun: vi.fn(),
+    cancelRun: vi.fn(),
+  },
 }))
 vi.mock('@/api/kb', () => ({ kbApi: { list: vi.fn() } }))
 // 页内 TrendCard 于 onMounted 实例化 ResizeObserver(jsdom 未实现),补空桩
@@ -56,6 +62,7 @@ describe('EvalPage', () => {
     vi.mocked(evalApi.getRun).mockReset()
     vi.mocked(evalApi.myKbs).mockReset()
     vi.mocked(evalApi.triggerRun).mockReset()
+    vi.mocked(evalApi.cancelRun).mockReset()
     vi.mocked(kbApi.list).mockReset()
     vi.mocked(evalApi.listRuns).mockResolvedValue({ total: runs.length, items: runs })
     vi.mocked(evalApi.myKbs).mockResolvedValue(
@@ -167,6 +174,42 @@ describe('EvalPage', () => {
     await vi.advanceTimersByTimeAsync(3100)
     expect(vi.mocked(evalApi.listRuns).mock.calls.length).toBe(3) // 已停
     vi.useRealTimers()
+  })
+
+  it('renders cancelling tag and keeps polling until terminal', async () => {
+    vi.useFakeTimers()
+    vi.mocked(evalApi.listRuns).mockResolvedValue(
+      { total: 1, items: [{ ...runs[0]!, status: 'cancelling', done_count: 1 } as never] })
+    const w = mountPage()
+    await flushPromises()
+    expect(w.text()).toContain('取消中')
+    // cancelling 仍轮询
+    await vi.advanceTimersByTimeAsync(3100)
+    expect(vi.mocked(evalApi.listRuns).mock.calls.length).toBe(2)
+    // 终态 cancelled 后停
+    vi.mocked(evalApi.listRuns).mockResolvedValue(
+      { total: 1, items: [{ ...runs[0]!, status: 'cancelled' } as never] })
+    await vi.advanceTimersByTimeAsync(3100)
+    expect(w.text()).toContain('已取消')
+    await vi.advanceTimersByTimeAsync(3100)
+    expect(vi.mocked(evalApi.listRuns).mock.calls.length).toBe(3)
+    vi.useRealTimers()
+  })
+
+  it('cancel button on running row calls cancelRun with confirm', async () => {
+    // confirm 无既有 mock 先例:spy element-plus 导出的 ElMessageBox 对象
+    // (组件与 spec 同模块实例,spy 对组件可见),免去整包 mock 的开销
+    vi.spyOn(ElMessageBox, 'confirm').mockResolvedValue({ action: 'confirm' } as never)
+    vi.mocked(evalApi.listRuns).mockResolvedValue(
+      { total: 1, items: [runRunning] })
+    vi.mocked(evalApi.cancelRun).mockResolvedValue(
+      { id: 7, status: 'cancelling' })
+    const w = mountPage()
+    await flushPromises()
+    await w.find('button.cancel-btn').trigger('click')
+    await flushPromises()
+    expect(evalApi.cancelRun).toHaveBeenCalledWith(7)
+    expect(ElMessageBox.confirm).toHaveBeenCalled()
   })
 
   it('unmount with in-flight poll does not resurrect orphan interval', async () => {

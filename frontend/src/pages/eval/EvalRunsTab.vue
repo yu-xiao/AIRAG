@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { ElMessage, type TableInstance } from 'element-plus'
+import { ElMessage, ElMessageBox, type TableInstance } from 'element-plus'
 import { evalApi, type EvalItem, type EvalRun, type EvalRunDetail, type MyKb } from '@/api/eval'
 import { kbApi, type KbItem } from '@/api/kb'
 import TrendCard from '@/pages/eval/TrendCard.vue'
@@ -185,13 +185,32 @@ async function submitRun() {
   }
 }
 
+// ---- 取消运行(M19 T3 后端 cancelling/cancelled 状态) ----
+async function onCancelRun(row: EvalRun) {
+  try {
+    await ElMessageBox.confirm('确定取消该评估运行?', '取消评估', { type: 'warning' })
+  } catch {
+    return // 用户放弃取消
+  }
+  try {
+    await evalApi.cancelRun(row.id)
+    ElMessage.success('已请求取消')
+    load(true)
+  } catch (e) {
+    const detail = (e as { response?: { data?: { detail?: string } } })
+      ?.response?.data?.detail
+    ElMessage.error(detail ?? '取消评估失败')
+  }
+}
+
 // ---- running 3s 轮询(DocsPage 模式):hasRunning 开,全终态/卸载即停 ----
 // disposed:卸载后在途 load 的 finally→syncPolling 不再重建孤儿 interval
 let timer: number | undefined
 let disposed = false
 
+// cancelling 也属非终态:轮询持续到其落 cancelled/failed/completed
 function hasRunning() {
-  return runs.value.some((r) => r.status === 'running')
+  return runs.value.some((r) => ['running', 'cancelling'].includes(r.status))
 }
 
 function syncPolling() {
@@ -337,7 +356,9 @@ onMounted(() => {
           <el-tag v-if="row.status === 'running'" type="warning" size="small">
             运行中 {{ row.done_count }}/{{ row.item_count }}
           </el-tag>
+          <el-tag v-else-if="row.status === 'cancelling'" type="warning" size="small">取消中</el-tag>
           <el-tag v-else-if="row.status === 'failed'" type="danger" size="small">失败</el-tag>
+          <el-tag v-else-if="row.status === 'cancelled'" type="info" size="small">已取消</el-tag>
           <el-tag v-else type="success" size="small">完成</el-tag>
         </template>
       </el-table-column>
@@ -352,6 +373,19 @@ onMounted(() => {
       </el-table-column>
       <el-table-column label="时间" width="170">
         <template #default="{ row }">{{ fmtTime(row.created_at) }}</template>
+      </el-table-column>
+      <!-- .stop:按钮点击不冒泡成行点击(误开明细抽屉) -->
+      <el-table-column label="操作" width="90">
+        <template #default="{ row }">
+          <el-button
+            v-if="row.status === 'running'"
+            type="warning"
+            link
+            size="small"
+            class="cancel-btn"
+            @click.stop="onCancelRun(row)"
+          >取消</el-button>
+        </template>
       </el-table-column>
     </el-table>
 

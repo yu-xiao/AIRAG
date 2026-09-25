@@ -8,7 +8,7 @@ export interface EvalRun {
   mode: 'retrieval' | 'generation'
   item_count: number
   summary: Record<string, number | null> | null
-  status: 'running' | 'completed' | 'failed'
+  status: 'running' | 'cancelling' | 'completed' | 'failed' | 'cancelled'
   created_by: string | null
   done_count: number
   created_at: string
@@ -123,6 +123,12 @@ export const evalApi = {
 
   async triggerRun(payload: TriggerInput): Promise<{ run_id: number }> {
     const { data } = await http.post('/eval/runs', payload)
+    return data
+  },
+
+  /** 请求取消运行中的评估(M19 T3:POST /eval/runs/{id}/cancel) */
+  async cancelRun(id: number): Promise<{ id: number; status: string }> {
+    const { data } = await http.post(`/eval/runs/${id}/cancel`)
     return data
   },
 }
