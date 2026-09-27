@@ -46,6 +46,8 @@ export interface WebhookEndpoint {
   enabled: boolean
   description: string | null
   secret_masked: string
+  /** M20:平台通道加签密钥是否已设(M19 后端已有,前端此前未用) */
+  im_secret_set: boolean
   created_at: string
   /** M18:平台适配(generic 自签 HMAC;wecom 无密钥;钉钉/飞书平台加签) */
   provider: WebhookProvider

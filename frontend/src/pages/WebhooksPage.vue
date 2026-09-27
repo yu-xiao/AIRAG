@@ -413,6 +413,12 @@ onMounted(() => {
             <template #default="{ row }">
               <!-- wecom 平台无密钥概念:灰字占位,避免 masked 误导 -->
               <span v-if="row.provider === 'wecom'" class="no-secret">无需密钥</span>
+              <!-- M20:平台通道真实签名密钥在 im_secret 位,secret 列是占位——
+                   用 im_secret_set 显状态,避免 masked 占位误导 -->
+              <span v-else-if="row.provider !== 'generic'"
+                    :class="{ 'no-secret': !row.im_secret_set }">
+                {{ row.im_secret_set ? '已设置' : '未设置' }}
+              </span>
               <span v-else class="mono">{{ row.secret_masked }}</span>
             </template>
           </el-table-column>

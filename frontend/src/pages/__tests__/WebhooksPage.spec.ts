@@ -28,6 +28,7 @@ const eps: WebhookEndpoint[] = [
     secret: 'wh_plain_SECRET_XYZ',
     // M18:平台 / KB 订阅范围 / 投递统计(list 聚合返回)
     provider: 'generic',
+    im_secret_set: true, // M20:generic 行不消费此字段,仅为满足接口
     kb_ids: [3],
     stats: {
       total: 42, succeeded: 40, pending: 0, retrying: 1, dead: 1,
@@ -39,8 +40,26 @@ const eps: WebhookEndpoint[] = [
     events: null, enabled: false,
     description: null, secret_masked: 'wh_****cd34',
     created_at: '2026-09-22T11:00:00',
-    provider: 'wecom', kb_ids: null, stats: null,
+    provider: 'wecom', im_secret_set: false, kb_ids: null, stats: null,
   },
+  {
+    // M20:钉钉平台通道两态——secret 列用 im_secret_set 显状态(此处未设置)
+    id: 3, name: '钉钉告警', url: 'https://oapi.dingtalk.com/robot/send?access_token=a1',
+    events: null, enabled: true,
+    description: null, secret_masked: 'wh_****ef56',
+    created_at: '2026-09-23T09:00:00',
+    provider: 'dingtalk', kb_ids: null, stats: null,
+    im_secret_set: false,
+  } as WebhookEndpoint,
+  {
+    // M20:钉钉平台通道(已设置加签密钥)
+    id: 4, name: '钉钉值班', url: 'https://oapi.dingtalk.com/robot/send?access_token=b2',
+    events: null, enabled: true,
+    description: null, secret_masked: 'wh_****ef78',
+    created_at: '2026-09-23T10:00:00',
+    provider: 'dingtalk', kb_ids: null, stats: null,
+    im_secret_set: true,
+  } as WebhookEndpoint,
 ]
 
 const deliveries: WebhookDeliveryResponse = {
@@ -419,5 +438,27 @@ describe('WebhooksPage', () => {
       .map((li) => li.textContent?.trim() ?? '')
     expect(labels).toHaveLength(6)
     expect(labels).toContain('评估已取消')
+  })
+
+  // ---- M20:平台通道 secret 列显 im_secret_set 状态 ----
+
+  it('平台通道密钥列:im_secret_set 显「未设置/已设置」', async () => {
+    const w = mountPage()
+    await flushPromises()
+    const rows = w.findAll('.ep-table .el-table__row')
+    // 未设置:文本 + 灰字类 no-secret
+    const unset = rows.find((r) => r.text().includes('钉钉告警'))!
+    expect(unset.text()).toContain('未设置')
+    // 空结果直接 expect 会触发 VTU 空 wrapper 代理异常,须经 exists() 断言
+    expect(unset.find('.no-secret').exists()).toBe(true)
+    // 已设置:文本在、且不落灰字类
+    const set = rows.find((r) => r.text().includes('钉钉值班'))!
+    expect(set.text()).toContain('已设置')
+    expect(set.find('.no-secret').exists()).toBe(false)
+    // 对照:三分支其余两支不变——generic 仍 masked、wecom 仍「无需密钥」
+    expect(rows.find((r) => r.text().includes('面板端点'))!.text())
+      .toContain('wh_****ab12')
+    expect(rows.find((r) => r.text().includes('备份端点'))!.text())
+      .toContain('无需密钥')
   })
 })
