@@ -209,12 +209,16 @@ async def check_url_allowed(url: str, allowlist: str | None = None) -> None:
     违规(DNS 挂了不该建端点/投递)。白名单命中即放行(本地址跳过后续判定)。
     """
     from app.core.config import settings
-    parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+    try:
+        parsed = urlparse(url)
+        hostname = parsed.hostname  # 括号不配对的 IPv6 在 urlparse/此处抛 ValueError
+    except ValueError as e:
+        raise SsrfBlockedError(f"url malformed: {url[:80]}") from e
+    if parsed.scheme not in ("http", "https") or not hostname:
         raise SsrfBlockedError(f"scheme/host invalid: {url[:80]}")
     nets = _allowlist_networks(
         settings.WEBHOOK_SSRF_ALLOWLIST if allowlist is None else allowlist)
-    host = parsed.hostname
+    host = hostname
     try:
         literal = ipaddress.ip_address(host)
     except ValueError:

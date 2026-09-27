@@ -372,3 +372,19 @@ async def test_ssrf_wide_private_ranges_blocked_without_allowlist(host):
     # 显式空 allowlist(dev .env 常设 127.0.0.1,不显式置空会走查环境值)
     with pytest.raises(SsrfBlockedError):
         await wp.check_url_allowed(f"http://{host}/x", allowlist="")
+
+
+# ---- M20 T4:括号不配对的 IPv6——urlparse 裸 ValueError 必须包成 SsrfBlockedError ----
+async def test_ssrf_malformed_bracket_url_blocked():
+    """M20:括号不配对的 IPv6 字面量——urlparse 抛 ValueError 必须包成
+    SsrfBlockedError,不得逃逸打断建端点/投递调用方。"""
+    with pytest.raises(wp.SsrfBlockedError):
+        await wp.check_url_allowed("http://[::1/x")
+    with pytest.raises(wp.SsrfBlockedError):
+        await wp.check_url_allowed("http://[/x")
+
+
+async def test_ssrf_valid_bracket_v6_still_parsed():
+    # 合法公网 v6 带端口照常放行(2001:db8:: 在 py3.12 属 is_private 文档段,
+    # 故用真公网地址,同 test_ssrf_ipv6_with_port_allowed_public)
+    await wp.check_url_allowed("http://[2606:4700::1111]:8000/x")
