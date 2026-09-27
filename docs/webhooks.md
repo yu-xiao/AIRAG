@@ -4,7 +4,9 @@
 
 ## 事件与订阅
 
-- 五事件:`document.done` / `document.failed` / `eval.completed` / `eval.failed` / `chat.refused`
+- 六事件:`document.done` / `document.failed` / `eval.completed` / `eval.failed` / `eval.cancelled` / `chat.refused`
+  - `eval.cancelled`(M20):评估被取消;负载 `run{id, kb_id, mode, item_count, summary}`
+    同 `eval.completed` 形状,但 `item_count` 为取消前已完成的子集(非全量)
 - 订阅粒度:事件类型(多选,空=全部)× 知识库(多选,空=全部;`chat.refused` 按命中任一订阅库投递)
 - at-least-once:可能重复投递,**接收方必须按 `event_id` 幂等去重**
 

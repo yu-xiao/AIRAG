@@ -67,7 +67,7 @@ def describe_event(event_type: str, data: dict) -> str:
         if event_type == "document.failed":
             lines.append(f"错误: {str(d.get('error', ''))[:200]}")
         return "\n".join(lines)
-    if event_type in ("eval.completed", "eval.failed"):
+    if event_type in ("eval.completed", "eval.failed", "eval.cancelled"):
         run = d.get("run") or {}
         if event_type == "eval.completed":
             summary = run.get("summary") or {}
@@ -75,6 +75,11 @@ def describe_event(event_type: str, data: dict) -> str:
             return "\n".join(["**评估完成**",
                               f"知识库: #{run.get('kb_id')}  模式: {run.get('mode', '')}",
                               f"题数: {run.get('item_count', '')}  {key}".rstrip()])
+        if event_type == "eval.cancelled":
+            # M20:item_count 是取消前已完成的子集,诚实展示不冒充全量
+            return "\n".join(["**评估已取消**",
+                              f"知识库: #{run.get('kb_id')}  模式: {run.get('mode', '')}",
+                              f"已完成题数: {run.get('item_count', '')}(取消前的子集)"])
         return "\n".join(["**评估失败**",
                           f"知识库: #{run.get('kb_id')}  模式: {run.get('mode', '')}",
                           f"错误: {str(d.get('error', ''))[:200]}"])

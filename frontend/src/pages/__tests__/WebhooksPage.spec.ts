@@ -399,4 +399,25 @@ describe('WebhooksPage', () => {
       expect(w.text()).toContain('仅此一次')
     })
   })
+
+  // ---- M20:eval.cancelled 事件选项 ----
+
+  it('事件选项含「评估已取消」(eval.cancelled)', async () => {
+    const w = mountPage()
+    await flushPromises()
+    await findBtn(w, '新建端点').trigger('click')
+    await flushPromises()
+    // el-select 选项 dropdown 经 teleport 挂 document.body;投递记录筛选下拉是
+    // 超集(含「测试」),以含「评估失败」且不含「测试」锚定新建弹窗的事件订阅
+    // dropdown,经渲染文本断言(EVENT_OPTIONS 为 SFC 内常量)
+    const dropdown = Array.from(document.querySelectorAll('.el-select-dropdown'))
+      .find((d) => d.textContent?.includes('评估失败')
+        && !d.textContent?.includes('测试'))
+    expect(dropdown, '事件订阅下拉未渲染').toBeTruthy()
+    const labels = Array
+      .from(dropdown!.querySelectorAll('.el-select-dropdown__item'))
+      .map((li) => li.textContent?.trim() ?? '')
+    expect(labels).toHaveLength(6)
+    expect(labels).toContain('评估已取消')
+  })
 })

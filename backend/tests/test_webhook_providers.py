@@ -37,6 +37,17 @@ def test_describe_eval_completed_and_failed():
     assert "评估失败" in s
 
 
+def test_describe_event_eval_cancelled():
+    """M20:取消事件 IM 卡片文案——子集题数诚实展示。"""
+    from app.services.webhook_providers import describe_event
+
+    text = describe_event("eval.cancelled", {
+        "run": {"kb_id": 2, "mode": "generation", "item_count": 2,
+                "summary": {"item_count": 2}}})
+    assert "评估已取消" in text and "#2" in text
+    assert "generation" in text and "2" in text
+
+
 def test_describe_chat_refused_truncates_question():
     s = describe_event("chat.refused", ENV_REFUSED)
     assert "问答拒答" in s and "rest" in s and "[3, 5]" in s

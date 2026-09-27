@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.models import WebhookDelivery, WebhookEndpoint
 from app.services import webhook_providers as wp
@@ -439,3 +439,30 @@ async def test_emit_kb_missing_kb_field_hits_all(db_session):
                          {"document": {}})  # 无 kb_id
     await db_session.commit()
     assert n == 1
+
+
+# ---- M20:eval.cancelled 事件注册 ----
+def test_event_types_registered_eval_cancelled():
+    """M20:eval.cancelled 入册(admin API 订阅校验同源消费此表)。"""
+    from app.services.outbound import EVENT_TYPES
+    assert "eval.cancelled" in EVENT_TYPES
+
+
+async def test_emit_eval_cancelled_expands_with_kb_filter(db_session):
+    """M20:eval.cancelled 注册后订阅展开与 per-KB 过滤同 eval.completed 语义。"""
+    from app.services.outbound import _event_kb_ids, emit_event
+    assert _event_kb_ids("eval.cancelled", {"run": {"kb_id": 3}}) == {3}
+    await _mk_ep(db_session, events=["eval.cancelled"])   # 显式订阅命中
+    await _mk_ep(db_session, events=["eval.completed"])   # 不命中
+    ep_all = await _mk_ep(db_session, events=[])          # 空订阅命中
+    await db_session.execute(update(WebhookEndpoint)      # kb 限定 7:不命中 kb 1
+        .where(WebhookEndpoint.id == ep_all.id)
+        .values(kb_ids=[7]))
+    await db_session.commit()
+    n = await emit_event(db_session, "eval.cancelled",
+                         {"run": {"id": 1, "kb_id": 1, "mode": "retrieval"}})
+    await db_session.commit()
+    assert n == 1
+    rows = (await db_session.execute(
+        select(WebhookDelivery))).scalars().all()
+    assert [r.event_type for r in rows] == ["eval.cancelled"]

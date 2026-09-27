@@ -26,7 +26,7 @@ from app.services.webhook_providers import (  # noqa: F401 — sign_headers 兼�
 )
 
 EVENT_TYPES = ("document.done", "document.failed", "eval.completed",
-               "eval.failed", "chat.refused")
+               "eval.failed", "eval.cancelled", "chat.refused")
 # 第 n 次失败后的退避分钟数(末位封顶;彻底放弃由 WEBHOOK_MAX_ATTEMPTS 裁决)
 BACKOFF_MINUTES = (1, 5, 15, 60, 60)
 
@@ -54,7 +54,7 @@ def _event_kb_ids(event_type: str, data: dict) -> set[int] | None:
     kb = None
     if event_type in ("document.done", "document.failed"):
         kb = (d.get("document") or {}).get("kb_id")
-    elif event_type in ("eval.completed", "eval.failed"):
+    elif event_type in ("eval.completed", "eval.failed", "eval.cancelled"):
         kb = (d.get("run") or {}).get("kb_id")
     elif event_type == "chat.refused":
         ids = {int(k) for k in (d.get("kb_ids") or [])}

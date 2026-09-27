@@ -14,12 +14,13 @@ import { disambiguateKbNames } from '@/utils/kbLabel'
 
 const tab = ref<'endpoints' | 'deliveries'>('endpoints')
 
-// 五事件(后端 outbound.EVENT_TYPES);test 仅出现在投递记录(测试发送专用)
+// 六事件(后端 outbound.EVENT_TYPES);test 仅出现在投递记录(测试发送专用)
 const EVENT_OPTIONS = [
   { value: 'document.done', label: '文档解析完成' },
   { value: 'document.failed', label: '文档解析失败' },
   { value: 'eval.completed', label: '评估完成' },
   { value: 'eval.failed', label: '评估失败' },
+  { value: 'eval.cancelled', label: '评估已取消' },
   { value: 'chat.refused', label: '对话拒答' },
 ]
 const DELIVERY_EVENT_OPTIONS = [...EVENT_OPTIONS, { value: 'test', label: '测试' }]
@@ -571,7 +572,7 @@ onMounted(() => {
               :value="e.value"
             />
           </el-select>
-          <div class="form-help">不选择任何事件 = 订阅全部五类事件</div>
+          <div class="form-help">不选择任何事件 = 订阅全部六类事件</div>
         </el-form-item>
         <el-form-item label="知识库范围">
           <el-select
