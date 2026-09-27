@@ -159,10 +159,55 @@ def _fresh_chat_llm():
     return make_chat_llm.__wrapped__()
 
 
+async def _finalize_run(db: AsyncSession, run_id: int, kb_id: int,
+                        mode: str, results: list[dict],
+                        cancelled: bool) -> tuple[str | None, int]:
+    """M20 条件收口:终态只经条件 UPDATE 落库,消端点/任务丢更新竞态。
+
+    completed 只许写在仍是 running 的行上(端点在最后检查点后并发置
+    cancelling 时零行命中,fallback 按用户已赢收口 cancelled);cancelled
+    写在 cancelling 上。两跳全零行=行已被 sweep 等他人收口,不写不发
+    (返回 None)。事件按 final 分流,同事务 commit;返回 (final, n)
+    供调用方 nudge。"""
+    from sqlalchemy import update
+
+    from app.models import EvalRun
+
+    summary = summarize(results)
+    item_count = len(results)
+    final = "cancelled" if cancelled else "completed"
+    expect = "cancelling" if cancelled else "running"
+    res = await db.execute(
+        update(EvalRun)
+        .where(EvalRun.id == run_id, EvalRun.status == expect)
+        .values(status=final, summary=summary, item_count=item_count))
+    if res.rowcount == 0 and not cancelled:
+        # A1 竞态:最后检查点后端点已置 cancelling——用户已赢
+        res = await db.execute(
+            update(EvalRun)
+            .where(EvalRun.id == run_id, EvalRun.status == "cancelling")
+            .values(status="cancelled", summary=summary,
+                    item_count=item_count))
+        final = "cancelled" if res.rowcount else None
+    elif res.rowcount == 0:
+        final = None  # 行已不在 cancelling(他人收口),不写不发
+    data = {"run": {"id": run_id, "kb_id": kb_id, "mode": mode,
+                    "item_count": item_count, "summary": summary}}
+    if final == "completed":
+        n = await emit_event(db, "eval.completed", data)  # M17
+    elif final == "cancelled":
+        n = await emit_event(db, "eval.cancelled", data)  # M20
+    else:
+        n = 0
+    await db.commit()
+    return final, n
+
+
 async def run_eval_task(run_id: int, mode: str, rerank: bool,
                         top_k: int) -> None:
     """状态机:running→completed/failed/cancelled;逐题插 EvalItem+commit
-    (进度可见)。M19 T3:取消是协作式——端点置 cancelling,循环逐题 commit
+    (进度可见)。M20:收口经 `_finalize_run` 条件 UPDATE。M19 T3:取消是
+    协作式——端点置 cancelling,循环逐题 commit
     后 refresh 检查发现即 break,终态 cancelled(已完成子集照写
     summary/item_count,数据诚实)。
 
@@ -221,18 +266,9 @@ async def run_eval_task(run_id: int, mode: str, rerank: bool,
                         if run.status == "cancelling":
                             cancelled = True
                             break
-                run.summary = summarize(results)
-                run.item_count = len(results)
-                # M19 T3:取消与自然完成同一收口段,仅 status 不同;完成路径
-                # emit_event/commit 时序逐字不变;cancelled 时 summary/
-                # item_count 是已完成子集的诚实快照。
-                run.status = "cancelled" if cancelled else "completed"
-                # 取消是用户动作,不发评估完成事件;eval.cancelled 事件类型留 M20
-                n = 0 if cancelled else await emit_event(db, "eval.completed", {
-                    "run": {"id": run.id, "kb_id": run.kb_id, "mode": mode,
-                            "item_count": run.item_count,
-                            "summary": run.summary}})  # M17
-                await db.commit()
+                # M20:条件收口(竞态防线+事件分流);kb_id 是 M17 快照
+                final, n = await _finalize_run(db, run_id, run.kb_id,
+                                               mode, results, cancelled)
                 if n:
                     nudge()
             except Exception as e:

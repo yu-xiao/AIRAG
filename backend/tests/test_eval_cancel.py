@@ -152,11 +152,11 @@ async def test_run_task_cancel_at_later_question(client, auth_headers,
     assert calls["n"] == 2
 
 
-async def test_cancelled_run_emits_no_completed_event(
+async def test_cancelled_run_emits_cancelled_event(
         client, auth_headers, db_session, monkeypatch):
-    """取消收口不外发 eval.completed:全订阅端点(events=[] 照
-    test_webhook_events._subscribed_ep 模式)也零 WebhookDelivery 行,
-    nudge spy 未被调(emit 不发即 n=0,`if n:` 门自然关死)。"""
+    """M20:取消收口改发独立事件 eval.cancelled(仍不发 eval.completed)。
+    全订阅端点(events=[] 照 test_webhook_events._subscribed_ep 模式)恰收
+    一行,nudge 被踢(n>0,与 completed 同待遇)。"""
     import app.services.eval_runner as runner
     from app.services.eval_runner import run_eval_task
 
@@ -176,8 +176,81 @@ async def test_cancelled_run_emits_no_completed_event(
     assert run.status == "cancelled"  # 前置:确是取消路径(非 completed)
     deliveries = (await db_session.execute(
         select(WebhookDelivery))).scalars().all()
-    assert deliveries == []
-    assert nudged == []
+    # M20:取消改发独立事件——恰一行 eval.cancelled,绝无 eval.completed
+    assert [d.event_type for d in deliveries] == ["eval.cancelled"]
+    assert deliveries[0].payload["data"]["run"]["item_count"] == 1
+    assert nudged == [1]  # n>0,nudge 被踢(与 completed 同待遇)
+
+
+async def _mk_bare_run(db_session, status="running") -> int:
+    run = EvalRun(kb_id=1, mode="retrieval", summary=None,
+                  item_count=0, status=status, triggered_by=1)
+    db_session.add(run)
+    await db_session.commit()
+    return run.id
+
+
+async def test_finalize_completes_only_from_running(db_session):
+    from app.services.eval_runner import _finalize_run
+
+    run_id = await _mk_bare_run(db_session, "running")
+    final, n = await _finalize_run(db_session, run_id, 1, "retrieval",
+                                   [{"question": "q"}], False)
+    assert final == "completed"
+    db_session.expire_all()
+    run = await db_session.get(EvalRun, run_id)
+    assert run.status == "completed"
+    assert run.item_count == 1 and run.summary["item_count"] == 1
+
+
+async def test_finalize_raced_cancel_wins(db_session):
+    """A1 竞态:任务未察觉(cancelled=False)但行已被端点置 cancelling →
+    fallback 收口 cancelled,绝不覆盖成 completed。"""
+    from app.services.eval_runner import _finalize_run
+
+    run_id = await _mk_bare_run(db_session, "cancelling")
+    final, n = await _finalize_run(db_session, run_id, 1, "retrieval",
+                                   [{"question": "q"}], False)
+    assert final == "cancelled"
+    db_session.expire_all()
+    run = await db_session.get(EvalRun, run_id)
+    assert run.status == "cancelled"
+
+
+async def test_finalize_double_miss_no_write_no_event(db_session):
+    """两跳全零行(行已被 sweep 等收口)→ 不改写、零事件。"""
+    from app.services.eval_runner import _finalize_run
+
+    run_id = await _mk_bare_run(db_session, "failed")
+    db_session.add(WebhookEndpoint(
+        name=f"dm{time.time_ns()}", url="http://x/h", secret="wh_s",
+        events=[], created_by=1))
+    await db_session.commit()
+    final, n = await _finalize_run(db_session, run_id, 1, "retrieval",
+                                   [], False)
+    assert final is None and n == 0
+    db_session.expire_all()
+    run = await db_session.get(EvalRun, run_id)
+    assert run.status == "failed"  # 他人终态未被覆盖
+    rows = (await db_session.execute(
+        select(WebhookDelivery))).scalars().all()
+    assert rows == []
+
+
+async def test_finalize_cancelled_emits_cancelled_event(db_session):
+    from app.services.eval_runner import _finalize_run
+
+    run_id = await _mk_bare_run(db_session, "cancelling")
+    db_session.add(WebhookEndpoint(
+        name=f"fc{time.time_ns()}", url="http://x/h", secret="wh_s",
+        events=[], created_by=1))
+    await db_session.commit()
+    final, n = await _finalize_run(db_session, run_id, 1, "retrieval",
+                                   [{"question": "q"}], True)
+    assert final == "cancelled" and n == 1
+    rows = (await db_session.execute(
+        select(WebhookDelivery))).scalars().all()
+    assert [r.event_type for r in rows] == ["eval.cancelled"]
 
 
 async def test_sweep_collects_cancelling(client, auth_headers, db_session):
