@@ -154,3 +154,8 @@ async def _no_dns(monkeypatch):
         return ["93.184.216.34"]
 
     monkeypatch.setattr(_wp, "_resolve_host", _fake)
+    # M20:ENFORCE 钉死——dev .env 关断(WEBHOOK_SSRF_ENFORCE=false)时,
+    # 依赖检查点生效的用例(毒环回归等)前提会 silently 失效
+    from app.core.config import settings as _cfg
+
+    monkeypatch.setattr(_cfg, "WEBHOOK_SSRF_ENFORCE", True)

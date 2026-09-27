@@ -56,6 +56,9 @@ const runRunning = {
 
 const mountPage = () => mount(EvalRunsTab, { global: { plugins: [ElementPlus] } })
 
+// M20:confirm spy 句柄模块级持有,afterEach 统一 restore,防泄漏到后续用例
+let confirmSpy: ReturnType<typeof vi.spyOn> | null = null
+
 describe('EvalPage', () => {
   beforeEach(() => {
     vi.mocked(evalApi.listRuns).mockReset()
@@ -199,7 +202,7 @@ describe('EvalPage', () => {
   it('cancel button on running row calls cancelRun with confirm', async () => {
     // confirm 无既有 mock 先例:spy element-plus 导出的 ElMessageBox 对象
     // (组件与 spec 同模块实例,spy 对组件可见),免去整包 mock 的开销
-    vi.spyOn(ElMessageBox, 'confirm').mockResolvedValue({ action: 'confirm' } as never)
+    confirmSpy = vi.spyOn(ElMessageBox, 'confirm').mockResolvedValue({ action: 'confirm' } as never)
     vi.mocked(evalApi.listRuns).mockResolvedValue(
       { total: 1, items: [runRunning] })
     vi.mocked(evalApi.cancelRun).mockResolvedValue(
@@ -355,5 +358,9 @@ describe('EvalPage', () => {
     expect(w.text()).toContain('文档8')
   })
 
-  afterEach(() => { vi.useRealTimers() })
+  afterEach(() => {
+    vi.useRealTimers()
+    confirmSpy?.mockRestore()
+    confirmSpy = null
+  })
 })

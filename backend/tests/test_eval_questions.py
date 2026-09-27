@@ -1,8 +1,10 @@
 # backend/tests/test_eval_questions.py
 """M15 T2:题集 CRUD 权限矩阵 + my-kbs。"""
-from sqlalchemy import text
+import json
 
-from app.models import EvalQuestion
+from sqlalchemy import select, text
+
+from app.models import AuditLog, EvalQuestion
 
 
 async def _register_and_login(client, username):
@@ -188,7 +190,7 @@ async def test_export_permissions(client, auth_headers, db_session):
     assert r.status_code == 403  # editor 非 owner
 
 
-async def test_bulk_creates_all(client, auth_headers):
+async def test_bulk_creates_all(client, auth_headers, db_session):
     kb_id = await _make_kb(client, auth_headers, "导入库")
     qs = [{"question": f"bq{i}", "expect_doc_ids": [i],
            "expect_keywords": [], "reference_answer": None} for i in range(3)]
@@ -200,6 +202,14 @@ async def test_bulk_creates_all(client, auth_headers):
     r2 = await client.get(f"/api/eval/questions?kb_id={kb_id}",
                           headers=auth_headers)
     assert r2.json()["total"] == 3
+    # M20:bulk 审计台账直查表(不依赖 admin 读权限)
+    rows = (await db_session.execute(
+        select(AuditLog).where(AuditLog.action == "eval_questions_bulk")
+    )).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].target == f"kb:{kb_id}"
+    # detail 列为 Text:audit() 落库前 json.dumps(ensure_ascii=False)
+    assert json.loads(rows[0].detail) == {"created": 3, "errors": 0}
 
 
 async def test_bulk_partial_success(client, auth_headers):

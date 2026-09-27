@@ -393,6 +393,33 @@ async def test_deliver_due_round_limit(db_session, monkeypatch):
     assert sum(1 for r in left if r.status == "pending") == 2
 
 
+# ---- M20:deliver_due 整轮回归(回归护栏,无独立 RED 阶段) ----
+async def test_deliver_due_full_round_lifecycle(db_session):
+    """M20 整轮回归:一轮内 pending→500→retrying(退避已排)与 404→立即
+    dead 并存;retrying 到期后二轮 200→succeeded(attempts=2,at-least-once)。"""
+    from app.services.outbound import deliver_due
+
+    await _mk_ep(db_session, events=[], url="http://h/flaky")
+    await _mk_ep(db_session, events=[], url="http://h/gone")
+    d1 = await _pending(db_session, "flaky")
+    d2 = await _pending(db_session, "gone")
+    n = await deliver_due(db_session, client=_FakeClient(
+        {"flaky": 500, "gone": 404}))
+    assert n == 2
+    await db_session.refresh(d1)
+    assert d1.status == "retrying" and d1.attempts == 1
+    assert d1.next_attempt_at is not None
+    await db_session.refresh(d2)
+    assert d2.status == "dead" and d2.attempts == 1
+    d1.next_attempt_at = (datetime.now(timezone.utc).replace(tzinfo=None)
+                          - timedelta(minutes=1))
+    await db_session.commit()
+    n2 = await deliver_due(db_session, client=_FakeClient({"flaky": 200}))
+    assert n2 == 1
+    await db_session.refresh(d1)
+    assert d1.status == "succeeded" and d1.attempts == 2
+
+
 # ---- M18:per-KB 订阅过滤 ----
 async def _mk_kb_ep(db_session, kb_ids):
     ep = WebhookEndpoint(
