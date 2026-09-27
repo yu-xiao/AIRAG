@@ -537,4 +537,21 @@ afterEach(() => {
 3. 终审 clean 或修复波闭环;不推送
 4. M20 走查增量清单(并到 M18+M19 合并走查一起做):webhook 端点表钉钉行密钥列「未设置/已设置」、新建端点事件选项含「评估已取消」、取消一次运行后投递记录出现 eval.cancelled
 
-## 执行记录(待补)
+## 执行记录(2026-09-27,SDD)
+
+**提交链**(spec 1650aa3 → 计划 54b4162):T1 e9f903f → T2 617ea11 → T3 69407f3 → T4 75678dc → T5 2596a6d → T6 2280168 → T7 验收脚本 07fea60。七任务评审:T3 经 1 裁定偏离(guard 次序,brief 缺陷)、T4 经 2 处 brief 笔误修正,其余一次通过;零修复轮。
+
+**测试与验收(控制端亲验)**:pytest 477→**489P/0F**(+3/+4/+2/+2/+1);vitest 82→**84/84**(+1/+1);build 零错(764ms)。真栈 `m20_acceptance.py` **19/19 PASS 0 SKIP**(generation 真 LLM 取消回路 run 37:32.3s cancelled、子集 item_count 诚实;eval.cancelled 投递真送达本地 receiver 恰一封 envelope;零 eval.completed 假事件;坏括号 URL 422;eval.cancelled 可订阅/乱拼 422;幂等/终态 409/终态不被改写;dingtalk im_secret_set False→PUT→True;清理 204)。
+
+**实施期裁定**(SDD 台账全量;关键):
+- T3:brief `_flip_guard` 原序在 conftest 共享 session 下不可运行(expire_all → perms.py 同步属性 MissingGreenlet,上游于修改点)——改 orig 先跑再翻转,窗口确定性等价;同时删除端点 ORM 预检(终态409/幂等前置),评审全状态矩阵枚举确认与条件 UPDATE + rowcount-0 重读分支逐项等价,原子 UPDATE 成为单一裁决源。
+- T4:brief 测试代码两处笔误修正(check_url_allowed 是协程须 await;2001:db8::5 在 py3.12 判 is_private,换真公网 IPv6——M19 同款先例)。
+- 验收脚本首跑 18/19:ep_ev 生命周期在②内闭环但误入清理清单二次 DELETE 404——脚本自身 bug,修正后 19/19。
+
+**终审(whole-branch,7d1e044..07fea60)**:verdict **Clean**,零 Critical/Important。并发轨迹全枚举:running/cancelling 的全部状态写入均为行锁条件 UPDATE,completed-on-cancelled 与假事件结构性不可达,无永久卡死路径(双 miss 前置行已终态;sweep 兜 cancelling 孤儿)。事件注册单源性核验(EVENT_TYPES 唯一源,admin 校验/前端选项/docs 全消费)。唯一 Minor:docs/webhooks.md 头部标签仍写「M17/M18」——park M21。
+
+**M21 候选(终审)**:①异常路径 failed 无条件写 vs 并发取消的仲裁(现为 last-writer-wins,spec 认可)②sweep 无条件 UPDATE 建立在 solo worker 前提上——多 worker 前须加租约/心跳守卫③docs/webhooks.md 头部标签刷新+逐事件负载示例节④_finalize_run None 分支跳过空 commit⑤新测试局部 import 上提模块级。
+
+**不推送**:M18+M19+M20 合并走查通过后统一推 origin(用户指示走查延后);栈已起(backend 8001/worker/beat/前端 5173)随时可查。SDD 工作区保留至推送(含各任务报告与门禁/验收日志)。
+
+**M20 走查增量清单**(并到 M18+M19 合并走查):①webhook 端点表钉钉/飞书行 secret 列显「未设置/已设置」(wecom 仍「无需密钥」)②新建端点事件复选组六项含「评估已取消」③跑一次生成评估→立即取消→投递记录出现一行「评估已取消」事件 succeeded;坏括号 URL(如 `http://[::1/x`)建端点报 422。
