@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import ValidationError
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -385,11 +385,17 @@ async def cancel_run(
     if run is None:
         raise HTTPException(status_code=404, detail="eval run not found")
     await _require_kb_owner(db, current, run.kb_id)
-    if run.status in ("completed", "failed", "cancelled"):
+    # M20:条件 UPDATE 防丢更新——读后任务恰收口终态时零行命中,
+    # 重读分流(幂等/409),绝不覆盖任务已落的终态
+    res = await db.execute(
+        update(EvalRun)
+        .where(EvalRun.id == run_id, EvalRun.status == "running")
+        .values(status="cancelling"))
+    if res.rowcount == 0:
+        await db.refresh(run)
+        if run.status == "cancelling":
+            return {"id": run_id, "status": "cancelling"}  # 幂等,不重复 audit
         raise HTTPException(status_code=409, detail="run already finished")
-    if run.status == "cancelling":
-        return {"id": run_id, "status": "cancelling"}  # 幂等,不重复 audit
-    run.status = "cancelling"
     await audit(db, current.username, "eval_cancel", f"eval_run:{run_id}",
                 {"kb_id": run.kb_id, "mode": run.mode})
     await db.commit()

@@ -93,6 +93,61 @@ async def test_cancel_audited_once(client, auth_headers, db_session):
     assert rows[0].target == f"eval_run:{run_id}"
 
 
+def _flip_guard(monkeypatch, db_session, run_id, to_status):
+    """守卫 seam:owner 校验内经测试会话把 run 翻成 to_status 并 commit,
+    确定性复现「端点读 running 之后、条件 UPDATE 之前任务收口」窗口。
+    注意先跑原校验再翻转:client 覆写 get_db 与测试同会话,expire_all
+    之后原校验对 user/kb 的属性同步访问会 MissingGreenlet,先校验后
+    expire 才既过权限又造出端点的过期读。"""
+    import app.api.eval as ev
+
+    orig = ev._require_kb_owner
+
+    async def guard(db, current, kb_id):
+        kb = await orig(db, current, kb_id)
+        await db_session.execute(
+            update(EvalRun).where(EvalRun.id == run_id)
+            .values(status=to_status))
+        await db_session.commit()
+        db_session.expire_all()
+        return kb
+
+    monkeypatch.setattr(ev, "_require_kb_owner", guard)
+
+
+async def test_cancel_race_run_completed_before_update(
+        client, auth_headers, db_session, monkeypatch):
+    """A2 竞态:条件 UPDATE 零行→重读 409;终态不被改写、无 audit。"""
+    run_id = await _mk_run(client, auth_headers, db_session)
+    _flip_guard(monkeypatch, db_session, run_id, "completed")
+    r = await client.post(f"/api/eval/runs/{run_id}/cancel",
+                          headers=auth_headers)
+    assert r.status_code == 409
+    db_session.expire_all()
+    run = await db_session.get(EvalRun, run_id)
+    assert run.status == "completed"  # 终态未被覆盖回 cancelling
+    rows = (await db_session.execute(
+        select(AuditLog).where(AuditLog.action == "eval_cancel")
+    )).scalars().all()
+    assert rows == []
+
+
+async def test_cancel_race_run_cancelling_idempotent(
+        client, auth_headers, db_session, monkeypatch):
+    """A2 竞态另一形态:翻成 cancelling → 条件 UPDATE 零行→重读幂等 200,
+    不重复 audit。"""
+    run_id = await _mk_run(client, auth_headers, db_session)
+    _flip_guard(monkeypatch, db_session, run_id, "cancelling")
+    r = await client.post(f"/api/eval/runs/{run_id}/cancel",
+                          headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json() == {"id": run_id, "status": "cancelling"}
+    rows = (await db_session.execute(
+        select(AuditLog).where(AuditLog.action == "eval_cancel")
+    )).scalars().all()
+    assert rows == []
+
+
 def _fake_retrieval_item(run_id, flip_at):
     """返回 fake retrieval_item:第 flip_at 次调用时经任务会话把 run 置
     cancelling 并 commit(模拟并发取消;同会话 update 后 loop 的 refresh 能见)。"""
