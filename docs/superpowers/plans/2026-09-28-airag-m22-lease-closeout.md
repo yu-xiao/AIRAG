@@ -556,3 +556,49 @@ git commit -m "chore(ui,docs): provider-help fallback + wording nit (m22)"
 2. **真栈验收** `backend/scripts/m22_acceptance.py`(照 m21 模式):①NULL+created 30min 前 running 行存活 ≥2 beat tick;②NULL+created 61min 前行 → beat 收口 failed + eval.failed 真送达 receiver(summary=null);③stale 心跳行 → 收口+事件;④fresh 心跳行存活;⑤真实 retrieval 运行领租+续租(hb 非空);⑥docs 孤儿说明在。派发失败路径单测已覆盖,真栈不模拟断 broker。
 3. **终审 whole-branch** + M23 候选回流。
 4. **执行记录** + 记忆更新(推送与 M21 的 11 个提交一起,等用户批量走查)。
+
+---
+
+## 执行记录(2026-09-28,SDD 五任务一波修复轮 + 终审 Clean)
+
+**交付(7296fb0..24f23d8,9 提交 + 本记录,main 本地未推)**:
+- T1 f1d4b45+03c661e 两段式租约:创建回 NULL(从未开跑)+ 任务启动条件 UPDATE 领租
+  (闭行 abort/排队取消零子集收口)+ sweep 两段谓词(心跳宽限 10min / 创建龄
+  EVAL_QUEUE_GRACE_MINUTES=60,timestamptz 比 aware UTC、naive 列比 naive UTC)
+  ——显式取代 M21「创建即心跳」(排队>10min 误杀根除);修复轮:两个领租用例
+  原用无题 kb 不具判别力,改 _mk_run 带题并实证(去领租块即红)
+- T2 ca35974 孤儿收口发 eval.failed:UPDATE…RETURNING 逐行事件(summary 诚实
+  null、item_count 创建题数、ORPHAN_ERROR 常量)、同事务 commit、n>0 才 nudge
+- T3 8ba6e06 派发失败走 _finalize_run——全库最后一个 ORM 无条件终态写删除,
+  502 契约不变,事件与任务失败路径同构
+- T4 1c58bd1 _finalize_run cancelled+error 互斥 ValueError(先于任何 DB 写)
+- T5 3d598d0 PROVIDER_HELP `?? ''` 兜底 + docs 措辞(单题结果字典为主语)
+- 24f23d8 m22_acceptance(13 检查)
+
+**门禁**:pytest 496→**501P/0F**、vitest **85/85**、build 零错(Loguru WinError 32
+为 Windows 日志轮转锁噪声,先存与 M22 无关)。
+
+**真栈验收 m22_acceptance 13/13 PASS 0 SKIP**(worker 重启后):①排队 30min
+未开跑行存活 ≥2 beat tick(M21 误杀场景的真栈判别)②超龄 61min 行 beat 收口
++eval.failed 真送达 receiver(summary=null)③stale 心跳行收口+事件④fresh 行
+存活⑤真实 retrieval 运行领租+续租⑥docs 孤儿说明在。
+
+**终审(whole-branch,7296fb0..24f23d8)**:**Ready to merge — Yes**,零
+Critical/Important。对抗性核验:eval_runs 全部终态写点恰五处且全条件化(创建
+insert 非 终态写);claim 竞态全交钓鱼闭合(取消先于/夹于/后于 claim 各归位);
+sweep 单语句 RETURNING 原子离场,无重复发事件面;时钟域代码/模型/测试三处同律。
+
+**过程中裁定(全记 SDD ledger)**:①直接 main、与 M21 的 11 提交同批等走查后推
+②两领租用例无判别力(kb 无题,零题路径与领租结果重合)——控制器裁定后修复轮
+改带题实证 ③m21_acceptance 的 NULL 即扫检查历史性失效,由 m22 脚本取代,不改
+旧脚本 ④T3 测试补 `import time` 核可。
+
+**M23 候选(终审+ledger triage)**:①逐题检查点改为 any non-running 即
+break(单题>10min 时 mid-run sweep 收口后循环仍白跑的残余)②ORPHAN_ERROR 文案
+分裂(never-started vs heartbeat expired)③验收模板 wait_delivery 条件加括号
+(防后世拷贝踩 and/or 优先级)④排队>60min 残余(多 worker owner 列,扩容再议)
+⑤deferred 三条 minor 顺手;大件 A2A/MinerU 本地化/LDAP 仍等输入。
+
+**栈态**:8001/beat/worker(已重启带 M22 代码)/5173 运行;dev 库 head=
+c2d3e4f5a6b7(M22 无新迁移)。
+
