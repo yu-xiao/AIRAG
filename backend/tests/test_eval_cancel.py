@@ -10,6 +10,9 @@ from sqlalchemy import select, text, update
 
 from app.models import (AuditLog, EvalItem, EvalQuestion, EvalRun,
                         WebhookDelivery, WebhookEndpoint)
+import app.services.eval_runner as runner
+from app.services.eval_runner import _finalize_run, run_eval_task
+from app.workers.eval_tasks import _recover_orphan_runs
 
 
 async def _register_and_login(client, username):
@@ -168,9 +171,6 @@ def _fake_retrieval_item(run_id, flip_at):
 async def test_run_task_stops_on_cancelling(client, auth_headers,
                                             db_session, monkeypatch):
     """第 1 题提交后置 cancelling → 任务收口 cancelled + 子集数据。"""
-    import app.services.eval_runner as runner
-    from app.services.eval_runner import run_eval_task
-
     run_id = await _mk_run(client, auth_headers, db_session, n=3)
     fake, calls = _fake_retrieval_item(run_id, flip_at=1)
     monkeypatch.setattr(runner, "retrieval_item", fake)
@@ -189,9 +189,6 @@ async def test_run_task_stops_on_cancelling(client, auth_headers,
 async def test_run_task_cancel_at_later_question(client, auth_headers,
                                                  db_session, monkeypatch):
     """第 2 题提交后才取消 → 已提交的 2 题保留(逐题检查点,非首题短路)。"""
-    import app.services.eval_runner as runner
-    from app.services.eval_runner import run_eval_task
-
     run_id = await _mk_run(client, auth_headers, db_session, n=3)
     fake, calls = _fake_retrieval_item(run_id, flip_at=2)
     monkeypatch.setattr(runner, "retrieval_item", fake)
@@ -212,9 +209,6 @@ async def test_cancelled_run_emits_cancelled_event(
     """M20:取消收口改发独立事件 eval.cancelled(仍不发 eval.completed)。
     全订阅端点(events=[] 照 test_webhook_events._subscribed_ep 模式)恰收
     一行,nudge 被踢(n>0,与 completed 同待遇)。"""
-    import app.services.eval_runner as runner
-    from app.services.eval_runner import run_eval_task
-
     db_session.add(WebhookEndpoint(
         name=f"cxl{time.time_ns()}", url="http://x/h", secret="wh_s",
         events=[], created_by=1))
@@ -246,8 +240,6 @@ async def _mk_bare_run(db_session, status="running") -> int:
 
 
 async def test_finalize_completes_only_from_running(db_session):
-    from app.services.eval_runner import _finalize_run
-
     run_id = await _mk_bare_run(db_session, "running")
     final, n = await _finalize_run(db_session, run_id, 1, "retrieval",
                                    [{"question": "q"}], False)
@@ -261,8 +253,6 @@ async def test_finalize_completes_only_from_running(db_session):
 async def test_finalize_raced_cancel_wins(db_session):
     """A1 竞态:任务未察觉(cancelled=False)但行已被端点置 cancelling →
     fallback 收口 cancelled,绝不覆盖成 completed。"""
-    from app.services.eval_runner import _finalize_run
-
     run_id = await _mk_bare_run(db_session, "cancelling")
     final, n = await _finalize_run(db_session, run_id, 1, "retrieval",
                                    [{"question": "q"}], False)
@@ -274,8 +264,6 @@ async def test_finalize_raced_cancel_wins(db_session):
 
 async def test_finalize_double_miss_no_write_no_event(db_session):
     """两跳全零行(行已被 sweep 等收口)→ 不改写、零事件。"""
-    from app.services.eval_runner import _finalize_run
-
     run_id = await _mk_bare_run(db_session, "failed")
     db_session.add(WebhookEndpoint(
         name=f"dm{time.time_ns()}", url="http://x/h", secret="wh_s",
@@ -293,8 +281,6 @@ async def test_finalize_double_miss_no_write_no_event(db_session):
 
 
 async def test_finalize_cancelled_emits_cancelled_event(db_session):
-    from app.services.eval_runner import _finalize_run
-
     run_id = await _mk_bare_run(db_session, "cancelling")
     db_session.add(WebhookEndpoint(
         name=f"fc{time.time_ns()}", url="http://x/h", secret="wh_s",
@@ -310,8 +296,6 @@ async def test_finalize_cancelled_emits_cancelled_event(db_session):
 
 async def test_sweep_collects_cancelling(client, auth_headers, db_session):
     """worker 重启清扫:running 与 cancelling 两类在途都收口 failed。"""
-    from app.workers.eval_tasks import _recover_orphan_runs
-
     db_session.add_all([
         EvalRun(kb_id=1, mode="retrieval", summary=None,
                 item_count=1, status="cancelling"),
