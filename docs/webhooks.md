@@ -1,6 +1,7 @@
 # Webhook 出站推送对接指南
 
-(AIRag M17/M18;admin 在「出站推送」页配置端点)
+(AIRag M17 引入,M18 平台适配+per-KB 订阅,M19 密钥生命周期+出站加固,
+M20 新增 eval.cancelled,M21 统一 eval.failed 负载形状;admin 在「出站推送」页配置端点)
 
 ## 事件与订阅
 
@@ -9,6 +10,56 @@
     同 `eval.completed` 形状,但 `item_count` 为取消前已完成的子集(非全量)
 - 订阅粒度:事件类型(多选,空=全部)× 知识库(多选,空=全部;`chat.refused` 按命中任一订阅库投递)
 - at-least-once:可能重复投递,**接收方必须按 `event_id` 幂等去重**
+
+### 事件负载示例(generic 通道全量信封的 `data` 字段)
+
+信封外层恒为 `{"event_id", "event_type", "occurred_at", "data"}`;
+以下示例均为 `data` 内容。平台通道收到的是中文 markdown 摘要,非全量信封。
+
+- **document.done**
+
+  ```json
+  {"document": {"id": 42, "kb_id": 3, "filename": "预算说明.pdf",
+                "chunk_count": 17}}
+  ```
+
+- **document.failed**
+
+  ```json
+  {"document": {"id": 43, "kb_id": 3, "filename": "扫描件.pdf"},
+   "error": "OCR 空结果"}
+  ```
+
+- **eval.completed / eval.cancelled**(cancelled 的 `item_count` 是取消前
+已完成子集,非全量)
+
+  ```json
+  {"run": {"id": 7, "kb_id": 3, "mode": "retrieval", "item_count": 12,
+           "summary": {"item_count": 12, "hit": 0.9167, "mrr": 0.8611,
+                       "keyword_recall": 0.8333}}}
+  ```
+
+  generation 模式的 summary 形状:`{"item_count", "faithfulness_avg",
+  "relevancy_avg", "refused_count", "reference_avg"(未设参考答案则为
+  `null`,非缺席——generation 题目恒带 `reference` 键,`summarize` 必落
+  该字段)}`;未测量的检索指标缺席、未测量的均值为 `null`,不落 0
+  (「未测量≠零分」,M16 语义)。
+
+- **eval.failed**(M21 起 `run` 形状与 completed 统一,含部分汇总)
+
+  ```json
+  {"run": {"id": 8, "kb_id": 3, "mode": "generation", "item_count": 5,
+           "summary": {"item_count": 5, "faithfulness_avg": 0.82,
+                       "relevancy_avg": 0.9, "refused_count": 1,
+                       "reference_avg": null}},
+   "error": "ZHIPU_API_KEY 未配置,生成评估无法执行"}
+  ```
+
+- **chat.refused**(`source`:`web` 网页 / `rest` API Key / `mcp` MCP 工具)
+
+  ```json
+  {"source": "rest", "kb_ids": [3, 5], "question": "竞品价格是多少"}
+  ```
 
 ## 通用端点(provider=generic)
 
