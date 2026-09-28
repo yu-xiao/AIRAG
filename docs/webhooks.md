@@ -41,7 +41,8 @@ M20 新增 eval.cancelled,M21 统一 eval.failed 负载形状;admin 在「出站
 
   generation 模式的 summary 形状:`{"item_count", "faithfulness_avg",
   "relevancy_avg", "refused_count", "reference_avg"(未设参考答案则为
-  `null`,非缺席——generation 题目恒带 `reference` 键,`summarize` 必落
+  `null`,非缺席——generation 单题结果(`generation_item`)恒带
+  `reference` 键,`summarize` 必落
   该字段)}`;未测量的检索指标缺席、未测量的均值为 `null`,不落 0
   (「未测量≠零分」,M16 语义)。
 

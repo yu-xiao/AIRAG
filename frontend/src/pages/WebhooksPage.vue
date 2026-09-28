@@ -566,7 +566,7 @@ onMounted(() => {
               :value="p.value"
             />
           </el-select>
-          <div class="form-help">{{ PROVIDER_HELP[form.provider] }}</div>
+          <div class="form-help">{{ PROVIDER_HELP[form.provider] ?? '' }}</div>
         </el-form-item>
         <el-form-item label="回调 URL" prop="url">
           <el-input
