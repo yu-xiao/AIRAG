@@ -694,3 +694,52 @@ git commit -m "feat(ui): provider-aware webhook channel guidance (wecom false-su
 2. **真栈验收** `backend/scripts/m21_acceptance.py`(照 m20 模式,重启栈后跑):①generation 无 key 触发→failed 条件落库+eval.failed 真送达 receiver、负载含部分 summary;②直插 stale/NULL 心跳 running 行→(调 sweep_orphan_runs 或等 beat)收口 failed;③fresh 心跳行不被收口;④真实短评估运行中 heartbeat_at 推进;⑤webhooks.md 头部无「M17/M18」旧标签且含负载示例节(脚本 grep)。
 3. **终审 whole-branch**(requesting-code-review 模式)+ M22 候选回流。
 4. **执行记录** 追加至本计划;更新记忆(推送仍等用户走查,既定节奏)。
+
+---
+
+## 执行记录(2026-09-28,SDD 六任务零修复轮 + 终审一波修复)
+
+**交付(4388fcc..63bf51a,11 提交,main 本地未推)**:
+- T1 c56f87c 测试局部 import 上提(实为 8 块 11 句,brief 计数笔误按语义全清)
+- T2 3bd6556 `_finalize_run(error=)`:failed 条件收口(撞并发取消→用户赢 cancelled
+  + eval.cancelled)、双 miss 提前返回不空 commit、eval.failed 负载 run 形状统一
+  (item_count/summary + error);最后一个 ORM 无条件终态写删除
+- T3 565cce0 timeutil.utcnow_naive 公共化(outbound 薄委托)+eval_runs.heartbeat_at
+  (迁移 c2d3e4f5a6b7,dev 库已升)+两循环逐题续租(同 commit 零额外往返)
+- T4 e10a72a sweep stale-only(NULL 或超 EVAL_HEARTBEAT_GRACE_MINUTES=10)+beat
+  60s 任务 sweep_orphan_runs(worker_ready 保留);孤儿文案改「orphaned: heartbeat
+  expired」;test_eval_trigger.py:150 同款断言计划漏列、实现者按成对规则补修
+- T5 5ef0d85 webhooks.md 头部 M17~M21 事实 + 逐事件负载示例节;交叉核对三处
+  code-wins 修正(generation 均值 present-as-null 而非缺席)
+- T6 c1ac4ea 前端 PROVIDER_HELP 四通道联动引导(企微误报成功坑)
+- 8930756 m21_acceptance(15 检查)
+- 63bf51a 终审修复波:trigger_run 创建即初始化 heartbeat_at(排队即在宽限内)——
+  终审抓到 NULL 心跳 × beat sweep 会把「排队中的活任务」误判孤儿(solo FIFO 下
+  确定性复现);+日志「on worker start」措辞修正
+
+**门禁**:pytest 489→**496P/0F**(T2+3、T3+1、T4+2、修复波+1);vitest 84→**85/85**;
+build 零错。唯一 warning 为 fastmcp/authlib 第三方弃用提示,先存且与本次无关。
+
+**真栈验收 m21_acceptance 15/15 PASS 0 SKIP**(栈重启后):①scrubbed-key 子进程
+eager 触发→failed 条件落库→eval.failed 经真 worker 投递→receiver 实收信封(run
+形状统一+error)②beat sweep 收口 NULL/stale 行(failed+新孤儿文案)③fresh 心跳行
+存活 ≥2 beat tick(stale-only 判别:旧代码必死)④真实 retrieval 运行心跳续租
+(hb≥触发前)⑤docs 头部/示例节检查⑥API 清理 204。
+
+**终审(whole-branch,4388fcc..8930756)**:Important×1(排队假孤儿,63bf51a 修复,
+scoped 复审 PASS 双 ADDRESSED 零新破)——终审另确认:eval_runs 全部终态写路径中仅
+剩 api/eval.py:368 派发失败微窗口无条件写(先存,单写者毫秒窗,park M22)。
+
+**过程中裁定(全记 SDD ledger)**:①直接 main 实施(20 里程碑既定;推送等走查)
+②dev 库幻影 alembic_version b9c0d1e2f3a4(09-25 回退事故残留)核验后纠正 stamp
+(独立复核:im_secret 是 API 字段非列,链外列 im_secret/channel/kb_scope 为惰性
+残留,git 迁移链无缺失)③Task4 计划漏列断言追认 ④Task5 三处 code-wins 文档修正。
+
+**M22 候选(终审+ledger triage)**:①多 worker 租约残余——排队等待>宽限仍会假孤儿
+(owner 列/任务启动续租);②sweep 收口不发 eval.failed 事件(接收方对孤儿死亡无
+感知);③api/eval.py:366-372 派发失败 ORM 无条件写→条件收口(与 trigger_run 同
+pass);④_finalize_run cancelled+error 组合防护;⑤PROVIDER_HELP ?? 兜底/docs 措辞
+nit(顺手);大件 A2A/MinerU 本地化/LDAP 仍等输入。
+
+**栈态**:8001/worker/beat/5173 运行最终代码;dev 库 head=c2d3e4f5a6b7。
+
