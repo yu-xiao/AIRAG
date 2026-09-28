@@ -4,8 +4,11 @@ from datetime import datetime, timedelta, timezone
 from celery.signals import worker_ready
 from loguru import logger
 
+from app.services.outbound import emit_event, nudge
 from app.workers.celery_app import celery_app
 from app.workers.pipeline import _engine, _run_async
+
+ORPHAN_ERROR = "orphaned: heartbeat expired (worker died or restarted)"
 
 
 @celery_app.task(name="app.workers.eval_tasks.run_evaluation")
@@ -65,13 +68,22 @@ async def _sweep_orphan_runs() -> int:
                            and_(EvalRun.heartbeat_at.is_(None),
                                 EvalRun.created_at <= q_cutoff),
                        ))
-                .values(
-                    status="failed",
-                    error="orphaned: heartbeat expired (worker died or restarted)",
-                )
+                .values(status="failed", error=ORPHAN_ERROR)
+                .returning(EvalRun.id, EvalRun.kb_id, EvalRun.mode,
+                           EvalRun.item_count)
             )
+            swept = result.all()
+            n = 0
+            for rid, kb_id, mode, item_count in swept:
+                # 孤儿从未收口:summary 诚实 null,item_count 为创建时题数
+                n += await emit_event(session, "eval.failed", {
+                    "run": {"id": rid, "kb_id": kb_id, "mode": mode,
+                            "item_count": item_count, "summary": None},
+                    "error": ORPHAN_ERROR})
             await session.commit()
-            return result.rowcount
+            if n:
+                nudge()
+            return len(swept)
     finally:
         await engine.dispose()
 

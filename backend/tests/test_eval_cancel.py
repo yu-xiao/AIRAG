@@ -495,6 +495,38 @@ async def test_sweep_two_stage_predicate(db_session):
         ["running", "failed", "running", "failed"]
 
 
+async def test_sweep_emits_eval_failed_per_orphan(db_session):
+    """M22:孤儿收口不再静默——每个被收口行恰一条 eval.failed,负载
+    summary 诚实为 null、item_count 为创建时题数;completed 行零事件。"""
+    from datetime import datetime, timezone
+
+    db_session.add(WebhookEndpoint(
+        name=f"sw{time.time_ns()}", url="http://x/h", secret="wh_s",
+        events=[], created_by=1))
+    db_session.add_all([
+        EvalRun(kb_id=1, mode="retrieval", summary=None, item_count=7,
+                status="running", heartbeat_at=None,
+                created_at=datetime.now(timezone.utc)
+                - timedelta(minutes=90)),
+        EvalRun(kb_id=1, mode="generation", summary=None, item_count=3,
+                status="cancelling",
+                heartbeat_at=utcnow_naive() - timedelta(minutes=30)),
+        EvalRun(kb_id=1, mode="retrieval", summary={"hit": 1.0},
+                item_count=2, status="completed"),
+    ])
+    await db_session.commit()
+    _recover_orphan_runs()
+    db_session.expire_all()
+    rows = (await db_session.execute(
+        select(WebhookDelivery).order_by(WebhookDelivery.id))
+    ).scalars().all()
+    assert [r.event_type for r in rows] == ["eval.failed", "eval.failed"]
+    assert all(r.payload["data"]["run"]["summary"] is None
+               for r in rows)
+    assert rows[0].payload["data"]["run"]["item_count"] == 7
+    assert "orphaned" in rows[0].payload["data"]["error"]
+
+
 def test_beat_schedule_registers_orphan_sweep():
     from app.workers.celery_app import celery_app
 
