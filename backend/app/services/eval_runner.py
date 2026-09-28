@@ -161,28 +161,34 @@ def _fresh_chat_llm():
 
 async def _finalize_run(db: AsyncSession, run_id: int, kb_id: int,
                         mode: str, results: list[dict],
-                        cancelled: bool) -> tuple[str | None, int]:
+                        cancelled: bool, error: str | None = None,
+                        ) -> tuple[str | None, int]:
     """M20 条件收口:终态只经条件 UPDATE 落库,消端点/任务丢更新竞态。
+    M21:failed 同入此口——异常路径最后一个 ORM 无条件终态写删除。
 
-    completed 只许写在仍是 running 的行上(端点在最后检查点后并发置
-    cancelling 时零行命中,fallback 按用户已赢收口 cancelled);cancelled
-    写在 cancelling 上。两跳全零行=行已被 sweep 等他人收口,不写不发
-    (返回 None)。事件按 final 分流,同事务 commit;返回 (final, n)
-    供调用方 nudge。"""
+    completed/failed 只许写在仍是 running 的行上(端点在最后检查点后
+    并发置 cancelling 时零行命中,fallback 按用户已赢收口 cancelled——
+    failed 撞上并发取消同样用户赢);cancelled 写在 cancelling 上。
+    两跳全零行=行已被 sweep 等他人收口,不写不发(返回 None;空事务
+    无 pending 变更,提前返回不走 commit)。事件按 final 分流,同事务
+    commit;返回 (final, n) 供调用方 nudge。"""
     from sqlalchemy import update
 
     from app.models import EvalRun
 
     summary = summarize(results)
     item_count = len(results)
-    final = "cancelled" if cancelled else "completed"
+    final = "failed" if error else ("cancelled" if cancelled else "completed")
     expect = "cancelling" if cancelled else "running"
+    values = dict(status=final, summary=summary, item_count=item_count)
+    if error:
+        values["error"] = error  # 仅 failed 落 error 列;取消非失败
     res = await db.execute(
         update(EvalRun)
         .where(EvalRun.id == run_id, EvalRun.status == expect)
-        .values(status=final, summary=summary, item_count=item_count))
+        .values(**values))
     if res.rowcount == 0 and not cancelled:
-        # A1 竞态:最后检查点后端点已置 cancelling——用户已赢
+        # A1 竞态:最后检查点后端点已置 cancelling——用户已赢(failed 同享)
         res = await db.execute(
             update(EvalRun)
             .where(EvalRun.id == run_id, EvalRun.status == "cancelling")
@@ -191,6 +197,8 @@ async def _finalize_run(db: AsyncSession, run_id: int, kb_id: int,
         final = "cancelled" if res.rowcount else None
     elif res.rowcount == 0:
         final = None  # 行已不在 cancelling(他人收口),不写不发
+    if final is None:
+        return None, 0  # 空事务:零命中零事件,commit 无意义
     data = {"run": {"id": run_id, "kb_id": kb_id, "mode": mode,
                     "item_count": item_count, "summary": summary}}
     if final == "completed":
@@ -198,7 +206,8 @@ async def _finalize_run(db: AsyncSession, run_id: int, kb_id: int,
     elif final == "cancelled":
         n = await emit_event(db, "eval.cancelled", data)  # M20
     else:
-        n = 0
+        data["error"] = error  # M21:eval.failed 的 run 形状与 completed 统一
+        n = await emit_event(db, "eval.failed", data)  # M17
     await db.commit()
     return final, n
 
@@ -278,12 +287,11 @@ async def run_eval_task(run_id: int, mode: str, rerank: bool,
                 # run 永远停在 running——状态机必须兜住。已逐题 commit 的
                 # items 不受影响(它们已落库)。
                 await db.rollback()
-                run.status = "failed"
-                run.error = str(e)[:500]
-                n = await emit_event(db, "eval.failed", {
-                    "run": {"id": run_id, "kb_id": kb_id, "mode": mode},
-                    "error": str(e)[:500]})  # M17
-                await db.commit()
+                # M21:failed 也走条件收口(并发取消用户赢→cancelled),
+                # 最后一个 ORM 无条件终态写删除;kb_id 是 M17 快照
+                final, n = await _finalize_run(
+                    db, run_id, kb_id, mode, results, False,
+                    error=str(e)[:500])
                 if n:
                     nudge()
     finally:

@@ -294,6 +294,76 @@ async def test_finalize_cancelled_emits_cancelled_event(db_session):
     assert [r.event_type for r in rows] == ["eval.cancelled"]
 
 
+async def test_finalize_failed_only_from_running(db_session):
+    """M21:failed 条件写——只落在仍是 running 的行;run 形状与 completed
+    统一(item_count/summary),error 字段保留。"""
+    run_id = await _mk_bare_run(db_session, "running")
+    db_session.add(WebhookEndpoint(
+        name=f"fl{time.time_ns()}", url="http://x/h", secret="wh_s",
+        events=[], created_by=1))
+    await db_session.commit()
+    final, n = await _finalize_run(db_session, run_id, 1, "retrieval",
+                                   [{"question": "q"}], False, error="炸了")
+    assert final == "failed" and n == 1
+    db_session.expire_all()
+    run = await db_session.get(EvalRun, run_id)
+    assert run.status == "failed" and run.error == "炸了"
+    assert run.item_count == 1 and run.summary["item_count"] == 1
+    rows = (await db_session.execute(
+        select(WebhookDelivery))).scalars().all()
+    assert [r.event_type for r in rows] == ["eval.failed"]
+    d = rows[0].payload["data"]
+    assert d["error"] == "炸了"
+    assert d["run"]["item_count"] == 1 and "summary" in d["run"]
+
+
+async def test_finalize_failed_raced_cancel_wins(db_session):
+    """异常撞上并发取消:行已被端点置 cancelling → 用户赢,收口 cancelled、
+    发 eval.cancelled 而非 eval.failed,run.error 不写(取消非失败)。"""
+    run_id = await _mk_bare_run(db_session, "cancelling")
+    db_session.add(WebhookEndpoint(
+        name=f"fr{time.time_ns()}", url="http://x/h", secret="wh_s",
+        events=[], created_by=1))
+    await db_session.commit()
+    final, n = await _finalize_run(db_session, run_id, 1, "retrieval",
+                                   [{"question": "q"}], False, error="炸了")
+    assert final == "cancelled" and n == 1
+    db_session.expire_all()
+    run = await db_session.get(EvalRun, run_id)
+    assert run.status == "cancelled" and run.error is None
+    rows = (await db_session.execute(
+        select(WebhookDelivery))).scalars().all()
+    assert [r.event_type for r in rows] == ["eval.cancelled"]
+
+
+async def test_run_task_exception_failed_via_finalize(
+        client, auth_headers, db_session, monkeypatch):
+    """M21:run_eval_task 异常路径经 _finalize_run 条件收口——不再 ORM
+    无条件写;部分结果照写 summary(数据诚实,与取消同语义)。"""
+    run_id = await _mk_run(client, auth_headers, db_session, n=2)
+    calls = {"n": 0}
+
+    async def flaky(db, kb_id, q, top_k, reranker):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("第二题炸")
+        return {"question": q.question, "hit_at_k": None, "mrr": None,
+                "keyword_recall": None}
+
+    monkeypatch.setattr(runner, "retrieval_item", flaky)
+    monkeypatch.setattr(runner, "nudge", lambda: None)
+    await run_eval_task(run_id, "retrieval", False, 8)
+    db_session.expire_all()
+    run = (await db_session.execute(
+        select(EvalRun).where(EvalRun.id == run_id))).scalar_one()
+    assert run.status == "failed"
+    assert "第二题炸" in run.error
+    assert run.item_count == 1 and run.summary["item_count"] == 1
+    items = (await db_session.execute(
+        select(EvalItem).where(EvalItem.run_id == run_id))).scalars().all()
+    assert len(items) == 1  # 第 1 题已逐题落库,不受异常影响
+
+
 async def test_sweep_collects_cancelling(client, auth_headers, db_session):
     """worker 重启清扫:running 与 cancelling 两类在途都收口 failed。"""
     db_session.add_all([
