@@ -62,6 +62,9 @@ class Settings(BaseSettings):
     WEBHOOK_DELIVER_ROUND_LIMIT: int = 500      # deliver_due 单轮真实尝试上限(大积压分轮)
     # M21 租约宽限:评估单题(三次 LLM 裁决)远小于此;心跳早于此=孤儿
     EVAL_HEARTBEAT_GRACE_MINUTES: int = 10
+    # M22 从未开跑(heartbeat NULL,含排队中)的兜底宽限:消息丢失/队列
+    # 堵死才超此龄;solo 下任何现实排队时长 << 此值
+    EVAL_QUEUE_GRACE_MINUTES: int = 60
     MAX_UPLOAD_MB: int = 20
 
 

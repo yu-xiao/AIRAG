@@ -2,6 +2,8 @@
 """M15 T5:触发端点守卫(409/422/403/404/422 top_k)+ eager 内联执行 +
 列表/明细新字段(status/created_by/done_count/error)。
 终审 I-1:dispatch 失败收口 failed + 502;worker 启动孤儿 running 清扫。"""
+from datetime import datetime, timedelta, timezone
+
 from sqlalchemy import select, text
 
 from app.models import EvalQuestion, EvalRun
@@ -128,15 +130,11 @@ async def test_trigger_dispatch_failure_marks_run_failed(
     assert "dispatch failed" in run.error
 
 
-async def test_trigger_run_initializes_heartbeat_at_creation(
+async def test_trigger_run_leaves_heartbeat_null_until_start(
         client, auth_headers, db_session, monkeypatch):
-    """终审修复:run 创建即写心跳——beat 清扫把 NULL 视 stale,排队在
-    忙 worker 后的 run 会被误收口孤儿(queued-behind-busy-worker)。
-    patch .delay 拦住 eager 内联执行(模拟任务仍在队列里),
-    创建时刻的心跳即 run 在宽限期内不被清扫的唯一凭据。"""
-    from datetime import timedelta
-
-    from app.core.timeutil import utcnow_naive
+    """M22 两段式租约:创建时 heartbeat 保持 NULL(=从未开跑)——排队中
+    的 run 由创建龄(EVAL_QUEUE_GRACE_MINUTES)保护;M21 的「创建即心跳」
+    方案被本里程碑显式取代。patch .delay 拦住 eager 内联执行。"""
     from app.workers.eval_tasks import run_evaluation
 
     monkeypatch.setattr(run_evaluation, "delay", lambda *a, **k: None)
@@ -148,8 +146,7 @@ async def test_trigger_run_initializes_heartbeat_at_creation(
     run = (await db_session.execute(
         select(EvalRun).where(EvalRun.kb_id == kb_id))).scalars().one()
     assert run.status == "running"
-    assert run.heartbeat_at is not None
-    assert utcnow_naive() - run.heartbeat_at < timedelta(seconds=60)
+    assert run.heartbeat_at is None
 
 
 async def test_recover_orphan_runs_sweeps_running(db_session):
@@ -159,7 +156,8 @@ async def test_recover_orphan_runs_sweeps_running(db_session):
 
     db_session.add_all([
         EvalRun(kb_id=1, mode="retrieval", summary=None,
-                item_count=1, status="running"),
+                item_count=1, status="running",
+                created_at=datetime.now(timezone.utc) - timedelta(minutes=90)),
         EvalRun(kb_id=2, mode="generation", summary={"hit": 1.0},
                 item_count=2, status="completed"),
     ])

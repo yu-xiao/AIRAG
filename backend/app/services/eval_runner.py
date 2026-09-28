@@ -224,6 +224,7 @@ async def run_eval_task(run_id: int, mode: str, rerank: bool,
     自持 NullPool 引擎(任务的事件循环与 API/CLI 不共享,池化连接
     不得跨循环复用——pipeline._run_async + _engine 同款防御)。
     """
+    from sqlalchemy import update
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
     from app.core.config import settings
@@ -236,6 +237,25 @@ async def run_eval_task(run_id: int, mode: str, rerank: bool,
             run = await db.get(EvalRun, run_id)
             if run is None:
                 logger.info(f"eval run {run_id} gone, skip")
+                return
+            # M22 领租:启动即条件 UPDATE 续签——行已被 sweep/端点收口终态
+            # 则零行命中直接退出(杜绝被误杀后白跑);排队期间被取消则
+            # 零子集提前收口 cancelled(与 M19 检查点同语义,提前到零题)。
+            claim = await db.execute(
+                update(EvalRun)
+                .where(EvalRun.id == run_id,
+                       EvalRun.status.in_(("running", "cancelling")))
+                .values(heartbeat_at=utcnow_naive()))
+            await db.commit()
+            await db.refresh(run)
+            if claim.rowcount == 0:
+                logger.info(f"eval run {run_id} closed before start, abort")
+                return
+            if run.status == "cancelling":
+                final, n = await _finalize_run(db, run_id, run.kb_id,
+                                               mode, [], True)
+                if n:
+                    nudge()
                 return
             kb_id = run.kb_id  # M17:rollback 会过期实例,失败分支事件先取快照
             questions = await load_questions(db, run.kb_id)
