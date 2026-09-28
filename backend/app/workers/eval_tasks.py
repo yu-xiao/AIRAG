@@ -1,4 +1,6 @@
 """M15:评估执行 Celery 任务(Web 触发)。"""
+from datetime import timedelta
+
 from celery.signals import worker_ready
 from loguru import logger
 
@@ -26,30 +28,36 @@ async def _dispose_shared_engine() -> None:
 
 
 async def _sweep_orphan_runs() -> int:
-    """在途(status='running' 或 'cancelling',M19 T3)的 EvalRun 收口为
-    failed,返回受影响行数。
+    """在途(status='running' 或 'cancelling',M19 T3)且心跳过期(M21
+    租约)的 EvalRun 收口为 failed,返回受影响行数。
 
-    触发时机是 worker_ready:solo 池单 worker,启动瞬间不可能有执行中的
-    评估任务,残留 running 必是孤儿(worker 被杀/重启、Redis 断线丢
-    .delay() 消息);cancelling 同理——取消请求已落库但原任务随 worker
-    消亡,无人再收口。不收口则同 kb+mode 永久 409、前端 hasRunning()
-    3s 轮询永不停。DB 访问同 pipeline._mark_failed 模式:自持 NullPool
-    引擎,用完 dispose(不与 API/worker 常驻引擎共享连接池)。"""
-    from sqlalchemy import update
+    M21 前:solo 池 worker_ready 瞬间无在途任务,无条件收口成立;多
+    worker 前必须能区分「活任务」与「孤儿」——任务逐题续签 heartbeat_at,
+    本函数只收 stale(NULL 或早于宽限;NULL 兼容存量行与「已建未开跑」
+    孤儿)。除 worker_ready 外,beat 60s 周期兜底:worker 崩溃后孤儿
+    不再「只能等下次重启」,≤ 宽限+间隔内必被收口(强于 M15 现状)。
+    DB 访问同 pipeline._mark_failed 模式:自持 NullPool 引擎,用完
+    dispose(不与 API/worker 常驻引擎共享连接池)。"""
+    from sqlalchemy import or_, update
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
     from app.core.config import settings
+    from app.core.timeutil import utcnow_naive
     from app.models import EvalRun
 
     engine = _engine(settings.DATABASE_URL)
     try:
         async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            cutoff = utcnow_naive() - timedelta(
+                minutes=settings.EVAL_HEARTBEAT_GRACE_MINUTES)
             result = await session.execute(
                 update(EvalRun)
-                .where(EvalRun.status.in_(("running", "cancelling")))
+                .where(EvalRun.status.in_(("running", "cancelling")),
+                       or_(EvalRun.heartbeat_at.is_(None),
+                           EvalRun.heartbeat_at <= cutoff))
                 .values(
                     status="failed",
-                    error="worker restarted while evaluation was running",
+                    error="orphaned: heartbeat expired (worker died or restarted)",
                 )
             )
             await session.commit()
@@ -58,11 +66,19 @@ async def _sweep_orphan_runs() -> int:
         await engine.dispose()
 
 
-def _recover_orphan_runs() -> None:
+def _recover_orphan_runs() -> int:
     """信号处理器本体;独立成可直调函数供测试调用(信号在 pytest 不触发)。"""
     n = _run_async(_sweep_orphan_runs())
     if n:
         logger.info(f"recovered {n} orphaned running eval run(s) on worker start")
+    return n
+
+
+@celery_app.task(name="app.workers.eval_tasks.sweep_orphan_runs",
+                 ignore_result=True)
+def sweep_orphan_runs() -> int:
+    """beat 60s 周期兜底(worker_ready 之外的第二个触发面)。"""
+    return _recover_orphan_runs()
 
 
 @worker_ready.connect

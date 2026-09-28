@@ -147,5 +147,5 @@ async def test_recover_orphan_runs_sweeps_running(db_session):
     runs = (await db_session.execute(
         select(EvalRun).order_by(EvalRun.id))).scalars().all()
     assert [r.status for r in runs] == ["failed", "completed"]
-    assert runs[0].error == "worker restarted while evaluation was running"
+    assert runs[0].error == "orphaned: heartbeat expired (worker died or restarted)"
     assert runs[1].error is None

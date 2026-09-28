@@ -384,7 +384,7 @@ async def test_sweep_collects_cancelling(client, auth_headers, db_session):
     runs = (await db_session.execute(
         select(EvalRun).order_by(EvalRun.id))).scalars().all()
     assert [r.status for r in runs] == ["failed", "failed", "completed"]
-    assert runs[0].error == "worker restarted while evaluation was running"
+    assert runs[0].error == "orphaned: heartbeat expired (worker died or restarted)"
     assert runs[2].error is None
 
 
@@ -419,3 +419,31 @@ async def test_heartbeat_renewed_per_item(client, auth_headers,
     assert run.heartbeat_at is not None
     assert run.heartbeat_at >= before  # 续租发生在观测点之后
     assert (utcnow_naive() - run.heartbeat_at).total_seconds() < 60
+
+
+async def test_sweep_skips_fresh_heartbeat(db_session):
+    """M21 租约:心跳新鲜的在途行是活任务,重启/周期 sweep 都不收口;
+    NULL 与超宽限行照收(存量兼容)。"""
+    db_session.add_all([
+        EvalRun(kb_id=1, mode="retrieval", summary=None, item_count=0,
+                status="running", heartbeat_at=utcnow_naive()),
+        EvalRun(kb_id=2, mode="retrieval", summary=None, item_count=0,
+                status="cancelling",
+                heartbeat_at=utcnow_naive() - timedelta(minutes=30)),
+        EvalRun(kb_id=3, mode="retrieval", summary=None, item_count=0,
+                status="running", heartbeat_at=None),
+    ])
+    await db_session.commit()
+    _recover_orphan_runs()
+    db_session.expire_all()
+    runs = (await db_session.execute(
+        select(EvalRun).order_by(EvalRun.id))).scalars().all()
+    assert [r.status for r in runs] == ["running", "failed", "failed"]
+
+
+def test_beat_schedule_registers_orphan_sweep():
+    from app.workers.celery_app import celery_app
+
+    entry = celery_app.conf.beat_schedule["eval-orphan-sweep"]
+    assert entry["task"] == "app.workers.eval_tasks.sweep_orphan_runs"
+    assert entry["schedule"] == 60.0

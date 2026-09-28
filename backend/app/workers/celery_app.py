@@ -25,5 +25,9 @@ celery_app.conf.update(
             "task": "app.workers.webhook_tasks.deliver_pending",
             "schedule": 60.0,
         },
+        "eval-orphan-sweep": {
+            "task": "app.workers.eval_tasks.sweep_orphan_runs",
+            "schedule": 60.0,
+        },
     },
 )
