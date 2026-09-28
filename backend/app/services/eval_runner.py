@@ -9,6 +9,7 @@ from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.timeutil import utcnow_naive
 from app.models import EvalQuestion
 from app.services.eval_judge import (
     faithfulness_score,
@@ -249,6 +250,7 @@ async def run_eval_task(run_id: int, mode: str, rerank: bool,
                         r = await retrieval_item(db, run.kb_id, q, top_k,
                                                  reranker)
                         results.append(r)
+                        run.heartbeat_at = utcnow_naive()  # M21 租约续签(同 commit,零额外往返)
                         db.add(EvalItem(run_id=run.id, **item_kwargs(r)))
                         await db.commit()
                         await db.refresh(run)  # 拾取端点并发置的 cancelling
@@ -269,6 +271,7 @@ async def run_eval_task(run_id: int, mode: str, rerank: bool,
                         r = await generation_item(run.kb_id, q, llm, graph,
                                                   rerank)
                         results.append(r)
+                        run.heartbeat_at = utcnow_naive()  # M21 租约续签(同 commit,零额外往返)
                         db.add(EvalItem(run_id=run.id, **item_kwargs(r)))
                         await db.commit()
                         await db.refresh(run)  # 拾取端点并发置的 cancelling

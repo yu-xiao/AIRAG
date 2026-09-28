@@ -5,9 +5,11 @@
 收口,保留已完成子集的 summary/item_count);409 防重仍仅查 running。
 """
 import time
+from datetime import timedelta
 
 from sqlalchemy import select, text, update
 
+from app.core.timeutil import utcnow_naive
 from app.models import (AuditLog, EvalItem, EvalQuestion, EvalRun,
                         WebhookDelivery, WebhookEndpoint)
 import app.services.eval_runner as runner
@@ -400,3 +402,20 @@ async def test_dup_guard_ignores_cancelling(client, auth_headers,
         select(EvalRun).where(EvalRun.kb_id == kb_id,
                               EvalRun.status == "completed"))).scalar_one()
     assert new_run.id != run_id
+
+
+async def test_heartbeat_renewed_per_item(client, auth_headers,
+                                          db_session, monkeypatch):
+    """M21 租约:逐题续签 heartbeat_at(naive UTC,随逐题 commit 落库);
+    全部题跑完后心跳不应早于宽限。"""
+    run_id = await _mk_run(client, auth_headers, db_session, n=2)
+    before = utcnow_naive()
+    fake, _ = _fake_retrieval_item(run_id, flip_at=99)  # 不触发取消
+    monkeypatch.setattr(runner, "retrieval_item", fake)
+    await run_eval_task(run_id, "retrieval", False, 8)
+    db_session.expire_all()
+    run = await db_session.get(EvalRun, run_id)
+    assert run.status == "completed"
+    assert run.heartbeat_at is not None
+    assert run.heartbeat_at >= before  # 续租发生在观测点之后
+    assert (utcnow_naive() - run.heartbeat_at).total_seconds() < 60

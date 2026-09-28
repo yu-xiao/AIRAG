@@ -1,5 +1,8 @@
 # backend/app/models/eval.py
-from sqlalchemy import Boolean, Float, ForeignKey, Integer, JSON, String, Text
+from datetime import datetime
+
+from sqlalchemy import (Boolean, DateTime, Float, ForeignKey, Integer, JSON,
+                        String, Text)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
@@ -20,6 +23,8 @@ class EvalRun(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(
         String(16), default="completed", server_default="completed")
     error: Mapped[str | None] = mapped_column(Text)      # 失败原因(截 500)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(
+        DateTime)  # M21 租约:任务逐题续签(naive UTC);NULL=stale 兼容存量
     triggered_by: Mapped[int | None] = mapped_column(Integer)  # 无 FK,联查展示
 
     # lazy="selectin":async ORM 下 select 后直接访问集合属性会触发同步

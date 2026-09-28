@@ -16,6 +16,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.timeutil import utcnow_naive
 from app.models import WebhookDelivery, WebhookEndpoint
 from app.services.webhook_providers import (  # noqa: F401 — sign_headers 兼容旧 import
     SsrfBlockedError,
@@ -32,9 +33,9 @@ BACKOFF_MINUTES = (1, 5, 15, 60, 60)
 
 
 def _utcnow_naive() -> datetime:
-    """next_attempt_at 列为 naive TIMESTAMP(asyncpg 拒 aware 入参),
-    全链路统一 naive UTC:写入与扫描比较同源,无歧义。"""
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    """M21 起真身在 app.core.timeutil(heartbeat 同源);保留名字兼容
+    既有引用与文档。"""
+    return utcnow_naive()
 
 
 def _envelope(event_type: str, data: dict) -> dict:
