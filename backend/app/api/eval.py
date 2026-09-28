@@ -33,6 +33,8 @@ from app.schemas.eval import (
     EvalTriggerIn,
 )
 from app.services.audit import audit
+from app.services.eval_runner import _finalize_run
+from app.services.outbound import nudge
 
 router = APIRouter(prefix="/eval", tags=["eval"])
 
@@ -366,10 +368,14 @@ async def trigger_run(
         run_evaluation.delay(run.id, payload.mode, payload.rerank, top_k)
     except Exception as e:
         # I-1:.delay() 抛异常(broker 不可达/连接断)时消息已丢,run 若留
-        # running 则同 kb+mode 永久 409、前端轮询永不停 → 收口 failed
-        run.status = "failed"
-        run.error = f"dispatch failed: {e}"[:500]
-        await db.commit()
+        # running 则同 kb+mode 永久 409、前端轮询永不停 → 收口 failed。
+        # M22:同走 _finalize_run 条件收口——全库最后一个 ORM 无条件终态
+        # 写删除;事件/nudge/取消竞态(用户赢)与任务失败路径完全同构。
+        final, n = await _finalize_run(
+            db, run.id, run.kb_id, payload.mode, [], False,
+            error=f"dispatch failed: {e}"[:500])
+        if n:
+            nudge()
         raise HTTPException(
             status_code=502, detail="evaluation dispatch failed") from e
     return {"run_id": run.id}

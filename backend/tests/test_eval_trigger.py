@@ -3,6 +3,7 @@
 列表/明细新字段(status/created_by/done_count/error)。
 终审 I-1:dispatch 失败收口 failed + 502;worker 启动孤儿 running 清扫。"""
 from datetime import datetime, timedelta, timezone
+import time
 
 from sqlalchemy import select, text
 
@@ -128,6 +129,36 @@ async def test_trigger_dispatch_failure_marks_run_failed(
         select(EvalRun).where(EvalRun.kb_id == kb_id))).scalars().one()
     assert run.status == "failed"
     assert "dispatch failed" in run.error
+
+
+async def test_trigger_dispatch_failure_emits_eval_failed(
+        client, auth_headers, db_session, monkeypatch):
+    """M22:派发失败走 _finalize_run——eval.failed 事件照发(此前静默)、
+    item_count 收口为 0(零子集),与任务失败路径同构。"""
+    from app.models import WebhookDelivery, WebhookEndpoint
+    from app.workers.eval_tasks import run_evaluation
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("broker unreachable")
+
+    monkeypatch.setattr(run_evaluation, "delay", _boom)
+    db_session.add(WebhookEndpoint(
+        name=f"df{time.time_ns()}", url="http://x/h", secret="wh_s",
+        events=["eval.failed"], created_by=1))
+    await db_session.commit()
+    kb_id = await _make_kb(client, auth_headers, "触发库F")
+    await _add_question(db_session, kb_id)
+    r = await client.post("/api/eval/runs", headers=auth_headers,
+                          json={"kb_id": kb_id, "mode": "retrieval"})
+    assert r.status_code == 502
+    run = (await db_session.execute(
+        select(EvalRun).where(EvalRun.kb_id == kb_id))).scalars().one()
+    assert run.status == "failed" and run.item_count == 0
+    rows = (await db_session.execute(
+        select(WebhookDelivery))).scalars().all()
+    assert [x.event_type for x in rows] == ["eval.failed"]
+    d = rows[0].payload["data"]
+    assert "dispatch failed" in d["error"] and d["run"]["item_count"] == 0
 
 
 async def test_trigger_run_leaves_heartbeat_null_until_start(
