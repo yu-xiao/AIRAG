@@ -7,6 +7,7 @@
 import time
 from datetime import datetime, timedelta, timezone
 
+import pytest
 from sqlalchemy import select, text, update
 
 from app.core.timeutil import utcnow_naive
@@ -294,6 +295,21 @@ async def test_finalize_cancelled_emits_cancelled_event(db_session):
     rows = (await db_session.execute(
         select(WebhookDelivery))).scalars().all()
     assert [r.event_type for r in rows] == ["eval.cancelled"]
+
+
+async def test_finalize_rejects_cancelled_and_error(db_session):
+    """M22 互斥防护:取消与失败二选一——组合调用即 ValueError,且防护
+    先于任何写(行保持 running、零事件)。"""
+    run_id = await _mk_bare_run(db_session, "running")
+    with pytest.raises(ValueError):
+        await _finalize_run(db_session, run_id, 1, "retrieval", [],
+                            True, error="x")
+    db_session.expire_all()
+    run = await db_session.get(EvalRun, run_id)
+    assert run.status == "running"
+    rows = (await db_session.execute(
+        select(WebhookDelivery))).scalars().all()
+    assert rows == []
 
 
 async def test_finalize_failed_only_from_running(db_session):

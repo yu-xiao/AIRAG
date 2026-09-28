@@ -173,6 +173,9 @@ async def _finalize_run(db: AsyncSession, run_id: int, kb_id: int,
     两跳全零行=行已被 sweep 等他人收口,不写不发(返回 None;空事务
     无 pending 变更,提前返回不走 commit)。事件按 final 分流,同事务
     commit;返回 (final, n) 供调用方 nudge。"""
+    if cancelled and error:
+        raise ValueError(
+            "cancelled 与 error 互斥:取消非失败(调用方二选一)")
     from sqlalchemy import update
 
     from app.models import EvalRun
