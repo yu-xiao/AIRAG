@@ -128,6 +128,30 @@ async def test_trigger_dispatch_failure_marks_run_failed(
     assert "dispatch failed" in run.error
 
 
+async def test_trigger_run_initializes_heartbeat_at_creation(
+        client, auth_headers, db_session, monkeypatch):
+    """终审修复:run 创建即写心跳——beat 清扫把 NULL 视 stale,排队在
+    忙 worker 后的 run 会被误收口孤儿(queued-behind-busy-worker)。
+    patch .delay 拦住 eager 内联执行(模拟任务仍在队列里),
+    创建时刻的心跳即 run 在宽限期内不被清扫的唯一凭据。"""
+    from datetime import timedelta
+
+    from app.core.timeutil import utcnow_naive
+    from app.workers.eval_tasks import run_evaluation
+
+    monkeypatch.setattr(run_evaluation, "delay", lambda *a, **k: None)
+    kb_id = await _make_kb(client, auth_headers, "触发库E")
+    await _add_question(db_session, kb_id)
+    r = await client.post("/api/eval/runs", headers=auth_headers,
+                          json={"kb_id": kb_id, "mode": "retrieval"})
+    assert r.status_code == 201
+    run = (await db_session.execute(
+        select(EvalRun).where(EvalRun.kb_id == kb_id))).scalars().one()
+    assert run.status == "running"
+    assert run.heartbeat_at is not None
+    assert utcnow_naive() - run.heartbeat_at < timedelta(seconds=60)
+
+
 async def test_recover_orphan_runs_sweeps_running(db_session):
     """I-1:worker 启动清扫——预插 running 孤儿 → failed+语义,completed 不动。
     直调处理器本体(worker_ready 信号在 celery eager/pytest 进程不触发)。"""

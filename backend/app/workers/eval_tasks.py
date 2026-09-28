@@ -70,7 +70,7 @@ def _recover_orphan_runs() -> int:
     """信号处理器本体;独立成可直调函数供测试调用(信号在 pytest 不触发)。"""
     n = _run_async(_sweep_orphan_runs())
     if n:
-        logger.info(f"recovered {n} orphaned running eval run(s) on worker start")
+        logger.info(f"recovered {n} orphaned eval run(s) (stale heartbeat)")
     return n
 
 

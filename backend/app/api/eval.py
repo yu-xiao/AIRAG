@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.deps import get_current_user
 from app.core.perms import get_kb_perm, has_perm
+from app.core.timeutil import utcnow_naive
 from app.db.session import get_db
 from app.models import (
     EvalItem,
@@ -352,8 +353,11 @@ async def trigger_run(
         raise HTTPException(status_code=409, detail="evaluation already running")
     top_k = (payload.top_k if payload.top_k is not None
              else settings.RETRIEVAL_TOP_K)
+    # M21 修复:创建即心跳——排队即在租约内(beat 清扫视 NULL 为 stale,
+    # 忙 worker 后排队的 run 不再被误收口孤儿);超宽限残余留给 M22 多 worker 租约
     run = EvalRun(kb_id=payload.kb_id, mode=payload.mode, summary=None,
                   item_count=q_count, status="running",
+                  heartbeat_at=utcnow_naive(),
                   triggered_by=current.id)
     db.add(run)
     await db.commit()  # 铁律:先 commit 再 delay(eager/竞态下任务要看得见行)
