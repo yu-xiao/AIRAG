@@ -366,11 +366,13 @@ async def test_run_task_exception_failed_via_finalize(
     assert len(items) == 1  # 第 1 题已逐题落库,不受异常影响
 
 
-async def test_run_task_aborts_when_closed_before_start(db_session,
-                                                         monkeypatch):
+async def test_run_task_aborts_when_closed_before_start(
+        client, auth_headers, db_session, monkeypatch):
     """M22 领租:行已被收口终态 → 条件 UPDATE 零行命中,任务直接退出
-    ——零题被跑、终态不被覆盖(杜绝「被误杀后白跑全程」)。"""
-    run_id = await _mk_bare_run(db_session, "failed")
+    ——零题被跑、终态不被覆盖(杜绝「被误杀后白跑全程」)。真题集(n=2)
+    使测试具区分力:无领租块则两题照跑(calls==2、EvalItem 落库)。"""
+    run_id = await _mk_run(client, auth_headers, db_session,
+                           status="failed", n=2)
     fake, calls = _fake_retrieval_item(run_id, flip_at=99)
     monkeypatch.setattr(runner, "retrieval_item", fake)
     await run_eval_task(run_id, "retrieval", False, 8)
@@ -384,14 +386,17 @@ async def test_run_task_aborts_when_closed_before_start(db_session,
 
 
 async def test_run_task_cancelled_while_queued_closes_zero_subset(
-        db_session, monkeypatch):
+        client, auth_headers, db_session, monkeypatch):
     """M22:排队期间被取消(行 cancelling)→ 领租成功但提前收口:零子集
-    cancelled + eval.cancelled 事件,一题不跑(M19 检查点语义提前到零题)。"""
+    cancelled + eval.cancelled 事件,一题不跑(M19 检查点语义提前到零题)。
+    真题集(n=2)使测试具区分力:无领租块则第 1 题照跑后检查点收口
+    (item_count==1),而非零子集。"""
     db_session.add(WebhookEndpoint(
         name=f"cq{time.time_ns()}", url="http://x/h", secret="wh_s",
         events=[], created_by=1))
     await db_session.commit()
-    run_id = await _mk_bare_run(db_session, "cancelling")
+    run_id = await _mk_run(client, auth_headers, db_session,
+                           status="cancelling", n=2)
     fake, calls = _fake_retrieval_item(run_id, flip_at=99)
     monkeypatch.setattr(runner, "retrieval_item", fake)
     await run_eval_task(run_id, "retrieval", False, 8)
