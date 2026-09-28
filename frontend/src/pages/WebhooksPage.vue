@@ -53,6 +53,14 @@ const URL_PLACEHOLDER: Record<string, string> = {
   dingtalk: 'https://oapi.dingtalk.com/robot/send?access_token=...',
   feishu: 'https://open.feishu.cn/open-apis/bot/v2/hook/...',
 }
+// M21:按通道联动的引导——generic 只看 HTTP 状态码,企微业务错误也回 200,
+// 用 generic 接企微会误报成功(09-28 走查口头确认的坑)
+const PROVIDER_HELP: Record<string, string> = {
+  generic: '通用通道:自签 HMAC 密钥,成功判定只看 HTTP 状态码(2xx 即成功)',
+  wecom: '企微群机器人请用本通道(URL 取「群设置→群机器人→新建→复制 Webhook」),无需密钥。注意:通用通道只看 HTTP 状态码,企微业务错误也回 200,用通用通道接企微会误报成功',
+  dingtalk: '钉钉自定义机器人;机器人安全设置中的加签密钥可选(填入后按平台方式加签)',
+  feishu: '飞书自定义机器人;机器人安全设置中的签名密钥可选(填入后按平台方式加签)',
+}
 
 // KB 订阅范围选项(admin 可见全部 KB);加载失败静默——订阅选填,不打断端点页
 const kbOptions = ref<{ id: number; name: string }[]>([])
@@ -558,7 +566,7 @@ onMounted(() => {
               :value="p.value"
             />
           </el-select>
-          <div class="form-help">企业微信无需密钥;钉钉 / 飞书支持平台加签</div>
+          <div class="form-help">{{ PROVIDER_HELP[form.provider] }}</div>
         </el-form-item>
         <el-form-item label="回调 URL" prop="url">
           <el-input

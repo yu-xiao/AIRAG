@@ -252,6 +252,27 @@ describe('WebhooksPage', () => {
       'input[placeholder="平台机器人加签密钥,未开启加签可留空"]').exists()).toBe(true)
   })
 
+  it('通道引导文案随 provider 联动(wecom 含群机器人与误报提示)', async () => {
+    const w = mountPage()
+    await flushPromises()
+    await findBtn(w, '新建端点').trigger('click')
+    await flushPromises()
+    const sel = w.getComponent('.provider-select') as never as {
+      vm: { $emit: (e: string, v: unknown) => void }
+    }
+    // generic:HMAC + 仅看 HTTP 状态码
+    expect(w.text()).toContain('HMAC')
+    ;(sel.vm as never as { $emit: (e: string, v: unknown) => void })
+      .$emit('update:modelValue', 'wecom')
+    await flushPromises()
+    expect(w.text()).toContain('群机器人')
+    expect(w.text()).toContain('误报成功') // 09-28 走查:generic 接企微的坑
+    ;(sel.vm as never as { $emit: (e: string, v: unknown) => void })
+      .$emit('update:modelValue', 'dingtalk')
+    await flushPromises()
+    expect(w.text()).toContain('加签密钥')
+  })
+
   it('KB 多选:提交 payload 携带 kb_ids', async () => {
     vi.mocked(adminApi.createWebhook).mockResolvedValue({
       ...eps[0]!, id: 9, secret: 'wh_plainsecret123',
