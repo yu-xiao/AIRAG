@@ -290,3 +290,44 @@ git commit -m "chore(test): drop shadow import; parenthesize acceptance wait con
 2. **真栈验收** `backend/scripts/m23_acceptance.py`(照 m22 模式+净版 wait_delivery,worker 重启后跑):①超龄 never-started 行 → 收口 + receiver 收到 `never started` 文案 eval.failed;②stale 心跳行 → `heartbeat expired` 文案;③真实 retrieval 运行正常完成(领租+续租不回归);④docs 两形态文案在。
 3. **终审 whole-branch**(4746383 起)+ M24 候选回流。
 4. **执行记录** + 记忆更新(与 M21/M22 的 21 个提交同批,等用户批量走查后推送)。
+
+---
+
+## 执行记录(2026-09-29,SDD 三任务零修复轮 + 终审一波修复)
+
+**交付(4746383..f295973,8 提交含 spec/plan,main 本地未推)**:
+- 0d4379b spec / 9f24302 plan
+- T1 4679e19 检查点 any non-running 即 break(两循环;cancelled 仅 cancelling 置位;
+  failed 双 miss 不写不发,sweep 唯一权威;单题>10min 被 sweep 收口后不再白跑)
+- T2 339a34b 孤儿文案分裂:ORPHAN_HEARTBEAT_ERROR / ORPHAN_QUEUED_ERROR 两常量,
+  两条同事务 UPDATE…RETURNING(第五列 EvalRun.error,事件文案取库中真值),
+  断言序无关化;docs 两形态;实现者抓到 brief 测试代码 MissingGreenlet 坑
+  (expire_all 后访问 ORM id 同步惰性加载),最小修复裁定追认
+- T3 dc03959 影子 import 删除 + m22 验收 wait_delivery 条件括号(真值表等价核验)
+- d3a3650 m23_acceptance(10 检查)/ f295973 终审修复(日志尾缀 lease expired
+  + docstring 单 commit 原子性——终审证实两语句+事件行单 commit,崩溃整体回滚,
+  事件只延迟不重复,比 spec 记载更强)
+
+**门禁**:pytest 501→**502P/0F**、vitest **85/85**、build 零错(前端未触,门禁确认)。
+
+**真栈验收 m23_acceptance 10/10 PASS 0 SKIP**:超龄 never-started 行收口且
+receiver 实收 `never started` 文案、stale 心跳行收口且实收 `heartbeat expired`
+(分支分流真栈判别);真实 retrieval 运行零回归(领租+续租);docs 两形态在。
+
+**终审(whole-branch,4746383..d3a3650)**:**Ready to merge — Yes**,零
+Critical/Important。对抗核验:检查点对状态域路由全枚举(cancelling→取消收口/
+failed→双 miss/他值→保守 no-op);两语句在 heartbeat NULL 性上不相交,恰一次
+收口恰一次事件;RETURNING 后值即所写常量无漂移;时钟域全程同律。triage:日志
+尾缀 fix-now(随修复波落地),验收清理不对称 park(dev-only 脚本)。
+
+**环境备忘(新)**:start_dev.bat 的 alembic 步在分离窗口偶发卡死(前台直跑秒过,
+库已在 head)——重启栈时若 API 不起,先查 alembic 进程,直接拉 uvicorn 绕过;
+wmic /format:value 输出行尾带 CR,for 循环取 PID 须去 CR(字面量杀最稳)。
+
+**M24 候选**:大件仍等输入(A2A/MinerU 本地化/LDAP);小项:验收脚本早失败时
+端点/KB 清理不对称(finally 只删 run 行)、sweep docstring 与 spec 的原子性措辞
+对齐已完成、其余无积压——**M17 以来的 triage 队列首次清零**。
+
+**栈态**:8001(直接 uvicorn)/beat/worker(已重启带 f295973)/5173;dev 库
+head=c2d3e4f5a6b7(M23 无迁移)。
+
