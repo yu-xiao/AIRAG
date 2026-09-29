@@ -45,8 +45,9 @@ async def _sweep_orphan_runs() -> int:
     UTC(datetime.now(timezone.utc))比较——两列各域,绝不混用。任务
     逐题续签 heartbeat_at。除 worker_ready 外,beat 60s 周期兜底:
     worker 崩溃后孤儿不再「只能等下次重启」,≤ 宽限+间隔内必被收口
-    (强于 M15 现状)。两条同事务语句各带分支文案,语句间崩溃最少数发
-    不重发,at-least-once 一致。DB 访问同 pipeline._mark_failed 模式:
+    (强于 M15 现状)。两条语句与事件行同事务单 commit,语句间崩溃整体
+    回滚,下一 beat tick 重扫补收口(事件只可能延迟,不可重复)。
+    DB 访问同 pipeline._mark_failed 模式:
     自持 NullPool 引擎,用完 dispose(不与 API/worker 常驻引擎共享连接池)。"""
     from sqlalchemy import update
     from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -100,7 +101,7 @@ def _recover_orphan_runs() -> int:
     """信号处理器本体;独立成可直调函数供测试调用(信号在 pytest 不触发)。"""
     n = _run_async(_sweep_orphan_runs())
     if n:
-        logger.info(f"recovered {n} orphaned eval run(s) (stale heartbeat)")
+        logger.info(f"recovered {n} orphaned eval run(s) (lease expired)")
     return n
 
 
