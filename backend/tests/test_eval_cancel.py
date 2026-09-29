@@ -478,7 +478,8 @@ async def test_sweep_collects_cancelling(client, auth_headers, db_session):
     runs = (await db_session.execute(
         select(EvalRun).order_by(EvalRun.id))).scalars().all()
     assert [r.status for r in runs] == ["failed", "failed", "completed"]
-    assert runs[0].error == "orphaned: heartbeat expired (worker died or restarted)"
+    assert runs[0].error == ("orphaned: never started "
+                             "(queue grace exceeded or message lost)")
     assert runs[2].error is None
 
 
@@ -545,35 +546,37 @@ async def test_sweep_two_stage_predicate(db_session):
 
 
 async def test_sweep_emits_eval_failed_per_orphan(db_session):
-    """M22:孤儿收口不再静默——每个被收口行恰一条 eval.failed,负载
-    summary 诚实为 null、item_count 为创建时题数;completed 行零事件。"""
-    from datetime import datetime, timezone
-
+    """M22/M23:孤儿收口逐行发 eval.failed;error 按分支分流(已开跑=
+    heartbeat expired / 从未开跑=never started);断言按 run id 匹配,
+    不依赖 UPDATE…RETURNING 顺序;summary 诚实 null;completed 行零事件。"""
     db_session.add(WebhookEndpoint(
         name=f"sw{time.time_ns()}", url="http://x/h", secret="wh_s",
         events=[], created_by=1))
-    db_session.add_all([
-        EvalRun(kb_id=1, mode="retrieval", summary=None, item_count=7,
-                status="running", heartbeat_at=None,
-                created_at=datetime.now(timezone.utc)
-                - timedelta(minutes=90)),
-        EvalRun(kb_id=1, mode="generation", summary=None, item_count=3,
-                status="cancelling",
-                heartbeat_at=utcnow_naive() - timedelta(minutes=30)),
-        EvalRun(kb_id=1, mode="retrieval", summary={"hit": 1.0},
-                item_count=2, status="completed"),
-    ])
+    q_row = EvalRun(kb_id=1, mode="retrieval", summary=None, item_count=7,
+                    status="running", heartbeat_at=None,
+                    created_at=datetime.now(timezone.utc)
+                    - timedelta(minutes=90))
+    hb_row = EvalRun(kb_id=1, mode="generation", summary=None, item_count=3,
+                     status="cancelling",
+                     heartbeat_at=utcnow_naive() - timedelta(minutes=30))
+    done = EvalRun(kb_id=1, mode="retrieval", summary={"hit": 1.0},
+                   item_count=2, status="completed")
+    db_session.add_all([q_row, hb_row, done])
     await db_session.commit()
+    # expire_all 前先取 id:过期属性同步懒载在 async 会话里必炸 MissingGreenlet
+    q_id, hb_id = q_row.id, hb_row.id
     _recover_orphan_runs()
     db_session.expire_all()
     rows = (await db_session.execute(
-        select(WebhookDelivery).order_by(WebhookDelivery.id))
-    ).scalars().all()
-    assert [r.event_type for r in rows] == ["eval.failed", "eval.failed"]
-    assert all(r.payload["data"]["run"]["summary"] is None
-               for r in rows)
-    assert rows[0].payload["data"]["run"]["item_count"] == 7
-    assert "orphaned" in rows[0].payload["data"]["error"]
+        select(WebhookDelivery))).scalars().all()
+    assert len(rows) == 2
+    by_run = {r.payload["data"]["run"]["id"]: r.payload["data"]
+              for r in rows}
+    assert set(by_run) == {q_id, hb_id}
+    assert all(d["run"]["summary"] is None for d in by_run.values())
+    assert "never started" in by_run[q_id]["error"]
+    assert "heartbeat expired" in by_run[hb_id]["error"]
+    assert by_run[q_id]["run"]["item_count"] == 7
 
 
 def test_beat_schedule_registers_orphan_sweep():

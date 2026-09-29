@@ -8,7 +8,10 @@ from app.services.outbound import emit_event, nudge
 from app.workers.celery_app import celery_app
 from app.workers.pipeline import _engine, _run_async
 
-ORPHAN_ERROR = "orphaned: heartbeat expired (worker died or restarted)"
+ORPHAN_HEARTBEAT_ERROR = ("orphaned: heartbeat expired "
+                          "(worker died or restarted)")
+ORPHAN_QUEUED_ERROR = ("orphaned: never started "
+                       "(queue grace exceeded or message lost)")
 
 
 @celery_app.task(name="app.workers.eval_tasks.run_evaluation")
@@ -42,9 +45,10 @@ async def _sweep_orphan_runs() -> int:
     UTC(datetime.now(timezone.utc))比较——两列各域,绝不混用。任务
     逐题续签 heartbeat_at。除 worker_ready 外,beat 60s 周期兜底:
     worker 崩溃后孤儿不再「只能等下次重启」,≤ 宽限+间隔内必被收口
-    (强于 M15 现状)。DB 访问同 pipeline._mark_failed 模式:自持
-    NullPool 引擎,用完 dispose(不与 API/worker 常驻引擎共享连接池)。"""
-    from sqlalchemy import and_, or_, update
+    (强于 M15 现状)。两条同事务语句各带分支文案,语句间崩溃最少数发
+    不重发,at-least-once 一致。DB 访问同 pipeline._mark_failed 模式:
+    自持 NullPool 引擎,用完 dispose(不与 API/worker 常驻引擎共享连接池)。"""
+    from sqlalchemy import update
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
     from app.core.config import settings
@@ -59,31 +63,35 @@ async def _sweep_orphan_runs() -> int:
             # created_at 是 timestamptz:比较参数必须 aware UTC(时钟域铁律)
             q_cutoff = datetime.now(timezone.utc) - timedelta(
                 minutes=settings.EVAL_QUEUE_GRACE_MINUTES)
-            result = await session.execute(
+            started = (await session.execute(
                 update(EvalRun)
                 .where(EvalRun.status.in_(("running", "cancelling")),
-                       or_(
-                           and_(EvalRun.heartbeat_at.is_not(None),
-                                EvalRun.heartbeat_at <= hb_cutoff),
-                           and_(EvalRun.heartbeat_at.is_(None),
-                                EvalRun.created_at <= q_cutoff),
-                       ))
-                .values(status="failed", error=ORPHAN_ERROR)
+                       EvalRun.heartbeat_at.is_not(None),
+                       EvalRun.heartbeat_at <= hb_cutoff)
+                .values(status="failed", error=ORPHAN_HEARTBEAT_ERROR)
                 .returning(EvalRun.id, EvalRun.kb_id, EvalRun.mode,
-                           EvalRun.item_count)
-            )
-            swept = result.all()
+                           EvalRun.item_count, EvalRun.error)
+            )).all()
+            queued = (await session.execute(
+                update(EvalRun)
+                .where(EvalRun.status.in_(("running", "cancelling")),
+                       EvalRun.heartbeat_at.is_(None),
+                       EvalRun.created_at <= q_cutoff)
+                .values(status="failed", error=ORPHAN_QUEUED_ERROR)
+                .returning(EvalRun.id, EvalRun.kb_id, EvalRun.mode,
+                           EvalRun.item_count, EvalRun.error)
+            )).all()
             n = 0
-            for rid, kb_id, mode, item_count in swept:
+            for rid, kb_id, mode, item_count, err in [*started, *queued]:
                 # 孤儿从未收口:summary 诚实 null,item_count 为创建时题数
                 n += await emit_event(session, "eval.failed", {
                     "run": {"id": rid, "kb_id": kb_id, "mode": mode,
                             "item_count": item_count, "summary": None},
-                    "error": ORPHAN_ERROR})
+                    "error": err})
             await session.commit()
             if n:
                 nudge()
-            return len(swept)
+            return len(started) + len(queued)
     finally:
         await engine.dispose()
 

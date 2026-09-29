@@ -56,8 +56,10 @@ M20 新增 eval.cancelled,M21 统一 eval.failed 负载形状;admin 在「出站
    "error": "ZHIPU_API_KEY 未配置,生成评估无法执行"}
   ```
 
-  孤儿收口(worker 崩溃后被清扫)也发 eval.failed:`summary` 为 null、
-  `item_count` 为创建时题数、`error` 为 `orphaned: heartbeat expired …`。
+  孤儿收口也发 eval.failed:`summary` 为 null、`item_count` 为创建时题数;
+  `error` 按分支两形态——已开跑 `orphaned: heartbeat expired (worker died
+  or restarted)` / 从未开跑 `orphaned: never started (queue grace exceeded
+  or message lost)`。
 
 - **chat.refused**(`source`:`web` 网页 / `rest` API Key / `mcp` MCP 工具)
 
