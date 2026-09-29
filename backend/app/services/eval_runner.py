@@ -276,9 +276,12 @@ async def run_eval_task(run_id: int, mode: str, rerank: bool,
                         run.heartbeat_at = utcnow_naive()  # M21 租约续签(同 commit,零额外往返)
                         db.add(EvalItem(run_id=run.id, **item_kwargs(r)))
                         await db.commit()
-                        await db.refresh(run)  # 拾取端点并发置的 cancelling
-                        if run.status == "cancelling":
-                            cancelled = True
+                        await db.refresh(run)  # 检查点:拾取端点 cancelling / sweep failed
+                        if run.status != "running":
+                            # M23:any non-running 即停——cancelling 走取消
+                            # 收口;failed(sweep 已收口+已发事件)双 miss
+                            # 不写不发,最迟下一检查点停止白跑
+                            cancelled = run.status == "cancelling"
                             break
                 else:
                     from app.core.config import settings as _s
@@ -297,9 +300,12 @@ async def run_eval_task(run_id: int, mode: str, rerank: bool,
                         run.heartbeat_at = utcnow_naive()  # M21 租约续签(同 commit,零额外往返)
                         db.add(EvalItem(run_id=run.id, **item_kwargs(r)))
                         await db.commit()
-                        await db.refresh(run)  # 拾取端点并发置的 cancelling
-                        if run.status == "cancelling":
-                            cancelled = True
+                        await db.refresh(run)  # 检查点:拾取端点 cancelling / sweep failed
+                        if run.status != "running":
+                            # M23:any non-running 即停——cancelling 走取消
+                            # 收口;failed(sweep 已收口+已发事件)双 miss
+                            # 不写不发,最迟下一检查点停止白跑
+                            cancelled = run.status == "cancelling"
                             break
                 # M20:条件收口(竞态防线+事件分流);kb_id 是 M17 快照
                 final, n = await _finalize_run(db, run_id, run.kb_id,

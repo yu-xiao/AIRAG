@@ -425,6 +425,39 @@ async def test_run_task_cancelled_while_queued_closes_zero_subset(
     assert [r.event_type for r in rows] == ["eval.cancelled"]
 
 
+async def test_run_task_stops_when_swept_failed_mid_run(
+        client, auth_headers, db_session, monkeypatch):
+    """M23:单题超宽限被 sweep 收口 failed 后,循环在下一检查点停止
+    ——不白跑剩余题;failed 终态与数据不被 _finalize_run 改写(双 miss,
+    summary 保持 null、零事件;sweep 是唯一权威)。"""
+    run_id = await _mk_run(client, auth_headers, db_session, n=3)
+    calls = {"n": 0}
+
+    async def flaky(db, kb_id, q, top_k, reranker):
+        calls["n"] += 1
+        if calls["n"] == 2:  # 第 2 题提交后模拟 sweep 已收口 failed
+            await db.execute(update(EvalRun).where(EvalRun.id == run_id)
+                             .values(status="failed"))
+            await db.commit()
+        return {"question": q.question, "hit_at_k": None, "mrr": None,
+                "keyword_recall": None}
+
+    monkeypatch.setattr(runner, "retrieval_item", flaky)
+    monkeypatch.setattr(runner, "nudge", lambda: None)
+    await run_eval_task(run_id, "retrieval", False, 8)
+    assert calls["n"] == 2  # 第 2 题检查点见 failed 即停,第 3 题不跑
+    db_session.expire_all()
+    run = await db_session.get(EvalRun, run_id)
+    assert run.status == "failed"  # sweep 终态保持
+    assert run.summary is None  # 双 miss:无 summary 改写
+    items = (await db_session.execute(
+        select(EvalItem).where(EvalItem.run_id == run_id))).scalars().all()
+    assert len(items) == 2
+    rows = (await db_session.execute(
+        select(WebhookDelivery))).scalars().all()
+    assert rows == []  # 双 miss:零事件
+
+
 async def test_sweep_collects_cancelling(client, auth_headers, db_session):
     """worker 重启清扫:running 与 cancelling 两类在途都收口 failed。"""
     db_session.add_all([
