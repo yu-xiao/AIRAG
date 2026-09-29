@@ -520,8 +520,6 @@ async def test_sweep_two_stage_predicate(db_session):
     """M22 两段判据:已开跑看心跳宽限;从未开跑(NULL)看创建龄
     (EVAL_QUEUE_GRACE_MINUTES,默认 60)——排队中的新鲜行绝不收口,
     超龄 NULL 行兜底收口。created_at 为 timestamptz,回填用 aware UTC。"""
-    from datetime import datetime, timezone
-
     aware_now = datetime.now(timezone.utc)
     db_session.add_all([
         EvalRun(kb_id=1, mode="retrieval", summary=None, item_count=0,

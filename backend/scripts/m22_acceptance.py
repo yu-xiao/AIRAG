@@ -130,8 +130,8 @@ async def wait_delivery(c, jwt, endpoint_id, event_type, timeout_s=60):
                                 "event_type": event_type, "page_size": 20},
                         headers=jwt)
         rows = r.json().get("items") or []
-        if rows and all(x.get("status") in ("succeeded", "dead") for x in rows) \
-                and len(rows) >= 1 \
+        if (rows and all(x.get("status") in ("succeeded", "dead")
+                         for x in rows)) \
                 or time.perf_counter() > t0 + timeout_s:
             return rows
         await asyncio.sleep(2)
