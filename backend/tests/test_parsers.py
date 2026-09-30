@@ -153,3 +153,34 @@ def test_html_extracts_text_skips_script(tmp_path):
     assert "标题甲" in text and "正文二段" in text
     assert "var x" not in text and "body{}" not in text
     assert get_parser(".htm")
+
+
+def _make_pptx(tmp_path: Path) -> Path:
+    from pptx import Presentation
+    from pptx.util import Inches
+
+    prs = Presentation()
+    s1 = prs.slides.add_slide(prs.slide_layouts[5])  # blank
+    s1.shapes.title.text = "第一页标题"
+    tb = s1.shapes.add_textbox(Inches(1), Inches(2), Inches(4), Inches(1))
+    tb.text_frame.text = "第一页要点"
+    s2 = prs.slides.add_slide(prs.slide_layouts[5])
+    gf = s2.shapes.add_table(2, 2, Inches(1), Inches(1), Inches(4), Inches(1))
+    gf.table.cell(0, 0).text = "名称"
+    gf.table.cell(0, 1).text = "数量"
+    gf.table.cell(1, 0).text = "甲"
+    gf.table.cell(1, 1).text = "7"
+    p = tmp_path / "t.pptx"
+    prs.save(str(p))
+    return p
+
+
+def test_pptx_slides_tables_notes(tmp_path):
+    result = get_parser(".pptx").parse(_make_pptx(tmp_path))
+    assert result.page_count == 2
+    texts = [b.content for b in result.blocks if not b.is_table]
+    assert any("第一页标题" in t for t in texts)
+    assert any("第一页要点" in t for t in texts)
+    tables = [b for b in result.blocks if b.is_table]
+    assert len(tables) == 1 and tables[0].page_no == 2
+    assert "名称 | 数量" in tables[0].content and "甲 | 7" in tables[0].content
