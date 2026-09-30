@@ -140,3 +140,16 @@ def test_allowed_exts_derived_from_registry():
     assert doc_ops.ALLOWED_EXTS == frozenset(REGISTRY)
     for ext in (".txt", ".md", ".csv", ".json"):
         assert ext in doc_ops.ALLOWED_EXTS
+
+
+def test_html_extracts_text_skips_script(tmp_path):
+    p = tmp_path / "t.html"
+    p.write_text(
+        "<html><head><style>body{}</style><script>var x=1;</script></head>"
+        "<body><h1>标题甲</h1><p>正文一段</p><p>正文二段</p></body></html>",
+        encoding="utf-8")
+    result = get_parser(".html").parse(p)
+    text = "\n".join(b.content for b in result.blocks)
+    assert "标题甲" in text and "正文二段" in text
+    assert "var x" not in text and "body{}" not in text
+    assert get_parser(".htm")
