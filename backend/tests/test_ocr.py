@@ -211,6 +211,115 @@ def test_mineru_client_429_and_timeout(monkeypatch, tmp_path):
         mc.parse_via_mineru(p, "s.pdf")
 
 
+class _FakeResp:
+    def __init__(self, status_code=200, json_data=None, content=b""):
+        self.status_code = status_code
+        self._json_data = json_data
+        self.content = content
+
+    def json(self):
+        return self._json_data
+
+
+class _FakeMineruClient:
+    """罐头 MinerU 客户端:记录 batch json 与各 PUT 内容,zip 文本由测试注入。"""
+
+    instances = []
+    zip_texts = []  # 每个文件的 full.md 文本,顺序即 files 顺序
+
+    def __init__(self, base_url=None, timeout=None, **kw):
+        self.batch_json = None
+        self.puts = []  # [(url, content)]
+        self._urls = []
+        type(self).instances.append(self)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def post(self, url, headers=None, json=None):
+        self.batch_json = json
+        n = len(json["files"])
+        self._urls = [f"http://u/{i + 1}" for i in range(n)]
+        return _FakeResp(
+            json_data={"code": 0, "data": {"batch_id": "b1", "file_urls": self._urls}}
+        )
+
+    def put(self, url, content=b""):
+        self.puts.append((url, bytes(content)))
+        return _FakeResp(status_code=200)
+
+    def get(self, url, headers=None):
+        if url.startswith("/api/v4/extract-results/"):
+            return _FakeResp(
+                json_data={
+                    "code": 0,
+                    "data": {
+                        "extract_result": [
+                            {"state": "done", "full_zip_url": f"http://zip/{i + 1}"}
+                            for i in range(len(self._urls))
+                        ]
+                    },
+                }
+            )
+        idx = int(url.rsplit("/", 1)[-1]) - 1
+        return _FakeResp(content=_zip_with_markdown(self.zip_texts[idx]))
+
+
+def _use_fake_mineru(monkeypatch, zip_texts):
+    from app.services.parsing import mineru_client as mc
+
+    _FakeMineruClient.instances = []
+    _FakeMineruClient.zip_texts = zip_texts
+    monkeypatch.setattr(mc.httpx, "Client", _FakeMineruClient)
+    monkeypatch.setattr(mc, "POLL_INTERVAL", 0)
+    return _FakeMineruClient
+
+
+def test_mineru_client_transcodes_tiff_to_png(tmp_path, monkeypatch):
+    """M24:TIFF 云端 -60002 不收,本地逐帧转 PNG,单批上传并按帧序合并。"""
+    from PIL import Image
+
+    from app.services.parsing import mineru_client as mc
+
+    _enable_mineru(monkeypatch)
+    p = tmp_path / "scan.tif"
+    im = Image.new("RGB", (4, 4), (255, 0, 0))
+    im.save(p, save_all=True, append_images=[Image.new("RGB", (4, 4), (0, 0, 255))])
+
+    fake_cls = _use_fake_mineru(monkeypatch, ["第1页内容", "第2页内容"])
+    md = mc.parse_via_mineru(p, "scan.tif")
+
+    fake = fake_cls.instances[0]
+    names = [f["name"] for f in fake.batch_json["files"]]
+    assert names == ["scan_1.png", "scan_2.png"]
+    assert [u for u, _ in fake.puts] == ["http://u/1", "http://u/2"]
+    assert all(c.startswith(b"\x89PNG") for _, c in fake.puts)
+    assert "第1页内容" in md and "第2页内容" in md
+    assert md.index("第1页内容") < md.index("第2页内容")  # 帧序合并
+
+
+def test_mineru_client_non_tiff_uploads_raw(tmp_path, monkeypatch):
+    """非 TIFF 原样直传:原名 + 原始字节,单结果返回。"""
+    from app.services.parsing import mineru_client as mc
+
+    _enable_mineru(monkeypatch)
+    raw = b"\x89PNG\r\n\x1a\nraw-png-bytes"
+    p = tmp_path / "photo.png"
+    p.write_bytes(raw)
+
+    fake_cls = _use_fake_mineru(monkeypatch, ["单个结果"])
+    md = mc.parse_via_mineru(p, "photo.png")
+
+    fake = fake_cls.instances[0]
+    names = [f["name"] for f in fake.batch_json["files"]]
+    assert names == ["photo.png"]
+    assert fake.puts == [("http://u/1", raw)]
+    assert md == "单个结果"
+
+
 async def test_upload_jpg_and_ocr_mode(client, auth_headers):
     png = io.BytesIO(b"\x89PNG\r\n\x1a\nfaked")
     resp = await client.post(
