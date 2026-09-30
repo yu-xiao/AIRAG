@@ -598,3 +598,49 @@ git commit -m "feat(docs): widen upload accept to 18 extensions; new-types end-t
 2. **真栈验收** `backend/scripts/m24_acceptance.py`(照 m23 模式):①上传 GBK .txt/.pptx/.csv → done + 可检索;②上传一张 .bmp(auto OCR)→ done 且 ocr_used=True(真 MinerU token,先例 M5);③前端 accept 串含 18 扩展(grep DocsPage.vue);④ALLOWED_EXTS 即 REGISTRY(运行时断言)。
 3. **终审 whole-branch**(12037aa 起)+ M25 候选回流(老 Office/WPS 转换层若用户后续需要)。
 4. **执行记录** + 记忆更新(推送等走查,既定节奏)。
+
+---
+
+## 执行记录(2026-09-30,SDD 五任务 + 终审一波修复含 Critical)
+
+**交付(12037aa..4352c0c,9 提交含 spec/plan,main 本地未推)**:
+- b076123 spec+plan / fcd3949 T1 文本族(.txt/.md 复用 markdown_to_blocks、.csv 整表
+  块、.json 逐元素、_read_text utf-8-sig→gb18030+CRLF 归一)+ **ALLOWED_EXTS 派生自
+  REGISTRY 单源化** / 90f0ad4 T2 html/htm(bs4,stdlib 后端)/ 6223ff9 T3 pptx
+  (形状/表格/备注,page_no=slide 序)/ f4f4f77 T4 图片五格式 + IMAGE_EXTS 单源化
+  / 5e7f6be T5 前端 accept 18 扩展 + 端到端 / 9a4d0a3 验收脚本 / 4352c0c 终审修复波。
+
+**门禁**:pytest 502→**513P/0F**、vitest 84→**86/86**(新增 DocsPage beforeUpload
+  spec)、build 零错。
+
+**真栈验收 m24_acceptance 14/14 PASS 0 SKIP**(两轮:修复波后终版):GBK txt/
+  csv/pptx 上传→done→chunks 含可检索内容;**bmp 完整 OCR 回路实证**(上传进门→
+  真 MinerU 云调→无文本确定性收口);accept 与前端 ALLOWED_EXTS 常量双 grep;
+  运行时 ALLOWED_EXTS==REGISTRY 断言。首轮脚本自身两处笔误(相对 URL/content
+  字段名)修正后全绿。
+
+**终审(whole-branch)**:With fixes——**Critical:DocsPage.vue 的 beforeUpload
+  自带旧六种 ALLOWED_EXTS 常量,新类型在真实 UI 全被拒**(accept 只管选择器;
+  本里程碑全部门禁走 API 层恰好绕过)→ 修复波 4352c0c:常量/拒绝文案/提示文案
+  三处对齐 18 扩展 + 新建 DocsPage.spec.ts 锁 beforeUpload(.txt/.pptx 过、.exe
+  拒)+ 验收脚本加常量 grep + text_parser docstring 勘误(不重试→3 次快速重试)。
+  scoped 复审三 FINDING 全 ADDRESSED,验收 14/14。重要教训:**前端自有门
+  (beforeUpload/常量)是 accept 之外的第二层,门禁必须穿透到组件行为层**。
+  其余核验全清:导入图无环、pptx 属性面无 AttributeError 路径、IMAGE_EXTS
+  加载序安全、重试语义与裁定一致。
+
+**过程中裁定(全记 SDD ledger)**:①两处 brief 偏差追认(REGISTRY 再导出必要、
+  CRLF 归一必要——Windows 文本现实)②pipeline 对 ValueError 3 次快速重试维持
+  现状(M2 起损坏文件统一语义,spec 措辞勘误)③T4 测试片段按文件风格适配(sync
+  fake+_enable_mineru,源码级验证必要)④T5 e2e PASS-immediately 属预期(RED
+  已逐任务演示)。
+
+**M25 候选(终审 triage)**:老 Office/WPS 转换层(用户已问过,等需要时立项);
+  编码歧义启发式(GBK 字节流恰为合法 UTF-8 时静默乱码,无 chardet 的已接受
+  代价,可加 gb18030 回译对比);utf-8-sig 分支单测;验收脚本 finally 清理;
+  拒绝文案补 .htm/.jpeg 别名。大件 A2A 已评估挂起(触发条件在案)、MinerU
+  本地化/LDAP 仍等输入。
+
+**栈态**:8001/worker/beat/5173 运行 M24 终码(worker 重启过、API 直启绕过
+  bat alembic 卡死坑);无新迁移。
+
