@@ -69,7 +69,7 @@ const uploadPercent = ref(0)
 function beforeUpload(raw: UploadRawFile) {
   const ext = raw.name.slice(raw.name.lastIndexOf('.')).toLowerCase()
   if (!ALLOWED_EXTS.includes(ext)) {
-    ElMessage.error(`不支持的文件类型 ${ext},仅支持文档:.pdf/.docx/.xlsx/.pptx/.txt/.md/.csv/.json/.html 与图片:.jpg/.png/.bmp/.tif/.tiff/.webp/.gif`)
+    ElMessage.error(`不支持的文件类型 ${ext},仅支持文档:.pdf/.docx/.xlsx/.pptx/.txt/.md/.csv/.json/.html/.htm 与图片:.jpg/.jpeg/.png/.bmp/.tif/.tiff/.webp/.gif`)
     return false
   }
   if (raw.size > MAX_UPLOAD_MB * 1024 * 1024) {

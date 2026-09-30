@@ -2,6 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ElementPlus, { type UploadRawFile } from 'element-plus'
 import DocsPage from '@/pages/DocsPage.vue'
+import DocsPageSource from '@/pages/DocsPage.vue?raw'
 import { documentsApi } from '@/api/documents'
 import { kbApi, type KbItem } from '@/api/kb'
 
@@ -45,5 +46,10 @@ describe('DocsPage beforeUpload allowlist (M24: 18 types)', () => {
     expect(hook(f('a.txt'))).toBe(true)   // 旧白名单缺 .txt(M24 终审回归锁)
     expect(hook(f('b.pptx'))).toBe(true)
     expect(hook(f('c.exe'))).toBe(false)  // 越界类型仍拦截
+  })
+
+  it('拒绝文案与 18 项门清单一致(含 .htm/.jpeg 别名)', () => {
+    expect(DocsPageSource).toContain('.html/.htm')
+    expect(DocsPageSource).toContain('.jpeg')
   })
 })
