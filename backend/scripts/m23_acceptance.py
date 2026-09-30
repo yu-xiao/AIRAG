@@ -142,7 +142,53 @@ async def main() -> None:
     print(f"[info] receiver on 127.0.0.1:{port}")
 
     kb_ids, endpoint_ids, run_ids = [], [], []
+    admin: dict | None = None  # 前置绑定:login 即失败时 finally 仍可走 SQL 兜底
     async with httpx.AsyncClient(timeout=TIMEOUT) as c:
+        async def _cleanup(c, jwt):
+            """幂等兜底:API 优先(逐个吞错),SQL 按 FK 序清残;
+            正常路径的 204 检查在 try 内不变,这里只兜早失败。"""
+            for e in endpoint_ids:
+                try:
+                    await c.delete(f"{API}/admin/webhooks/{e}",
+                                   headers=jwt)
+                except Exception:
+                    pass
+            for k in kb_ids:
+                try:
+                    await c.delete(f"{API}/kbs/{k}", headers=jwt)
+                except Exception:
+                    pass
+            for rid in run_ids:
+                try:
+                    await sql("DELETE FROM eval_runs WHERE id = :i",
+                              {"i": rid})
+                except Exception:
+                    pass
+            for k in kb_ids:  # SQL 兜底(API 删失败时)
+                try:
+                    await sql(
+                        "DELETE FROM chunks WHERE kb_id = :k", {"k": k})
+                    await sql(
+                        "DELETE FROM documents WHERE kb_id = :k", {"k": k})
+                    await sql(
+                        "DELETE FROM eval_questions WHERE kb_id = :k",
+                        {"k": k})
+                    await sql(
+                        "DELETE FROM kb_permissions WHERE kb_id = :k",
+                        {"k": k})
+                    await sql(
+                        "DELETE FROM knowledge_bases WHERE id = :k",
+                        {"k": k})
+                except Exception:
+                    pass
+            for e in endpoint_ids:
+                try:
+                    await sql(
+                        "DELETE FROM webhook_endpoints WHERE id = :e",
+                        {"e": e})
+                except Exception:
+                    pass
+
         try:
             admin = await login(c, "admin")
             check("admin login ok", bool(admin.get("Authorization")))
@@ -263,8 +309,7 @@ async def main() -> None:
             check("acceptance KBs deleted 204 (API)",
                   bool(codes) and all(x == 204 for x in codes), str(codes))
         finally:
-            for rid in run_ids:
-                await sql("DELETE FROM eval_runs WHERE id = :i", {"i": rid})
+            await _cleanup(c, admin)
     summary_and_exit()
 
 

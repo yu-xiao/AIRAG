@@ -41,6 +41,33 @@ def summary_and_exit():
         sys.exit(1)
 
 
+def _nullpool_sessionmaker():
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.pool import NullPool
+
+    from app.core.config import settings
+
+    engine = create_async_engine(settings.DATABASE_URL, poolclass=NullPool)
+    return engine, async_sessionmaker(engine, expire_on_commit=False)
+
+
+async def sql(sql_text, params=None, fetch=False):
+    import sqlalchemy
+
+    engine, maker = _nullpool_sessionmaker()
+    try:
+        async with maker() as s:
+            res = await s.execute(sqlalchemy.text(sql_text), params or {})
+            if fetch:
+                out = res.mappings().all()
+                await s.commit()
+                return out
+            await s.commit()
+            return res
+    finally:
+        await engine.dispose()
+
+
 async def login(c: httpx.AsyncClient, username: str) -> dict:
     r = await c.post(f"{API}/auth/login",
                      json={"username": username, "password": "secret123"})
@@ -77,8 +104,48 @@ def _bmp_bytes() -> bytes:
 
 
 async def main() -> None:
-    kb_ids = []
+    kb_ids, endpoint_ids = [], []  # endpoint_ids 统一形制(当前无端点,恒空)
+    admin: dict | None = None  # 前置绑定:login 即失败时 finally 仍可走 SQL 兜底
     async with httpx.AsyncClient(timeout=TIMEOUT) as c:
+        async def _cleanup(c, jwt):
+            """幂等兜底:API 优先(逐个吞错),SQL 按 FK 序清残;
+            正常路径的 204 检查在 try 内不变,这里只兜早失败。"""
+            for e in endpoint_ids:
+                try:
+                    await c.delete(f"{API}/admin/webhooks/{e}",
+                                   headers=jwt)
+                except Exception:
+                    pass
+            for k in kb_ids:
+                try:
+                    await c.delete(f"{API}/kbs/{k}", headers=jwt)
+                except Exception:
+                    pass
+            for k in kb_ids:  # SQL 兜底(API 删失败时)
+                try:
+                    await sql(
+                        "DELETE FROM chunks WHERE kb_id = :k", {"k": k})
+                    await sql(
+                        "DELETE FROM documents WHERE kb_id = :k", {"k": k})
+                    await sql(
+                        "DELETE FROM eval_questions WHERE kb_id = :k",
+                        {"k": k})
+                    await sql(
+                        "DELETE FROM kb_permissions WHERE kb_id = :k",
+                        {"k": k})
+                    await sql(
+                        "DELETE FROM knowledge_bases WHERE id = :k",
+                        {"k": k})
+                except Exception:
+                    pass
+            for e in endpoint_ids:
+                try:
+                    await sql(
+                        "DELETE FROM webhook_endpoints WHERE id = :e",
+                        {"e": e})
+                except Exception:
+                    pass
+
         try:
             admin = await login(c, "admin")
             check("admin login ok", bool(admin.get("Authorization")))
@@ -187,7 +254,7 @@ async def main() -> None:
             check("acceptance KBs deleted 204 (API)",
                   bool(codes) and all(x == 204 for x in codes), str(codes))
         finally:
-            pass
+            await _cleanup(c, admin)
     summary_and_exit()
 
 
