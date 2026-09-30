@@ -2,9 +2,9 @@ from pathlib import Path
 
 from app.core.config import settings
 from app.services.parsing.base import ParseResult, ParsedBlock
+from app.services.parsing.image_parser import IMAGE_EXTS
 from app.services.parsing.mineru_client import parse_via_mineru
 
-IMAGE_EXTS = {".jpg", ".jpeg", ".png"}
 TABLE_MARKERS = ("|---", "---|")
 
 

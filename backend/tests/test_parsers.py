@@ -184,3 +184,14 @@ def test_pptx_slides_tables_notes(tmp_path):
     tables = [b for b in result.blocks if b.is_table]
     assert len(tables) == 1 and tables[0].page_no == 2
     assert "名称 | 数量" in tables[0].content and "甲 | 7" in tables[0].content
+
+
+def test_image_exts_registered():
+    from app.services import doc_ops
+    from app.services.parsing.ocr import IMAGE_EXTS
+    from app.services.parsing.base import get_parser
+
+    for ext in (".bmp", ".tif", ".tiff", ".webp", ".gif"):
+        assert ext in IMAGE_EXTS
+        assert get_parser(ext)
+    assert set(IMAGE_EXTS) <= doc_ops.ALLOWED_EXTS

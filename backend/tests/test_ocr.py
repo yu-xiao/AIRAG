@@ -279,3 +279,23 @@ async def test_ocr_empty_result_fails_without_retry(
     assert doc.status == "failed"
     assert "no text" in doc.error_msg
     assert len(calls) == 1  # 只调一次 MinerU,不烧重试额度
+
+
+async def test_maybe_ocr_routes_new_image_formats(tmp_path, monkeypatch):
+    """M24:bmp 等新图片格式进 OCR 门(auto 即走 MinerU)。"""
+    from app.services.parsing import ocr
+    from app.services.parsing.base import ParseResult
+
+    called = []
+
+    def fake_mineru(path, name):
+        called.append(name)
+        return "ocr 结果"
+
+    monkeypatch.setattr(ocr, "parse_via_mineru", fake_mineru)
+    _enable_mineru(monkeypatch)
+    p = tmp_path / "x.bmp"
+    p.write_bytes(b"bm")
+    out = ocr.maybe_ocr(p, ".bmp", "auto", ParseResult())
+    assert called == ["x.bmp"]
+    assert out.blocks[0].content == "ocr 结果"
