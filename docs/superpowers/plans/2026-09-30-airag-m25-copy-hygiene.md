@@ -225,3 +225,33 @@ git commit -m "chore(test): idempotent finally cleanup in m23/m24 acceptance scr
 1. **全量门禁**:pytest -q(≥515P:513+T2 两例)、vitest(≥87)+ build 零错。
 2. **终审 whole-branch**(65d74a8 起,小 diff 快审)+ M26 候选回流。
 3. **执行记录** + 记忆(推送等走查;文案截图走查项)。
+
+---
+
+## 执行记录(2026-09-30,单批实现 + 单轮合并评审 Ready-merge-Yes)
+
+**交付(65d74a8..87e9014,5 提交含 spec/plan,main 本地未推)**:
+- 41a2b38 spec / 3efad8a plan
+- c2b526d T1 拒绝文案补 .htm/.jpeg(与 18 项门清单集相等;?raw 源码断言,
+  .html/.htm 斜杠形为精确判别子串)
+- 3557786 T2 编码歧义 no-heuristic 裁定入 docstring(GBK 双节 vs UTF-8 窗口
+  概率论证)+ utf-8-sig BOM 剥离/纯 ASCII 两例回归锁(即时 PASS 属预期,
+  M24 T5 先例)
+- 87e9014 T3 m23/m24 验收脚本 finally 幂等 _cleanup(API 优先逐项吞错 + SQL
+  FK 序兜底;admin 预绑 None 防登录失败击穿 finally;m24 补 sql() 同款)
+
+**门禁**:pytest 513→**517P/0F**、vitest 86→**87/87**、build 零错。无真栈
+验收(纯卫生包,计划明文)。
+
+**评审(合并制,65d74a8..87e9014)**:Ready to merge — Yes,零 Critical/
+Important。实现者披露三偏差全证实:m24 无端点可清(计划记忆过时)、m24 补
+sql()、admin=None 预绑;并**抓掉计划自身的坑**(BOM 测试字面量内嵌 U+FEFF
+会双 BOM 假失败,已静默修正并披露)。Minor 三条全 cosmetic(?raw 断言中
+.jpeg 子断言不判别、SQL 兜底正常路径也跑、参数遮蔽)——不动。
+
+**M26 候选**:大件全挂起(A2A 触发条件在案/MinerU 本地化/LDAP 等输入);
+老 Office/WPS 转换层等需要再立项;小项无积压——**M24+M25 后卫生队列再次
+清零**。
+
+**栈态**:无需重启(前端文案热更、后端仅注释/测试/脚本)。
+
