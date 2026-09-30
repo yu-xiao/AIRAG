@@ -90,6 +90,21 @@ def test_txt_parses_paragraphs_and_gb18030(tmp_path):
     assert [b.content for b in result.blocks] == ["第一段内容", "第二段内容"]
 
 
+def test_txt_strips_utf8_bom(tmp_path):
+    p = tmp_path / "bom.txt"
+    p.write_bytes("带 BOM 的段落一\n\n段落二".encode("utf-8-sig"))
+    result = get_parser(".txt").parse(p)
+    assert [b.content for b in result.blocks] == ["带 BOM 的段落一", "段落二"]
+
+
+def test_txt_pure_ascii_uses_utf8_path(tmp_path):
+    p = tmp_path / "ascii.txt"
+    p.write_bytes(b"alpha paragraph\n\nbeta paragraph")
+    result = get_parser(".txt").parse(p)
+    assert [b.content for b in result.blocks] == \
+        ["alpha paragraph", "beta paragraph"]
+
+
 def test_md_reuses_markdown_blocks(tmp_path):
     p = tmp_path / "t.md"
     p.write_text("# 标题\n\n正文一段\n\n| a | b |\n|---|---|\n| 1 | 2 |",

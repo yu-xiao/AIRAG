@@ -9,7 +9,12 @@ from app.services.parsing.ocr import markdown_to_blocks
 
 def _read_text(path: Path) -> str:
     """utf-8(容 BOM)优先,回退 gb18030(国内存量 txt/csv 的 GBK 现实);
-    两者皆败 → ValueError:流水线按损坏文件统一语义收口(3 次快速重试后 failed)。"""
+    两者皆败 → ValueError:流水线按损坏文件统一语义收口(3 次快速重试后 failed)。
+
+    编码歧义不做启发式(M25 裁定):GBK 双字节(首 81-FE,次 40-FE)要整体
+    落进合法 UTF-8 多字节窗口(首 C2-DF、次 80-BF 等)须逐对字节恰好对齐,
+    真实中文文档全篇命中的概率可忽略;纯 ASCII 两解码等价无歧义;仅病态
+    超短串可能误判,接受——chardet/双语评分的复杂度不值。"""
     data = path.read_bytes()
     try:
         text = data.decode("utf-8-sig")
