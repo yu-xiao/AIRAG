@@ -80,4 +80,63 @@ def test_xlsx_sheet_as_whole_block(tmp_path):
 
 def test_unknown_ext_raises():
     with pytest.raises(KeyError):
-        get_parser(".txt")
+        get_parser(".xyz")
+
+
+def test_txt_parses_paragraphs_and_gb18030(tmp_path):
+    p = tmp_path / "t.txt"
+    p.write_bytes("第一段内容\n\n第二段内容".encode("gb18030"))
+    result = get_parser(".txt").parse(p)
+    assert [b.content for b in result.blocks] == ["第一段内容", "第二段内容"]
+
+
+def test_md_reuses_markdown_blocks(tmp_path):
+    p = tmp_path / "t.md"
+    p.write_text("# 标题\n\n正文一段\n\n| a | b |\n|---|---|\n| 1 | 2 |",
+                 encoding="utf-8")
+    result = get_parser(".md").parse(p)
+    contents = [b.content for b in result.blocks]
+    assert "# 标题" in contents
+    tables = [b for b in result.blocks if b.is_table]
+    assert len(tables) == 1 and "| 1 | 2 |" in tables[0].content
+
+
+def test_csv_whole_file_one_table_block(tmp_path):
+    p = tmp_path / "t.csv"
+    p.write_bytes("名称,数量\n甲,1\n乙,2".encode("gb18030"))
+    result = get_parser(".csv").parse(p)
+    assert len(result.blocks) == 1
+    assert result.blocks[0].is_table is True
+    assert "名称 | 数量" in result.blocks[0].content
+    assert "乙 | 2" in result.blocks[0].content
+
+
+def test_json_list_per_element_block(tmp_path):
+    import json as _json
+
+    p = tmp_path / "t.json"
+    p.write_text(_json.dumps(
+        [{"name": "甲", "v": 1}, {"name": "乙", "v": 2}],
+        ensure_ascii=False), encoding="utf-8")
+    result = get_parser(".json").parse(p)
+    assert len(result.blocks) == 2
+    assert "甲" in result.blocks[0].content
+    assert "乙" in result.blocks[1].content
+
+
+def test_json_invalid_raises_value_error(tmp_path):
+    import pytest as _pytest
+
+    p = tmp_path / "bad.json"
+    p.write_text("{not valid", encoding="utf-8")
+    with _pytest.raises(ValueError):
+        get_parser(".json").parse(p)
+
+
+def test_allowed_exts_derived_from_registry():
+    from app.services import doc_ops
+    from app.services.parsing.base import REGISTRY
+
+    assert doc_ops.ALLOWED_EXTS == frozenset(REGISTRY)
+    for ext in (".txt", ".md", ".csv", ".json"):
+        assert ext in doc_ops.ALLOWED_EXTS

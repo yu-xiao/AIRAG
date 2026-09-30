@@ -17,9 +17,12 @@ from app.core.config import settings
 from app.core.perms import get_kb_perm
 from app.models import Chunk, Document, KnowledgeBase, User
 from app.services.audit import audit
+from app.services.parsing import REGISTRY
 from app.workers.pipeline import process_document
 
-ALLOWED_EXTS = {".pdf", ".docx", ".xlsx", ".jpg", ".jpeg", ".png"}
+# M24 单源化:白名单即解析器注册表(包 __init__ 已导入全部解析器,
+# REGISTRY 此时完整)——加类型只动解析器注册与前端 accept 两处
+ALLOWED_EXTS = frozenset(REGISTRY)
 BUSY_STATUSES = ("parsing", "chunking", "embedding")
 
 

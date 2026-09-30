@@ -13,10 +13,10 @@ async def test_upload_document(client, auth_headers):
     content = "AIRag upload test content".encode()
     resp = await client.post(
         f"/api/kbs/{kb_id}/documents",
-        files={"file": ("hello.txt", content, "text/plain")},
+        files={"file": ("hello.exe", content, "application/octet-stream")},
         headers=auth_headers,
     )
-    assert resp.status_code == 415  # .txt 不在白名单
+    assert resp.status_code == 415  # .exe 不在白名单
 
 
 async def test_upload_docx_ok_and_duplicate(client, auth_headers):
