@@ -263,7 +263,7 @@ onUnmounted(() => {
       <el-upload
         drag
         multiple
-        accept=".pdf,.docx,.xlsx,.jpg,.jpeg,.png"
+        accept=".pdf,.docx,.xlsx,.txt,.md,.csv,.json,.html,.htm,.pptx,.jpg,.jpeg,.png,.bmp,.tif,.tiff,.webp,.gif"
         :show-file-list="false"
         :disabled="uploading"
         :before-upload="beforeUpload"

@@ -109,3 +109,45 @@ async def test_document_failed_emits_delivery(client, auth_headers,
         select(WebhookDelivery))).scalars().all()
     assert len(rows) == 1 and rows[0].event_type == "document.failed"
     assert "boom" in rows[0].payload["data"]["error"]
+
+
+async def test_new_types_end_to_end(client, auth_headers, db_session):
+    """M24:GBK txt / csv / pptx 上传 → eager 流水线 done → 检索命中
+    (fake embed;MINERU_TOKEN 空置不影响非图片路径)。"""
+    import io
+
+    from pptx import Presentation
+    from sqlalchemy import select
+
+    from app.models import Document
+    from app.services.retrieval.searcher import hybrid_search
+
+    kb_id = (await client.post(
+        "/api/kbs", json={"name": "m24端到端库"}, headers=auth_headers)
+    ).json()["id"]
+
+    prs = Presentation()
+    s1 = prs.slides.add_slide(prs.slide_layouts[5])
+    s1.shapes.title.text = "燃油泵检修规程"
+    buf = io.BytesIO()
+    prs.save(buf)
+
+    files = [
+        ("gb.txt", "机型甲的排故要点是先查燃油泵".encode("gb18030"),
+         "text/plain"),
+        ("t.csv", "部件,数量\n燃油泵,3".encode("utf-8"), "text/csv"),
+        ("s.pptx", buf.getvalue(), "application/octet-stream"),
+    ]
+    for name, content, mime in files:
+        r = await client.post(
+            f"/api/kbs/{kb_id}/documents",
+            files={"file": (name, content, mime)}, headers=auth_headers)
+        assert r.status_code == 201, (name, r.text[:120])
+
+    docs = (await db_session.execute(
+        select(Document).where(Document.kb_id == kb_id))).scalars().all()
+    assert len(docs) == 3
+    assert all(d.status == "done" for d in docs), \
+        [d.filename for d in docs if d.status != "done"]
+    hits = await hybrid_search(db_session, [kb_id], "燃油泵 排故", 8)
+    assert {h.document_id for h in hits} & {d.id for d in docs}
