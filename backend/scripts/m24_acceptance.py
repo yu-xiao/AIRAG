@@ -3,7 +3,7 @@
 覆盖:①GBK .txt / .pptx / .csv 经 API 上传 → done 且 hybrid 检索命中
 (真库真 embed,与单测的 fake 路径互补)②一张 .bmp(auto OCR)→ done 且
 ocr_used=True(真 MinerU 云调用,先例 M5;若云端不收 bmp 属探查性支持,
-报 FAIL 如实暴露)③前端 accept 串含 18 扩展(grep DocsPage.vue)
+报 FAIL 如实暴露)③前端 accept 串与 beforeUpload 白名单常量含 18 扩展(grep DocsPage.vue)
 ④运行时断言 ALLOWED_EXTS 即 REGISTRY 键集。清理:KB 走 API 删除。
 """
 import asyncio
@@ -166,6 +166,14 @@ async def main() -> None:
             acc_line = next(l for l in vue.splitlines() if "accept=" in l)
             check("frontend accept carries 18 extensions",
                   all(x in acc_line for x in need), acc_line.strip()[:160])
+
+            # accept 只管文件选择器;beforeUpload 的白名单常量才是真闸门,
+            # 须同含新类型(M24 终审:旧 6 类型常量曾拦下全部新类型上传)
+            ext_line = next(l for l in vue.splitlines()
+                            if l.lstrip().startswith("const ALLOWED_EXTS"))
+            check("frontend beforeUpload allowlist carries new types",
+                  ".pptx" in ext_line and ".bmp" in ext_line,
+                  ext_line.strip()[:160])
 
             # ④ 白名单单源(运行时)
             from app.services import doc_ops

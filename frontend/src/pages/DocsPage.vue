@@ -20,7 +20,7 @@ const loading = ref(false)
 const docs = ref<DocumentItem[]>([])
 
 const MAX_UPLOAD_MB = 20
-const ALLOWED_EXTS = ['.pdf', '.docx', '.xlsx', '.jpg', '.jpeg', '.png']
+const ALLOWED_EXTS = ['.pdf', '.docx', '.xlsx', '.txt', '.md', '.csv', '.json', '.html', '.htm', '.pptx', '.jpg', '.jpeg', '.png', '.bmp', '.tif', '.tiff', '.webp', '.gif']
 const NON_TERMINAL = ['pending', 'parsing', 'chunking', 'embedding']
 
 const STATUS_META: Record<string, { label: string; type: 'info' | 'primary' | 'success' | 'danger' }> = {
@@ -69,7 +69,7 @@ const uploadPercent = ref(0)
 function beforeUpload(raw: UploadRawFile) {
   const ext = raw.name.slice(raw.name.lastIndexOf('.')).toLowerCase()
   if (!ALLOWED_EXTS.includes(ext)) {
-    ElMessage.error(`不支持的文件类型 ${ext},仅支持 .pdf/.docx/.xlsx/.jpg/.png`)
+    ElMessage.error(`不支持的文件类型 ${ext},仅支持文档:.pdf/.docx/.xlsx/.pptx/.txt/.md/.csv/.json/.html 与图片:.jpg/.png/.bmp/.tif/.tiff/.webp/.gif`)
     return false
   }
   if (raw.size > MAX_UPLOAD_MB * 1024 * 1024) {
@@ -271,7 +271,7 @@ onUnmounted(() => {
       >
         <div class="el-upload__text">将文件拖到此处,或点击上传</div>
         <template #tip>
-          <div class="el-upload__tip">支持 .pdf / .docx / .xlsx / .jpg / .png(扫描件自动 OCR),单个文件不超过 20MB</div>
+          <div class="el-upload__tip">支持 PDF/Word/Excel/PPT/TXT/Markdown/CSV/JSON/HTML 及常见图片(扫描件自动 OCR),单个文件不超过 20MB</div>
         </template>
       </el-upload>
       <el-progress

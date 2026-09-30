@@ -9,7 +9,7 @@ from app.services.parsing.ocr import markdown_to_blocks
 
 def _read_text(path: Path) -> str:
     """utf-8(容 BOM)优先,回退 gb18030(国内存量 txt/csv 的 GBK 现实);
-    两者皆败 → ValueError:流水线按确定性 failed 收口,不重试。"""
+    两者皆败 → ValueError:流水线按损坏文件统一语义收口(3 次快速重试后 failed)。"""
     data = path.read_bytes()
     try:
         text = data.decode("utf-8-sig")
